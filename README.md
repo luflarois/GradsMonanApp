@@ -1,5 +1,4 @@
-# GRADS-MONAN APP
-
+# GradsMonanApp
 Um clone do GrADS/COLA para abrir e plotar saídas do modelo MONAN/MPAS
 (grade de Voronoi não estruturada).
 

@@ -17,17 +17,6 @@ def plot_map(setup,ax):
     map_line = setup["map_line"]
     mappath = setup["mappath"]
 
-    ## Carregar o shapefile com as fronteiras do país e estados usando geopandas
-    #gdf = gpd.read_file(map)
-
-    ## Plotar as fronteiras do país e estados
-    #gdf.boundary.plot(ax=ax, color=map_color, linewidth=map_line)
-
-    # Carregar o shapefile com as fronteiras do país e estados usando geopandas
+    # Carregar o shapefile com as fronteiras do país/continentes usando geopandas
     gdf = gpd.read_file(mappath+"/"+map)
-     # Opção 1: Deslocar o shapefile para 0°–360° (recomendado para dados MPAS)
-    gdf_shifted = gdf.copy()
-    gdf_shifted.geometry = gdf_shifted.geometry.translate(xoff=180)  # Desloca +360° onde lon < 0
-    gdf_shifted.boundary.plot(ax=ax, color=map_color, linewidth=map_line)
-    # Plotar as fronteiras do país e estados
-    gdf.boundary.plot(ax=plt.gca(), color=map_color, linewidth=map_line)
+    gdf.boundary.plot(ax=ax, color=map_color, linewidth=map_line)

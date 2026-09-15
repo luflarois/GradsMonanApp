@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "grads-monan"
+name = "GradsMonanApp"
 version = "0.1.0"
 description = "Um clone do GrADS para abrir e plotar saidas do modelo MONAN/MPAS (grade de Voronoi)"
 readme = "README.md"

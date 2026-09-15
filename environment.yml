@@ -1,4 +1,4 @@
-name: grads-monan
+name: GradsMonanApp
 channels:
   - conda-forge
 dependencies:
