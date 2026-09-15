@@ -8,8 +8,16 @@ incluindo interpolação, cortes verticais, perfis, vento e campos escalares.
 
 ## 1. Como rodar
 
+Estando no ambiente criado (conda ou venv - veja na instalação), por exemplo, usando o conda:
+
 ```bash
-python grads_monan.py
+conda activate grads-monan
+```
+
+Execute o comando abaixo:
+
+```bash
+grads_monan
 ```
 
 Ao iniciar, o programa carrega a configuração padrão de
