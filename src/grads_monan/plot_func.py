@@ -1,0 +1,550 @@
+#!/usr/bin/python
+# -*- coding: utf-8 -*- Line 2
+# ----------------------------------------------------------------------------
+# Created By  : Rodrigues, L.F [LFR]
+# Created Date: 13Jun2025
+# version ='0.1'
+# ---------------------------------------------------------------------------
+""" This script plot data from NetCDF data generated From MONAN MODEL"""  
+# ---------------------------------------------------------------------------
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.collections import PolyCollection
+from .utils import normalize_lon, mag, load_zgrid_centers
+from .map_func import plot_map
+from scipy.interpolate import griddata
+
+
+def set_ion():
+    plt.ion()
+
+def clear_plots(setup=None):
+    # Com paginas/paineis ativos (set pages), limpa so o painel atual
+    # (eixo corrente), para nao apagar os demais paineis da janela.
+    if setup is not None and (setup.get("pages_rows", 1) > 1 or setup.get("pages_cols", 1) > 1):
+        plt.gca().cla()
+    else:
+        plt.clf()
+
+def set_window_title(titulo):
+    """
+    Define o titulo da janela do matplotlib (nao confundir com o titulo do
+    grafico em si, comando 'set title'). Cria a figura se ainda nao existir.
+    Envolto em try/except pois nem todo backend suporta essa chamada.
+    """
+    fig = plt.gcf()
+    try:
+        fig.canvas.manager.set_window_title(titulo)
+    except Exception:
+        pass
+
+def _niveis_cor(setup):
+    """
+    Niveis de cor/contorno a usar em contourf/tricontourf/tricontour.
+    Se 'set clevs' tiver sido usado (lista nao vazia em setup['clevs']),
+    usa exatamente esses valores como fronteiras dos intervalos de cor
+    (ex: clevs 0 100 200 ... cria faixas 0-100, 100-200, ...).
+    Caso contrario, usa o padrao de 20 niveis automaticos.
+    """
+    clevs = setup.get("clevs")
+    if clevs:
+        return clevs
+    return 20
+
+def _tamanho_malha_ok(label, tamanho_dado, tamanho_malha):
+    """
+    Confere se o numero de pontos da variavel bate com o numero de pontos
+    da malha aberta (latCell/lonCell). Se nao bater, avisa com uma mensagem
+    clara (em vez do erro criptico do matplotlib/scipy la na frente) e
+    retorna False.
+    """
+    if tamanho_dado != tamanho_malha:
+        print("Erro: a variavel '{0}' tem {1} ponto(s), mas a malha aberta (latCell/lonCell) tem {2} ponto(s).".format(
+            label, tamanho_dado, tamanho_malha))
+        print("Isso indica que esta variavel nao esta na mesma malha do arquivo de grade usado no 'open'.")
+        print("Verifique se e realmente o arquivo de grade correto para este arquivo de dados.")
+        return False
+    return True
+
+
+def plot_perfil(setup, var):
+
+
+    lat_min = setup["lat_min"]
+    lon_min = setup["lon_min"]
+    lat_max = setup["lat_max"]
+    lon_max = setup["lon_max"]
+    time_sel = setup["time_sel"]
+    lev  = setup["lev"] 
+    levf = setup["levf"]
+    label = setup["label"]
+    cmap = setup["cmap"]
+    lc = setup["lc"]
+    lw = setup["lw"]
+    z = setup["levels"]
+    latitudes = setup["latitudes"]
+    longitudes = setup["longitudes"]
+    levels = setup["levels"]
+
+    lon = np.array(longitudes)
+    lat = np.array(latitudes)
+    if len(var.shape) < 3:
+        print("Nao e possivel plotar perfil vertical: a variavel e bidimensional (sem dimensao de nivel).")
+        return -1
+    data = var[time_sel, :,lev:levf]
+    lon = normalize_lon(lon)
+
+    if not _tamanho_malha_ok(label, data.shape[0], len(lon)):
+        return -1
+
+
+    # posLat = encontrar_posicao_mais_proxima(latitudes,lat_min)
+    # posLon = encontrar_posicao_mais_proxima(longitudes,lon_min)
+
+
+    if lat_min == lat_max and lon_min != lon_max:
+        print("Not implemented!")
+        return -1
+
+    if lat_min != lat_max and lon_min == lon_max:
+        print("Not implemented!")
+        return -1
+        
+    if lat_min != lat_max or lon_min != lon_max:
+         print("Isnt a point lat lon selected!")
+         return -1  
+    
+    dist = np.sqrt((lat - lat_min)**2 + (lon - lon_min)**2)
+    closest_index = np.argmin(dist)
+    vertical_profile = data[closest_index,:]
+
+    eixo_pressao = setup.get("eixo_pressao", False)
+    variables = setup.get("variables", {})
+    zgrid_arr = None
+    if not eixo_pressao:
+        zgrid_arr = load_zgrid_centers(variables, len(lat), len(levels))
+
+    if eixo_pressao:
+        # Pressao (t_iso_levels): maior pressao embaixo, menor em cima
+        y_vals = np.array(levels[lev:levf])
+        ylabel = 'Pressao (hPa)'
+    elif zgrid_arr is not None and np.mean(np.isfinite(zgrid_arr[closest_index, lev:levf])) >= 0.5:
+        # Sem t_iso_levels, mas com zgrid: altura geometrica, menor embaixo, maior em cima
+        y_vals = zgrid_arr[closest_index, lev:levf]
+        ylabel = 'Altura (m)'
+    else:
+        if zgrid_arr is not None:
+            print("Aviso: zgrid majoritariamente invalido para o ponto selecionado (shape={0}); usando indice de nivel no eixo Y.".format(zgrid_arr.shape))
+        # Sem os dois: apenas o indice do nivel, menor embaixo, maior em cima
+        y_vals = np.array(levels[lev:levf])
+        ylabel = 'Levels'
+
+    plt.scatter(vertical_profile,y_vals)
+    plt.plot(vertical_profile,y_vals, color='blue', linestyle='-',label=label)
+    plt.xlabel(label)
+    plt.ylabel(ylabel)
+    if eixo_pressao:
+        plt.gca().invert_yaxis()
+    plt.grid()
+    return 1
+
+def save_fig(fig_name, setup):
+    plt.savefig(fig_name, dpi=setup["fig_dpi"], bbox_inches=setup["fig_inches"], transparent=setup["fig_transparency"])
+    return 0
+
+def plot_corte(setup, var, cbar=None):
+    """
+    Corte vertical (nivel x longitude, com latitude fixa; ou nivel x latitude,
+    com longitude fixa), interpolando a malha nao estruturada (Voronoi) sobre
+    uma linha reta na coordenada fixada.
+    """
+    lat_min = setup["lat_min"]
+    lat_max = setup["lat_max"]
+    lon_min = setup["lon_min"]
+    lon_max = setup["lon_max"]
+    time_sel = setup["time_sel"]
+    lev  = setup["lev"]
+    levf = setup["levf"]
+    label = setup["label"]
+    cmap = setup["cmap"]
+    Title = setup["title"]
+    latitudes = np.array(setup["latitudes"])
+    longitudes = normalize_lon(np.array(setup["longitudes"]))
+    levels = np.array(setup["levels"])
+
+    if len(var.shape) < 3:
+        print("Nao e possivel fazer corte vertical: a variavel e bidimensional (sem dimensao de nivel).")
+        ax = plt.gca()
+        return ax, cbar
+
+    data = var[time_sel, :, lev:levf]  # (nCells, nLevs)
+    n_lev = data.shape[1]
+
+    if not _tamanho_malha_ok(label, data.shape[0], len(longitudes)):
+        ax = plt.gca()
+        return ax, cbar
+
+    lat_fixa = (lat_min == lat_max)
+
+    if lat_fixa:
+        eixo_x = np.linspace(lon_min, lon_max, 200)
+        pontos_destino = np.column_stack((eixo_x, np.full_like(eixo_x, lat_min)))
+        xlabel = 'Longitude'
+    else:
+        eixo_x = np.linspace(lat_min, lat_max, 200)
+        pontos_destino = np.column_stack((np.full_like(eixo_x, lon_min), eixo_x))
+        xlabel = 'Latitude'
+
+    pontos_origem = np.column_stack((longitudes, latitudes))
+
+    corte = np.full((n_lev, len(eixo_x)), np.nan)
+    for k in range(n_lev):
+        corte[k, :] = griddata(pontos_origem, data[:, k], pontos_destino, method='linear')
+
+    if np.all(np.isnan(corte)):
+        print("Aviso: a interpolacao do corte nao gerou nenhum ponto valido (verifique lat/lon selecionadas).")
+        ax = plt.gca()
+        return ax, cbar
+
+    ax = plt.gca()
+
+    eixo_pressao = setup.get("eixo_pressao", False)
+    variables = setup.get("variables", {})
+    zgrid_arr = None
+    if not eixo_pressao:
+        zgrid_arr = load_zgrid_centers(variables, len(latitudes), len(levels))
+
+    altura = None
+    if not eixo_pressao and zgrid_arr is not None:
+        # Sem t_iso_levels, mas com zgrid: interpola tambem a altura sobre a
+        # mesma linha, nivel a nivel, para um corte que acompanha o terreno
+        # (a altura de um mesmo nivel de modelo varia espacialmente).
+        altura = np.full((n_lev, len(eixo_x)), np.nan)
+        for k in range(n_lev):
+            altura[k, :] = griddata(pontos_origem, zgrid_arr[:, lev+k], pontos_destino, method='linear')
+        frac_valida = np.mean(np.isfinite(altura))
+        if frac_valida < 0.5:
+            print("Aviso: interpolacao do zgrid majoritariamente invalida ({0:.0f}% dos pontos); usando indice de nivel no eixo Y.".format(frac_valida*100))
+            altura = None
+
+    if altura is not None:
+        # contourf com X/Y em 2D (grade curvilinea) nao atualiza sozinho os
+        # limites dos eixos (autoscale) - fixamos manualmente a partir dos
+        # proprios dados, em vez de depender do autoscale do matplotlib.
+        eixo_x_mesh = np.tile(eixo_x, (n_lev, 1))
+        cs = ax.contourf(eixo_x_mesh, altura, corte, levels=_niveis_cor(setup), cmap=cmap)
+        # Hachura nas celulas sem dado valido (tipicamente abaixo da
+        # topografia local, na grade seguindo o terreno).
+        mascara = np.isnan(corte).astype(int)
+        if np.any(mascara):
+            ax.contourf(eixo_x_mesh, altura, mascara, levels=[0.5, 1.5],
+                        colors='none', hatches=['//'])
+        ax.set_xlim(np.nanmin(eixo_x_mesh), np.nanmax(eixo_x_mesh))
+        ax.set_ylim(np.nanmin(altura), np.nanmax(altura))
+        plt.ylabel('Altura (m)')
+    else:
+        y = levels[lev:levf]
+        cs = ax.contourf(eixo_x, y, corte, levels=_niveis_cor(setup), cmap=cmap)
+        # Hachura nas celulas sem dado valido (mesmo motivo: geralmente
+        # abaixo da topografia local).
+        mascara = np.isnan(corte).astype(int)
+        if np.any(mascara):
+            ax.contourf(eixo_x, y, mascara, levels=[0.5, 1.5],
+                        colors='none', hatches=['//'])
+        ax.set_xlim(np.min(eixo_x), np.max(eixo_x))
+        ax.set_ylim(np.min(y), np.max(y))
+        if eixo_pressao:
+            # Pressao (t_iso_levels): maior pressao embaixo, menor em cima
+            plt.ylabel('Pressao (hPa)')
+            ax.invert_yaxis()
+        else:
+            # Sem os dois: apenas o indice do nivel, menor embaixo, maior em cima
+            plt.ylabel('Levels')
+
+    cbar = plt.colorbar(cs, ax=ax, label=label)
+    plt.xlabel(xlabel)
+    if Title:
+        plt.title(Title)
+
+    return ax, cbar
+
+def plot_voronoi(setup, data):
+    """
+    Plota o poligono de Voronoi real de cada celula da malha nao estruturada,
+    colorido pelo valor de 'data' - sem interpolar/triangular como o shaded
+    ou o contour. Requer conectividade da malha (verticesOnCell, latVertex,
+    lonVertex), disponivel apenas em arquivos de grade completos.
+    """
+    if not setup.get("tem_conectividade_voronoi", False):
+        print("Aviso: este arquivo/grade nao tem conectividade da malha (verticesOnCell/latVertex/lonVertex).")
+        print("Nao e possivel desenhar os poligonos de Voronoi; forneca um arquivo de grade completo no comando 'open'.")
+        return None
+
+    vertices_on_cell = np.asarray(setup["vertices_on_cell"])
+    n_edges_on_cell = setup["n_edges_on_cell"]
+    lat_vertex = np.array(setup["lat_vertex"])
+    lon_vertex = np.array(setup["lon_vertex"])
+
+    n_cells = len(data)
+    poligonos = []
+    valores = []
+    for i in range(n_cells):
+        n_edges = int(n_edges_on_cell[i]) if n_edges_on_cell is not None else vertices_on_cell.shape[1]
+        idx = vertices_on_cell[i, :n_edges] - 1  # verticesOnCell e 1-indexado (Fortran)
+        idx = idx[idx >= 0]
+        if len(idx) < 3:
+            continue
+        lons = lon_vertex[idx]
+        lats = lat_vertex[idx]
+        if lons.max() - lons.min() > 180:
+            # poligono "esticado" na borda +-180 (wrap de longitude) - ignora
+            continue
+        poligonos.append(np.column_stack((lons, lats)))
+        valores.append(data[i])
+
+    ax = plt.gca()
+    coll = PolyCollection(poligonos, array=np.array(valores), cmap=setup["cmap"], edgecolors='none')
+    ax.add_collection(coll)
+    ax.set_xlim(setup["lon_min"], setup["lon_max"])
+    ax.set_ylim(setup["lat_min"], setup["lat_max"])
+    return coll
+
+# Função para ler e plotar a variável 
+def plot_var(setup, var, cbar=None):
+
+    time_sel = setup["time_sel"]
+    lev = setup["lev"]
+    levf = setup["levf"]
+    cmap = setup["cmap"]
+    Title = setup["title"]
+    label = setup["label"]
+    map = setup["map"]
+    map_color = setup["map_color"]
+    map_line = setup["map_line"]
+    gxout = setup["gxout"]
+    lon_min = setup["lon_min"]
+    lon_max = setup["lon_max"]
+    lat_min = setup["lat_min"]
+    lat_max = setup["lat_max"]
+    latitudes = setup["latitudes"]
+    longitudes = setup["longitudes"]
+    levels = setup["levels"]
+
+    ponto_unico = (lat_min == lat_max) and (lon_min == lon_max)
+    corte_vertical = (lat_min == lat_max) != (lon_min == lon_max)  # so uma das duas fixa
+
+    if ponto_unico:
+        # lat e lon fixas num unico ponto: perfil vertical
+        plot_perfil(setup, var)
+        ax = plt.gca()
+        return ax, cbar
+
+    if corte_vertical:
+        if lev == levf:
+            print("Para um corte vertical (latitude ou longitude fixa), selecione um intervalo de niveis:")
+            print("  set lev <lev_ini> <lev_fim>")
+            ax = plt.gca()
+            return ax, cbar
+        return plot_corte(setup, var, cbar)
+
+    if len(var.shape) == 2:
+        data = var[time_sel, :]
+    else:
+        data = var[time_sel, :,lev]
+
+    if not _tamanho_malha_ok(label, len(data), len(longitudes)):
+        ax = plt.gca()
+        return ax, cbar
+
+    ax = plt.gca()
+    plt.xlim(lon_min, lon_max)  # Limitar o eixo X (longitude)
+    plt.ylim(lat_min, lat_max)  # Limitar o eixo Y (latitude)
+
+    if gxout == "shaded":
+        # Plotar contornos PREENCHIDOS em malha não estruturada
+        cs = ax.tricontourf(longitudes, latitudes, data, levels=_niveis_cor(setup), cmap=cmap)
+        cbar = plt.colorbar(cs,ax=ax,label=label)
+    elif gxout == "contour":
+        cs = ax.tricontour(longitudes, latitudes, data, levels=_niveis_cor(setup), cmap=cmap)
+        plt.clabel(cs, inline=True, fontsize=10)
+    elif gxout == "voronoi":
+        # Plota o poligono real de cada celula (sem interpolar/triangular)
+        coll = plot_voronoi(setup, data)
+        if coll is not None:
+            cbar = plt.colorbar(coll, ax=ax, label=label)
+
+    plt.xlabel('Longitude')
+    plt.ylabel('Latitude')
+
+    return ax,cbar
+
+def plot_vector_field(setup, var_u, var_v):
+    """
+    Plota vetores (quiver) das componentes var_u/var_v, sempre como vetor
+    (independente do 'gxout'), sobre a figura/eixo atual (sem limpar) - assim
+    sobrepoe a um shaded/contour ja plotado anteriormente.
+    """
+    time_sel = setup["time_sel"]
+    lev = setup["lev"]
+    lon_min = setup["lon_min"]
+    lon_max = setup["lon_max"]
+    lat_min = setup["lat_min"]
+    lat_max = setup["lat_max"]
+    latitudes = setup["latitudes"]
+    longitudes = setup["longitudes"]
+
+    if len(var_u.shape) == 2:
+        u = var_u[time_sel, :]
+        v = var_v[time_sel, :]
+    else:
+        u = var_u[time_sel, :, lev]
+        v = var_v[time_sel, :, lev]
+
+    if not _tamanho_malha_ok("u;v", len(u), len(longitudes)):
+        ax = plt.gca()
+        return ax
+
+    ax = plt.gca()
+    if lon_min != lon_max:
+        ax.set_xlim(lon_min, lon_max)
+    if lat_min != lat_max:
+        ax.set_ylim(lat_min, lat_max)
+
+    ax.quiver(longitudes, latitudes, u, v, scale=350, color='k')
+    plt.xlabel('Longitude')
+    plt.ylabel('Latitude')
+
+    return ax
+
+def plot_barbs(setup, var1, var2):
+    """
+    Plota barbelas de vento (wind barbs) a partir das componentes u/v,
+    sobre a malha nao estruturada (sem interpolacao para grade regular).
+    """
+    time_sel = setup["time_sel"]
+    lev = setup["lev"]
+    lon_min = setup["lon_min"]
+    lon_max = setup["lon_max"]
+    lat_min = setup["lat_min"]
+    lat_max = setup["lat_max"]
+    latitudes = setup["latitudes"]
+    longitudes = setup["longitudes"]
+
+    if len(var1.shape) == 2:
+        u = var1[time_sel, :]
+        v = var2[time_sel, :]
+    else:
+        u = var1[time_sel, :, lev]
+        v = var2[time_sel, :, lev]
+
+    if not _tamanho_malha_ok("u;v", len(u), len(longitudes)):
+        ax = plt.gca()
+        return ax
+
+    ax = plt.gca()
+    if lon_min != lon_max:
+        ax.set_xlim(lon_min, lon_max)
+    if lat_min != lat_max:
+        ax.set_ylim(lat_min, lat_max)
+
+    ax.barbs(longitudes, latitudes, u, v, length=6)
+    plt.xlabel('Longitude')
+    plt.ylabel('Latitude')
+
+    return ax
+
+def plot_streams(setup, u, v):
+    """
+    Plota streamlines em grade não estruturada (MPAS).
+    
+    Args:
+        setup: Dicionário com configurações (lon_min, lon_max, lat_min, lat_max, etc.)
+        u: Componente zonal do vento (u10) em grade não estruturada.
+        v: Componente meridional do vento (v10) em grade não estruturada.
+    """
+    time_sel = setup["time_sel"]
+    lev = setup["lev"]
+    lat = setup["latitudes"]
+    lon = setup["longitudes"]
+    
+    u_data = u[time_sel, :]
+    v_data = v[time_sel, :]
+
+    if not _tamanho_malha_ok("u;v", len(u_data), len(lon)):
+        return None
+    
+    # Cria uma grade regular para interpolação
+    lon_grid = np.linspace(setup["lon_min"], setup["lon_max"], 100)
+    lat_grid = np.linspace(setup["lat_min"], setup["lat_max"], 50)
+    lon_mesh, lat_mesh = np.meshgrid(lon_grid, lat_grid)
+    
+    # Interpola u e v para a grade regular
+    points = np.column_stack((lon, lat))
+    u_interp = griddata(points, u_data, (lon_mesh, lat_mesh), method='linear')
+    v_interp = griddata(points, v_data, (lon_mesh, lat_mesh), method='linear')
+    
+    # Configuração do plot
+    ax = plt.gca()
+    ax.set_xlim(setup["lon_min"], setup["lon_max"])
+    ax.set_ylim(setup["lat_min"], setup["lat_max"])
+    
+    # Streamlines com cores baseadas na velocidade (opcional)
+    speed = np.sqrt(u_interp**2 + v_interp**2)
+    strm = ax.streamplot(
+        lon_grid, lat_grid, u_interp, v_interp,
+        color='black',              # Cor das linhas
+        linewidth=0.1,              # Espessura
+        density=2,                  # Densidade das linhas
+        arrowsize=1,                # Tamanho das setas
+        cmap='viridis',             # Opcional: cor por magnitude
+    )
+    
+    # Barra de cores (se colorido por magnitude)
+    #if setup.get("color_streams", False):
+    #strm = ax.streamplot(
+    #   lon_grid, lat_grid, u_interp, v_interp, color=speed,
+    #   cmap=setup["cmap"], linewidth=1, density=2, arrowsize=1
+    #    )
+    #plt.colorbar(strm.lines, ax=ax, label='Velocidade (m/s)')
+
+def plot_wind(setup, var1, var2, cbar):
+
+    time_sel = setup["time_sel"]
+    lev = setup["lev"]
+    levf = setup["levf"]
+    gxout = setup["gxout"]
+    lon_min = setup["lon_min"]
+    lon_max = setup["lon_max"]
+    lat_min = setup["lat_min"]
+    lat_max = setup["lat_max"]
+
+    if lev!=levf:
+        plot_perfil(setup, mag(var1,var2))
+        ax = plt.gca()
+        return ax, cbar
+
+    ax = plt.gca()
+    plt.xlim(lon_min, lon_max)  # Limitar o eixo X (longitude)
+    plt.ylim(lat_min, lat_max)  # Limitar o eixo Y (latitude)
+
+    # Plotagem de vento: 'stream' (linhas de corrente) e 'barb' (barbelas) sao
+    # explicitos; qualquer outro valor de gxout (inclusive 'contour'/'shaded',
+    # que valem para variaveis escalares - ver plot_var) cai no padrao 'vect'
+    # (vetores).
+    if gxout == "stream":
+        plot_streams(setup, var1, var2)
+    elif gxout == "barb":
+        plot_barbs(setup, var1, var2)
+    else:
+        plot_vector_field(setup, var1, var2)
+
+    plt.xlabel('Longitude')
+    plt.ylabel('Latitude')
+
+    return ax,cbar
+
+def plot_marks(setup):
+    for i in range(0,len(setup["xmark"])):
+        x = setup["xmark"][i]
+        y = setup["ymark"][i]
+        plt.scatter(x, y, color=setup["colormark"][i], s=setup["sizemark"][i], label='Ponto de Interesse')

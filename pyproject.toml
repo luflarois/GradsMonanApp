@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "grads-monan"
+version = "0.1.0"
+description = "Um clone do GrADS para abrir e plotar saidas do modelo MONAN/MPAS (grade de Voronoi)"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "GPL-3.0-or-later" }
+authors = [
+    { name = "Luiz Flavio Rodrigues", email = "luflarois@pm.me" }
+]
+
+# Dependencias resolvidas automaticamente pelo pip/conda na instalacao -
+# ninguem precisa mais instalar isso manualmente um por um.
+dependencies = [
+    "numpy",
+    "scipy",
+    "matplotlib",
+    "netCDF4",
+    "geopandas",
+    "toml",
+    "pyreadline3; platform_system == 'Windows'",
+]
+
+[project.scripts]
+grads-monan = "grads_monan.cli:main"
+grads-monan-setup = "grads_monan.setup_config:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+grads_monan = ["data/*"]
