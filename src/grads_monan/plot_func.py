@@ -15,7 +15,8 @@ import matplotlib.tri as mtri
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 - registra a projecao '3d'
 from .utils import normalize_lon, mag, load_zgrid_centers
 from .map_func import plot_map
-from scipy.interpolate import griddata
+from scipy.interpolate import LinearNDInterpolator
+from scipy.spatial import Delaunay
 
 
 def set_ion():
@@ -108,6 +109,34 @@ def _tamanho_malha_ok(label, tamanho_dado, tamanho_malha):
         print("Verifique se e realmente o arquivo de grade correto para este arquivo de dados.")
         return False
     return True
+
+def _obter_triangulacao(setup):
+    """
+    Cria a triangulacao de Delaunay dos pontos da malha (longitude,
+    latitude) do arquivo aberto e a guarda em cache no proprio 'setup', para
+    ser reaproveitada por todas as interpolacoes (corte vertical, altura do
+    zgrid, streamlines de vento) em vez de ser reconstruida a cada nivel/
+    chamada - que e o principal gargalo de desempenho em arquivos grandes.
+    A cache e refeita sozinha (o 'setup' e outro) sempre que um novo
+    arquivo e aberto (ou 'reinit'), entao nunca fica desatualizada.
+    """
+    tri = setup.get("_delaunay_malha")
+    if tri is None:
+        pontos = np.column_stack((setup["longitudes"], setup["latitudes"]))
+        tri = Delaunay(pontos)
+        setup["_delaunay_malha"] = tri
+    return tri
+
+def _interpolar(setup, valores, pontos_destino):
+    """
+    Interpolacao linear sobre a malha nao estruturada, equivalente a
+    griddata(pontos_origem, valores, pontos_destino, method='linear'), mas
+    reaproveitando a triangulacao ja calculada (ver _obter_triangulacao) em
+    vez de reconstrui-la a cada chamada.
+    """
+    tri = _obter_triangulacao(setup)
+    interpolador = LinearNDInterpolator(tri, valores)
+    return interpolador(pontos_destino)
 
 def _filtrar_nan(longitudes, latitudes, data):
     """
@@ -278,11 +307,9 @@ def plot_corte(setup, var, cbar=None):
         pontos_destino = np.column_stack((np.full_like(eixo_x, lon_min), eixo_x))
         xlabel = 'Latitude'
 
-    pontos_origem = np.column_stack((longitudes, latitudes))
-
     corte = np.full((n_lev, len(eixo_x)), np.nan)
     for k in range(n_lev):
-        corte[k, :] = griddata(pontos_origem, data[:, k], pontos_destino, method='linear')
+        corte[k, :] = _interpolar(setup, data[:, k], pontos_destino)
 
     if np.all(np.isnan(corte)):
         print("Aviso: a interpolacao do corte nao gerou nenhum ponto valido (verifique lat/lon selecionadas).")
@@ -304,7 +331,7 @@ def plot_corte(setup, var, cbar=None):
         # (a altura de um mesmo nivel de modelo varia espacialmente).
         altura = np.full((n_lev, len(eixo_x)), np.nan)
         for k in range(n_lev):
-            altura[k, :] = griddata(pontos_origem, zgrid_arr[:, lev+k], pontos_destino, method='linear')
+            altura[k, :] = _interpolar(setup, zgrid_arr[:, lev+k], pontos_destino)
         frac_valida = np.mean(np.isfinite(altura))
         if frac_valida < 0.5:
             print("Aviso: interpolacao do zgrid majoritariamente invalida ({0:.0f}% dos pontos); usando indice de nivel no eixo Y.".format(frac_valida*100))
@@ -727,10 +754,11 @@ def plot_streams(setup, u, v):
     lat_grid = np.linspace(setup["lat_min"], setup["lat_max"], 50)
     lon_mesh, lat_mesh = np.meshgrid(lon_grid, lat_grid)
     
-    # Interpola u e v para a grade regular
-    points = np.column_stack((lon, lat))
-    u_interp = griddata(points, u_data, (lon_mesh, lat_mesh), method='linear')
-    v_interp = griddata(points, v_data, (lon_mesh, lat_mesh), method='linear')
+    # Interpola u e v para a grade regular (reaproveitando a triangulacao
+    # da malha, em cache - ver _obter_triangulacao)
+    pontos_destino = np.column_stack((lon_mesh.ravel(), lat_mesh.ravel()))
+    u_interp = _interpolar(setup, u_data, pontos_destino).reshape(lon_mesh.shape)
+    v_interp = _interpolar(setup, v_data, pontos_destino).reshape(lon_mesh.shape)
     
     # Configuração do plot
     ax = plt.gca()
