@@ -87,6 +87,22 @@ def _cmd_set_dispatch(cmd_split, setup, cmd_user):
         else:
             print("Uso: set lev <nivel>  ou  set lev <nivel_inicial> <nivel_final>")
         return setup
+    elif cmd_split[1] == "cut":
+        # Intervalo [minimo, maximo] plotado (2D e 3D); fora dele, fica
+        # transparente. 'set cut' sem valores desliga o corte.
+        if len(cmd_split) == 2:
+            setup["cut"] = None
+            print("Corte (set cut) desligado.")
+        elif len(cmd_split) == 4:
+            cmin = float(cmd_split[2])
+            cmax = float(cmd_split[3])
+            if cmin > cmax:
+                print("Erro: o minimo ({0}) nao pode ser maior que o maximo ({1}).".format(cmin, cmax))
+                return setup
+            setup["cut"] = (cmin, cmax)
+        else:
+            print("Uso: set cut <minimo> <maximo>  ou  set cut (sem valores, desliga)")
+        return setup
     elif cmd_split[1] == "pages":
         # Define a grade de paineis da janela: set pages <linhas> <colunas>
         if len(cmd_split) != 4:

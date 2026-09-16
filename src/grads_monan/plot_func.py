@@ -10,6 +10,9 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.collections import PolyCollection
+from matplotlib.colors import BoundaryNorm
+import matplotlib.tri as mtri
+from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 - registra a projecao '3d'
 from .utils import normalize_lon, mag, load_zgrid_centers
 from .map_func import plot_map
 from scipy.interpolate import griddata
@@ -18,7 +21,47 @@ from scipy.interpolate import griddata
 def set_ion():
     plt.ion()
 
+def _ativar_figura_2d(setup):
+    """
+    Garante que a figura 2D (usada por 'd'/'display') esteja ativa (current
+    figure do matplotlib) antes de plotar - necessario porque 'd3' usa uma
+    janela/figura separada, e o matplotlib so tem uma 'figura atual' por vez.
+    """
+    fig = setup.get("fig2d")
+    if fig is None or not plt.fignum_exists(fig.number):
+        fig = plt.gcf()  # reaproveita a figura corrente, ou cria uma se nao houver nenhuma
+        setup["fig2d"] = fig
+    else:
+        plt.figure(fig.number)
+    return fig
+
+def _ativar_figura_3d(setup):
+    """
+    Garante que a figura 3D (usada por 'd3') esteja ativa e com um eixo 3D
+    pronto, reaproveitando a mesma janela entre chamadas sucessivas de 'd3'
+    (em vez de abrir uma janela nova a cada vez).
+    """
+    fig = setup.get("fig3d")
+    if fig is None or not plt.fignum_exists(fig.number):
+        fig = plt.figure()
+        ax3d = fig.add_subplot(111, projection='3d')
+        setup["fig3d"] = fig
+        setup["ax3d"] = ax3d
+    else:
+        plt.figure(fig.number)
+        ax3d = setup.get("ax3d")
+        if ax3d is None or ax3d not in fig.axes:
+            ax3d = fig.add_subplot(111, projection='3d')
+            setup["ax3d"] = ax3d
+    return fig, ax3d
+
 def clear_plots(setup=None):
+    fig_atual = plt.gcf()
+    if setup is not None and setup.get("fig3d") is not None and fig_atual is setup["fig3d"]:
+        # Figura 3D: limpa tudo (inclusive barras de cor antigas) e recria o eixo 3D
+        fig_atual.clf()
+        setup["ax3d"] = fig_atual.add_subplot(111, projection='3d')
+        return
     # Com paginas/paineis ativos (set pages), limpa so o painel atual
     # (eixo corrente), para nao apagar os demais paineis da janela.
     if setup is not None and (setup.get("pages_rows", 1) > 1 or setup.get("pages_cols", 1) > 1):
@@ -65,6 +108,40 @@ def _tamanho_malha_ok(label, tamanho_dado, tamanho_malha):
         print("Verifique se e realmente o arquivo de grade correto para este arquivo de dados.")
         return False
     return True
+
+def _filtrar_nan(longitudes, latitudes, data):
+    """
+    Remove os pontos com data=NaN (ex: fora do intervalo de 'set cut') antes
+    de triangular com tricontourf/tricontour, que - ao contrario do contourf
+    de grade regular - nao aceita NaN diretamente.
+    """
+    data = np.asarray(data)
+    mask = ~np.isnan(data)
+    return np.asarray(longitudes)[mask], np.asarray(latitudes)[mask], data[mask]
+
+def _aplicar_corte(data, cut):
+    """
+    Marca como NaN os valores fora do intervalo [minimo, maximo] definido
+    por 'set cut <minimo> <maximo>'. 'cut' e None (sem corte) ou uma tupla
+    (minimo, maximo).
+    """
+    if cut is None:
+        return data
+    cmin, cmax = cut
+    data = np.asarray(data, dtype=float)
+    return np.where((data < cmin) | (data > cmax), np.nan, data)
+
+def _mask_corte(valores, cut):
+    """
+    Mascara booleana (True = dentro do intervalo de 'set cut', portanto
+    visivel). 'cut' e None (sem corte, tudo visivel) ou uma tupla
+    (minimo, maximo).
+    """
+    valores = np.asarray(valores)
+    if cut is None:
+        return np.ones(valores.shape, dtype=bool)
+    cmin, cmax = cut
+    return (valores >= cmin) & (valores <= cmax)
 
 
 def plot_perfil(setup, var):
@@ -117,6 +194,9 @@ def plot_perfil(setup, var):
     dist = np.sqrt((lat - lat_min)**2 + (lon - lon_min)**2)
     closest_index = np.argmin(dist)
     vertical_profile = data[closest_index,:]
+
+    cut = setup.get("cut")
+    vertical_profile = _aplicar_corte(vertical_profile, cut)
 
     eixo_pressao = setup.get("eixo_pressao", False)
     variables = setup.get("variables", {})
@@ -183,6 +263,9 @@ def plot_corte(setup, var, cbar=None):
     if not _tamanho_malha_ok(label, data.shape[0], len(longitudes)):
         ax = plt.gca()
         return ax, cbar
+
+    cut = setup.get("cut")
+    data = _aplicar_corte(data, cut)
 
     lat_fixa = (lat_min == lat_max)
 
@@ -289,6 +372,9 @@ def plot_voronoi(setup, data):
     poligonos = []
     valores = []
     for i in range(n_cells):
+        if np.isnan(data[i]):
+            # Fora do corte (set cut) - fica transparente (nao desenha o poligono)
+            continue
         n_edges = int(n_edges_on_cell[i]) if n_edges_on_cell is not None else vertices_on_cell.shape[1]
         idx = vertices_on_cell[i, :n_edges] - 1  # verticesOnCell e 1-indexado (Fortran)
         idx = idx[idx >= 0]
@@ -302,6 +388,10 @@ def plot_voronoi(setup, data):
         poligonos.append(np.column_stack((lons, lats)))
         valores.append(data[i])
 
+    if not poligonos:
+        print("Aviso: nenhuma celula com valor dentro do corte (set cut) nesta selecao.")
+        return None
+
     ax = plt.gca()
     coll = PolyCollection(poligonos, array=np.array(valores), cmap=setup["cmap"], edgecolors='none')
     ax.add_collection(coll)
@@ -309,8 +399,155 @@ def plot_voronoi(setup, data):
     ax.set_ylim(setup["lat_min"], setup["lat_max"])
     return coll
 
+def plot_var_3d(setup, var):
+    """
+    Comando 'd3 <variavel>': plota em 3D (scatter), numa janela separada da
+    usada pelo 'd' (2D), o subdominio definido por 'set lat <min> <max>',
+    'set lon <min> <max>' e 'set lev <n1> <n2>' - ou seja, exige faixas
+    reais (nao pontos unicos) nas tres dimensoes.
+
+    O eixo Z segue a mesma hierarquia do corte/perfil 2D (secao 7 do
+    manual): pressao (t_iso_levels), senao altura real (zgrid), senao
+    indice do nivel do modelo.
+    """
+    lat_min = setup["lat_min"]
+    lat_max = setup["lat_max"]
+    lon_min = setup["lon_min"]
+    lon_max = setup["lon_max"]
+    lev = setup["lev"]
+    levf = setup["levf"]
+    time_sel = setup["time_sel"]
+    label = setup["label"]
+    cmap = setup["cmap"]
+    Title = setup["title"]
+    latitudes = np.array(setup["latitudes"])
+    longitudes = np.array(setup["longitudes"])
+    levels = np.array(setup["levels"])
+    eixo_pressao = setup.get("eixo_pressao", False)
+    variables = setup.get("variables", {})
+
+    if lat_min == lat_max or lon_min == lon_max or lev == levf:
+        print("Para plotar em 3D, selecione faixas (nao pontos unicos) nas tres dimensoes:")
+        print("  set lat <min> <max>")
+        print("  set lon <min> <max>")
+        print("  set lev <n1> <n2>")
+        return None
+
+    if len(var.shape) < 3:
+        print("Nao e possivel plotar em 3D: a variavel e bidimensional (sem dimensao de nivel).")
+        return None
+
+    data = var[time_sel, :, lev:levf]  # (nCells, nLevs)
+
+    if not _tamanho_malha_ok(label, data.shape[0], len(longitudes)):
+        return None
+
+    mascara = (latitudes >= lat_min) & (latitudes <= lat_max) & (longitudes >= lon_min) & (longitudes <= lon_max)
+    if not np.any(mascara):
+        print("Nenhuma celula da malha cai dentro da faixa de latitude/longitude selecionada.")
+        return None
+
+    lats_sel = latitudes[mascara]
+    lons_sel = longitudes[mascara]
+    data_sel = data[mascara, :]  # (nCellsSel, nLevs)
+    n_lev = data_sel.shape[1]
+    n_cell_sel = data_sel.shape[0]
+
+    zgrid_arr = None
+    if not eixo_pressao:
+        zgrid_arr = load_zgrid_centers(variables, len(latitudes), len(levels))
+
+    if eixo_pressao:
+        zlabel = 'Pressao (hPa)'
+        zs_2d = np.tile(levels[lev:levf], (n_cell_sel, 1))  # (nCellsSel, nLevs)
+    elif zgrid_arr is not None:
+        zgrid_sel = zgrid_arr[mascara, :][:, lev:levf]
+        if np.mean(np.isfinite(zgrid_sel)) < 0.5:
+            print("Aviso: zgrid majoritariamente invalido nesta selecao; usando indice de nivel no eixo Z.")
+            zlabel = 'Levels'
+            zs_2d = np.tile(levels[lev:levf], (n_cell_sel, 1))
+        else:
+            zlabel = 'Altura (m)'
+            zs_2d = zgrid_sel
+    else:
+        zlabel = 'Levels'
+        zs_2d = np.tile(levels[lev:levf], (n_cell_sel, 1))
+
+    cut = setup.get("cut")
+    gxout = setup.get("gxout", "contour")
+
+    # Reaproveita a mesma janela 3D entre chamadas sucessivas de 'd3' (nao
+    # abre uma janela nova a cada vez), sem mexer na figura 2D usada pelo 'd'.
+    fig3d, ax3d = _ativar_figura_3d(setup)
+
+    niveis = _niveis_cor(setup)
+    norm = None
+    if isinstance(niveis, (list, tuple, np.ndarray)) and len(niveis) > 1:
+        # 'set clevs' definido: discretiza as cores exatamente nessas faixas,
+        # igual e feito no shaded/contour 2D.
+        norm = BoundaryNorm(niveis, ncolors=plt.get_cmap(cmap).N)
+
+    if gxout == "shaded":
+        # Uma superficie triangulada (shaded) por nivel, empilhadas no eixo Z,
+        # coloridas pelo valor da variavel (nao pela altura). Requer pelo
+        # menos 3 celulas visiveis por nivel para triangular.
+        triang_base = mtri.Triangulation(lons_sel, lats_sel)
+        alguma_superficie = False
+        mappable_ref = None
+        for k in range(n_lev):
+            valores_k = data_sel[:, k]
+            visivel_k = (valores_k != 0) & _mask_corte(valores_k, cut)
+            mask_tri = ~visivel_k[triang_base.triangles].all(axis=1)
+            if mask_tri.all():
+                continue  # nenhum triangulo visivel neste nivel
+            triang_base.set_mask(mask_tri)
+            surf = ax3d.plot_trisurf(triang_base, zs_2d[:, k], cmap=cmap, norm=norm, shade=False, alpha=0.7)
+            cores_tri = valores_k[triang_base.triangles].mean(axis=1)
+            surf.set_array(cores_tri)
+            if norm is None:
+                surf.autoscale()
+            mappable_ref = surf
+            alguma_superficie = True
+        if not alguma_superficie:
+            print("Aviso: nenhum valor visivel (tudo zero ou fora do corte) em nenhum nivel - nada para plotar em 3D.")
+            return None
+        fig3d.colorbar(mappable_ref, ax=ax3d, label=label)
+    else:
+        xs = np.repeat(lons_sel, n_lev)
+        ys = np.repeat(lats_sel, n_lev)
+        zs = zs_2d.flatten()
+        valores = data_sel.flatten()
+
+        # Pontos com valor exatamente zero ficam transparentes (nao aparecem
+        # no scatter), em vez de saírem pintados com a cor da primeira faixa
+        # do clevs. O mesmo vale para valores fora do intervalo de 'set cut'.
+        visivel = (valores != 0) & _mask_corte(valores, cut)
+        if not np.any(visivel):
+            print("Aviso: nenhum valor selecionado ficou visivel (tudo zero ou fora do corte) - nada para plotar em 3D.")
+            return None
+        xs, ys, zs, valores = xs[visivel], ys[visivel], zs[visivel], valores[visivel]
+
+        sc = ax3d.scatter(xs, ys, zs, c=valores, cmap=cmap, norm=norm)
+        fig3d.colorbar(sc, ax=ax3d, label=label)
+
+    ax3d.set_xlabel('Longitude')
+    ax3d.set_ylabel('Latitude')
+    ax3d.set_zlabel(zlabel)
+    if eixo_pressao:
+        ax3d.invert_zaxis()
+    if Title:
+        ax3d.set_title(Title)
+
+    # Z "da superficie" (para 'draw map' desenhar o mapa junto ao solo/base
+    # da caixa 3D, e nao no meio do ar).
+    setup["z_superficie_3d"] = float(np.max(zs_2d)) if eixo_pressao else float(np.min(zs_2d))
+
+    return fig3d, ax3d
+
 # Função para ler e plotar a variável 
 def plot_var(setup, var, cbar=None):
+
+    _ativar_figura_2d(setup)
 
     time_sel = setup["time_sel"]
     lev = setup["lev"]
@@ -356,17 +593,29 @@ def plot_var(setup, var, cbar=None):
         ax = plt.gca()
         return ax, cbar
 
+    cut = setup.get("cut")
+    data = _aplicar_corte(data, cut)
+
     ax = plt.gca()
     plt.xlim(lon_min, lon_max)  # Limitar o eixo X (longitude)
     plt.ylim(lat_min, lat_max)  # Limitar o eixo Y (latitude)
 
     if gxout == "shaded":
         # Plotar contornos PREENCHIDOS em malha não estruturada
-        cs = ax.tricontourf(longitudes, latitudes, data, levels=_niveis_cor(setup), cmap=cmap)
-        cbar = plt.colorbar(cs,ax=ax,label=label)
+        # tricontourf nao aceita NaN (precisa filtrar os pontos, nao so mascarar)
+        lon_validos, lat_validos, data_validos = _filtrar_nan(longitudes, latitudes, data)
+        if len(data_validos) == 0:
+            print("Aviso: nenhum valor dentro do corte (set cut) nesta selecao.")
+        else:
+            cs = ax.tricontourf(lon_validos, lat_validos, data_validos, levels=_niveis_cor(setup), cmap=cmap)
+            cbar = plt.colorbar(cs,ax=ax,label=label)
     elif gxout == "contour":
-        cs = ax.tricontour(longitudes, latitudes, data, levels=_niveis_cor(setup), cmap=cmap)
-        plt.clabel(cs, inline=True, fontsize=10)
+        lon_validos, lat_validos, data_validos = _filtrar_nan(longitudes, latitudes, data)
+        if len(data_validos) == 0:
+            print("Aviso: nenhum valor dentro do corte (set cut) nesta selecao.")
+        else:
+            cs = ax.tricontour(lon_validos, lat_validos, data_validos, levels=_niveis_cor(setup), cmap=cmap)
+            plt.clabel(cs, inline=True, fontsize=10)
     elif gxout == "voronoi":
         # Plota o poligono real de cada celula (sem interpolar/triangular)
         coll = plot_voronoi(setup, data)
@@ -508,6 +757,8 @@ def plot_streams(setup, u, v):
     #plt.colorbar(strm.lines, ax=ax, label='Velocidade (m/s)')
 
 def plot_wind(setup, var1, var2, cbar):
+
+    _ativar_figura_2d(setup)
 
     time_sel = setup["time_sel"]
     lev = setup["lev"]

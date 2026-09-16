@@ -207,6 +207,7 @@ def file_open(fileName, setup_toml, gridFile=None):
                  "pages_cols"      : 1,
                  "page_row"        : 1,
                  "page_col"        : 1,
+                 "cut"             : None,
                  "variables"       :variables}
 
         set_ion()

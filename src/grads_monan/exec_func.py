@@ -15,7 +15,7 @@ import difflib
 #My functions
 from .files_nc import file_open
 from .show_func import cmd_show, show_legend
-from .plot_func import plot_wind, plot_var, clear_plots,save_fig
+from .plot_func import plot_wind, plot_var, plot_var_3d, clear_plots,save_fig
 from .draw_func import draw_title, draw_mark, draw_map, draw_label
 from .set_func import cmd_set
 from .utils import mag
@@ -112,6 +112,15 @@ def exec_cmd(cmd_user, cmd,cmd_split,setup, dataset, ax, cbar, setup_toml):
             if cmd_split[1] == "label":
                 lbl = cmd_user[11:]
                 draw_label(setup,cbar,lbl)
+        elif cmd == "d3":
+            if len(cmd_split) < 2:
+                print("Uso: d3 <variavel>")
+                return setup,dataset,ax, cbar
+            if cmd_split[1] not in dataset.variables:
+                _var_not_found(dataset, cmd_split[1])
+                return setup,dataset,ax, cbar
+            var = dataset.variables[cmd_split[1]][:]
+            plot_var_3d(setup, var)
         elif cmd == "display" or cmd == "d":
             if len(cmd_split) < 2:
                 print("Uso: d <variavel>  |  d mag(<var_u>,<var_v>)  |  d <var_u>;<var_v>")

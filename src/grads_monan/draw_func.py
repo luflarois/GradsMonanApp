@@ -9,13 +9,20 @@
 # ---------------------------------------------------------------------------
 import matplotlib.pyplot as plt
 import geopandas as gpd
-from .map_func import plot_map
+from .map_func import plot_map, plot_map_3d
 
 def draw_title(setup):
     plt.title(setup["title"], fontsize=setup["title_fs"], fontweight=setup["title_fw"], color=setup["title_color"])
 
 def draw_map(setup,ax):
-    plot_map(setup,ax)
+    # Se a janela ativa no momento for a 3D (usada pelo 'd3'), desenha o
+    # mapa projetado na "superficie" da caixa 3D; senao, o comportamento
+    # 2D de sempre.
+    ax_ativo = plt.gca()
+    if getattr(ax_ativo, "name", None) == "3d":
+        plot_map_3d(setup, ax_ativo)
+    else:
+        plot_map(setup,ax)
 
 # Simbolos de marca - convencao classica do GrADS (numeros 1 a 11):
 # 1=+  2=circulo  3=circulo cheio  4=quadrado  5=quadrado cheio  6=x

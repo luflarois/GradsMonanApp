@@ -17,12 +17,13 @@ from .setup_config import ensure_config
 
 def main():
     print("")
-    print("GRADS-MONAN APP")
-    print("(a Grads/Cola clone for MONAN Model)")
-    print("Author: Luiz Flávio Rodrigues : luflarois@pm.me")
-    print("Revision: 0.1.0")
-    print("Licence: \U0001F12F GPLv3 \U0001F12F")
-    print("----------------------------------------------------------------------------")
+    print("+----------------------------------------------------+")
+    print("|                  GRADS-MONAN APP                   |")
+    print("|        (a Grads/Cola clone for MONAN Model)        |")
+    print("| Author: Luiz Flávio Rodrigues : luflarois@pm.me    |")
+    print("| Revision: 0.1.0                                    |")
+    print("| Licence: \U0001F12F GPLv3 \U0001F12F                                 |")
+    print("+----------------------------------------------------+\n")
 
     # Cria ~/.config/grads_monan/ e o grads_monan.toml automaticamente na
     # primeira execucao - o usuario nao precisa mais rodar nenhum script de
