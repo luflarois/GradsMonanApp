@@ -18,7 +18,7 @@ from .show_func import cmd_show, show_legend
 from .plot_func import plot_wind, plot_var, plot_var_3d, clear_plots,save_fig
 from .draw_func import draw_title, draw_mark, draw_map, draw_label
 from .set_func import cmd_set
-from .utils import mag
+from .utils import mag, sem_mascara
 
 def _var_not_found(dataset, varname):
     print("Variavel '{0}' nao encontrada no arquivo aberto!".format(varname))
@@ -41,7 +41,7 @@ def _avaliar_expressao(dataset, expr):
     faltantes = []
     for tok in tokens:
         if tok in dataset.variables:
-            namespace[tok] = dataset.variables[tok][:]
+            namespace[tok] = sem_mascara(dataset.variables[tok][:])
         else:
             faltantes.append(tok)
     if faltantes:
@@ -119,7 +119,7 @@ def exec_cmd(cmd_user, cmd,cmd_split,setup, dataset, ax, cbar, setup_toml):
             if cmd_split[1] not in dataset.variables:
                 _var_not_found(dataset, cmd_split[1])
                 return setup,dataset,ax, cbar
-            var = dataset.variables[cmd_split[1]][:]
+            var = sem_mascara(dataset.variables[cmd_split[1]][:])
             plot_var_3d(setup, var)
         elif cmd == "display" or cmd == "d":
             if len(cmd_split) < 2:
@@ -148,8 +148,8 @@ def exec_cmd(cmd_user, cmd,cmd_split,setup, dataset, ax, cbar, setup_toml):
                         _var_not_found(dataset, v)
                     return setup,dataset,ax, cbar
 
-                var1 = dataset.variables[var_u][:]
-                var2 = dataset.variables[var_v][:]
+                var1 = sem_mascara(dataset.variables[var_u][:])
+                var2 = sem_mascara(dataset.variables[var_v][:])
                 # mag(u,v) e tratada como uma variavel escalar comum (a magnitude):
                 # obedece shaded/contour, corte vertical e perfil, igual a qualquer "d <var>".
                 var = mag(var1, var2)
@@ -163,8 +163,8 @@ def exec_cmd(cmd_user, cmd,cmd_split,setup, dataset, ax, cbar, setup_toml):
                         _var_not_found(dataset, v)
                     return setup,dataset,ax, cbar
 
-                var1 = dataset.variables[var_u][:]
-                var2 = dataset.variables[var_v][:]
+                var1 = sem_mascara(dataset.variables[var_u][:])
+                var2 = sem_mascara(dataset.variables[var_v][:])
                 # u;v e sempre plotagem de vento: stream, barb ou vetor (padrao),
                 # conforme 'set gxout' - ver plot_wind.
                 ax, cbar = plot_wind(setup, var1, var2, cbar)
@@ -185,7 +185,7 @@ def exec_cmd(cmd_user, cmd,cmd_split,setup, dataset, ax, cbar, setup_toml):
                     if cmd_split[1] not in dataset.variables:
                         _var_not_found(dataset, cmd_split[1])
                         return setup,dataset,ax, cbar
-                    var = dataset.variables[cmd_split[1]][:]
+                    var = sem_mascara(dataset.variables[cmd_split[1]][:])
                     ax, cbar  = plot_var(setup, var, cbar)
 
     return setup,dataset,ax, cbar

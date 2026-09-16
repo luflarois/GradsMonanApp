@@ -38,6 +38,20 @@ def encontrar_posicao_mais_proxima(lista, valor):
     else:
         return lista.index(depois)
 
+def sem_mascara(arr):
+    """
+    Converte um array mascarado do netCDF4 (numpy.ma.MaskedArray) para um
+    array numpy comum, substituindo qualquer valor mascarado por NaN (o
+    codigo ja trata NaN como "sem dado" em toda parte - corte, topografia,
+    etc). O netCDF4 retorna arrays mascarados sempre que a variavel tem
+    metadado de _FillValue/missing_value, mesmo sem nenhum dado faltando de
+    verdade - e bibliotecas como scipy (Delaunay, cKDTree) rejeitam
+    array mascarado diretamente. Arrays normais passam por sem alteracao.
+    """
+    if np.ma.isMaskedArray(arr):
+        return np.ma.filled(arr.astype(float), np.nan)
+    return np.asarray(arr)
+
 def normalize_lon(lon):
     return ((lon + 180) % 360) - 180
 

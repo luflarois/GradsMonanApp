@@ -8,10 +8,10 @@
 """ This script plot data from NetCDF data generated From MONAN MODEL"""  
 # ---------------------------------------------------------------------------
 import os
-import math
+import numpy as np
 from netCDF4 import Dataset
 from .plot_func import set_ion, set_window_title
-from .utils import normalize_lon
+from .utils import normalize_lon, sem_mascara
 
 def file_open(fileName, setup_toml, gridFile=None):
 
@@ -83,26 +83,11 @@ def file_open(fileName, setup_toml, gridFile=None):
                 print("Please, check it!")
                 return None, None
         #patch_collection = get_mpas_patches(mesh, pickleFile=None,file = new_file)
-        latitudes = [math.degrees(valor) for valor in mesh.variables['latCell'][:]]
-        longitudes = [normalize_lon(math.degrees(valor)) for valor in mesh.variables['lonCell'][:]]
-
-        # Conectividade da malha (necessaria para 'set gxout voronoi', que
-        # plota o poligono real de cada celula em vez de interpolar).
-        # So esta disponivel em arquivos de grade completos (ex: x1.NNNN.grid.nc,
-        # ou o .init/.static do MPAS), nao costuma vir em saidas de historico.
-        if ("verticesOnCell" in mesh.variables and "latVertex" in mesh.variables
-                and "lonVertex" in mesh.variables):
-            vertices_on_cell = mesh.variables['verticesOnCell'][:]
-            n_edges_on_cell = mesh.variables['nEdgesOnCell'][:] if 'nEdgesOnCell' in mesh.variables else None
-            lat_vertex = [math.degrees(valor) for valor in mesh.variables['latVertex'][:]]
-            lon_vertex = [normalize_lon(math.degrees(valor)) for valor in mesh.variables['lonVertex'][:]]
-            tem_conectividade_voronoi = True
-        else:
-            vertices_on_cell = None
-            n_edges_on_cell = None
-            lat_vertex = None
-            lon_vertex = None
-            tem_conectividade_voronoi = False
+        # Vetorizado com numpy (em vez de um loop Python + math.degrees por
+        # elemento) - para malhas grandes (milhoes de celulas), isso sozinho
+        # e dezenas de vezes mais rapido.
+        latitudes = np.degrees(sem_mascara(mesh.variables['latCell'][:]))
+        longitudes = normalize_lon(np.degrees(sem_mascara(mesh.variables['lonCell'][:])))
 
         variables = dataset.variables
 
@@ -135,7 +120,7 @@ def file_open(fileName, setup_toml, gridFile=None):
             time_units = "desconhecida"
         #Determina o limite das bordas
         if 't_iso_levels' in dataset.variables:
-            levels = dataset.variables['t_iso_levels'][:]/100.
+            levels = sem_mascara(dataset.variables['t_iso_levels'][:])/100.
             eixo_pressao = True
         else:
             # Em algumas saídas (ex: regionais) o arquivo não traz níveis
@@ -182,19 +167,14 @@ def file_open(fileName, setup_toml, gridFile=None):
                  "title_color"     : setup_toml["title_color"],
                  "title_fs"        : setup_toml["title_fs"],
                  "title_fw"        : setup_toml["title_fw"],
-                 "lat_min"         : min(latitudes), 
-                 "lat_max"         : max(latitudes), 
-                 "lon_min"         : min(longitudes),
-                 "lon_max"         : max(longitudes),
+                 "lat_min"         : float(latitudes.min()), 
+                 "lat_max"         : float(latitudes.max()), 
+                 "lon_min"         : float(longitudes.min()),
+                 "lon_max"         : float(longitudes.max()),
                  "levels"          : levels, 
                  "eixo_pressao"    : eixo_pressao,
                  "latitudes"       : latitudes,
                  "longitudes"      : longitudes,
-                 "vertices_on_cell": vertices_on_cell,
-                 "n_edges_on_cell" : n_edges_on_cell,
-                 "lat_vertex"      : lat_vertex,
-                 "lon_vertex"      : lon_vertex,
-                 "tem_conectividade_voronoi": tem_conectividade_voronoi,
                  "time"            : time,
                  "time_variable"   : time_variable,
                  "time_units"      : time_units,

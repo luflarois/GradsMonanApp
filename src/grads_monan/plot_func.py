@@ -7,16 +7,24 @@
 # ---------------------------------------------------------------------------
 """ This script plot data from NetCDF data generated From MONAN MODEL"""  
 # ---------------------------------------------------------------------------
+import os
+import pickle
+import hashlib
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.collections import PolyCollection
 from matplotlib.colors import BoundaryNorm
 import matplotlib.tri as mtri
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 - registra a projecao '3d'
 from .utils import normalize_lon, mag, load_zgrid_centers
 from .map_func import plot_map
 from scipy.interpolate import LinearNDInterpolator
-from scipy.spatial import Delaunay
+from scipy.spatial import Delaunay, cKDTree
+
+# Cache persistente da triangulacao de Delaunay entre sessoes (nao so dentro
+# da mesma execucao do programa) - ver _obter_triangulacao mais abaixo.
+_CONFIG_DIR = os.path.expanduser("~/.config/grads_monan")
+_DELAUNAY_CACHE_PATH = os.path.join(_CONFIG_DIR, "delaunay_cache.pkl")
+_LAST_GRID_INFO_PATH = os.path.join(_CONFIG_DIR, "last_grid.info")
 
 
 def set_ion():
@@ -110,6 +118,70 @@ def _tamanho_malha_ok(label, tamanho_dado, tamanho_malha):
         return False
     return True
 
+def _assinatura_grade(setup):
+    """
+    Assinatura curta que identifica as caracteristicas da malha - NAO o
+    nome do arquivo - usada para saber se a triangulacao de Delaunay salva
+    em disco (cache persistente entre sessoes) ainda corresponde a malha
+    atualmente aberta: numero de celulas + hash (md5) do conteudo real de
+    latitude/longitude.
+    """
+    lons = np.asarray(setup["longitudes"])
+    lats = np.asarray(setup["latitudes"])
+    n_cells = len(lons)
+    resumo = hashlib.md5(lons.tobytes() + lats.tobytes()).hexdigest()
+    return n_cells, resumo
+
+def _carregar_delaunay_disco(setup):
+    """
+    Tenta reaproveitar, de uma sessao anterior, a triangulacao de Delaunay
+    salva em ~/.config/grads_monan/ (delaunay_cache.pkl + last_grid.info),
+    se as caracteristicas da malha baterem com o arquivo atualmente aberto.
+    Retorna None se nao houver cache valido (ou se a malha for diferente).
+    """
+    try:
+        if not (os.path.exists(_DELAUNAY_CACHE_PATH) and os.path.exists(_LAST_GRID_INFO_PATH)):
+            return None
+        n_cells, resumo = _assinatura_grade(setup)
+        info = {}
+        with open(_LAST_GRID_INFO_PATH) as f:
+            for linha in f:
+                if "=" in linha:
+                    chave, valor = linha.strip().split("=", 1)
+                    info[chave] = valor
+        if info.get("n_cells") != str(n_cells) or info.get("hash") != resumo:
+            return None
+        with open(_DELAUNAY_CACHE_PATH, "rb") as f:
+            tri = pickle.load(f)
+        print("Triangulacao (Delaunay) reaproveitada do cache em disco (mesma malha de uma sessao anterior).")
+        return tri
+    except Exception:
+        return None
+
+def _salvar_delaunay_disco(setup, tri):
+    """
+    Salva a triangulacao de Delaunay recem-calculada em
+    ~/.config/grads_monan/, junto com um resumo legivel das caracteristicas
+    da malha (last_grid.info), para reaproveitar em sessoes futuras sem
+    precisar reconstruir do zero. Falha em silencio (so avisa) se nao
+    conseguir escrever - isso nunca deve impedir a plotagem em si.
+    """
+    try:
+        os.makedirs(_CONFIG_DIR, exist_ok=True)
+        n_cells, resumo = _assinatura_grade(setup)
+        with open(_DELAUNAY_CACHE_PATH, "wb") as f:
+            pickle.dump(tri, f, protocol=pickle.HIGHEST_PROTOCOL)
+        with open(_LAST_GRID_INFO_PATH, "w") as f:
+            f.write("n_cells={0}\n".format(n_cells))
+            f.write("hash={0}\n".format(resumo))
+            f.write("lon_min={0}\n".format(float(np.min(setup["longitudes"]))))
+            f.write("lon_max={0}\n".format(float(np.max(setup["longitudes"]))))
+            f.write("lat_min={0}\n".format(float(np.min(setup["latitudes"]))))
+            f.write("lat_max={0}\n".format(float(np.max(setup["latitudes"]))))
+            f.write("arquivo_origem={0}\n".format(setup.get("openFileName", "desconhecido")))
+    except Exception as e:
+        print("Aviso: nao foi possivel salvar o cache de triangulacao em disco ({0}).".format(e))
+
 def _obter_triangulacao(setup):
     """
     Cria a triangulacao de Delaunay dos pontos da malha (longitude,
@@ -117,13 +189,18 @@ def _obter_triangulacao(setup):
     ser reaproveitada por todas as interpolacoes (corte vertical, altura do
     zgrid, streamlines de vento) em vez de ser reconstruida a cada nivel/
     chamada - que e o principal gargalo de desempenho em arquivos grandes.
-    A cache e refeita sozinha (o 'setup' e outro) sempre que um novo
-    arquivo e aberto (ou 'reinit'), entao nunca fica desatualizada.
+    A cache em memoria e refeita sozinha (o 'setup' e outro) sempre que um
+    novo arquivo e aberto (ou 'reinit'). Alem disso, tambem tenta um cache
+    EM DISCO (~/.config/grads_monan/) para reaproveitar entre sessoes
+    diferentes do programa, quando a mesma malha for reaberta.
     """
     tri = setup.get("_delaunay_malha")
     if tri is None:
-        pontos = np.column_stack((setup["longitudes"], setup["latitudes"]))
-        tri = Delaunay(pontos)
+        tri = _carregar_delaunay_disco(setup)
+        if tri is None:
+            pontos = np.column_stack((setup["longitudes"], setup["latitudes"]))
+            tri = Delaunay(pontos)
+            _salvar_delaunay_disco(setup, tri)
         setup["_delaunay_malha"] = tri
     return tri
 
@@ -138,36 +215,36 @@ def _interpolar(setup, valores, pontos_destino):
     interpolador = LinearNDInterpolator(tri, valores)
     return interpolador(pontos_destino)
 
-def _obter_triangulacao_mpl(setup):
+def _grade_regular_interpolada(setup, ax, data):
     """
-    Cria (uma unica vez por arquivo aberto) e reaproveita a triangulacao do
-    matplotlib (mtri.Triangulation) dos pontos da malha, usada por
-    tricontourf/tricontour. A geometria (longitude/latitude) e sempre a
-    mesma independente de qual variavel esta sendo exibida - triangular de
-    novo a cada 'd' e o principal gargalo de desempenho em malhas grandes
-    (ex: x5898242, a resolucao operacional).
+    Interpola 'data' (na malha nao estruturada) para uma grade regular,
+    reaproveitando a triangulacao em cache (ver _obter_triangulacao) - usada
+    por 'shaded'/'contour' para poder chamar o contourf/contour de GRADE
+    REGULAR do matplotlib, em vez do tricontourf/tricontour, que nao
+    escala bem para milhoes de pontos (mesmo com a triangulacao em cache,
+    o algoritmo de extracao das faixas de cor sobre a malha inteira e caro
+    e tem que ser refeito a cada troca de variavel).
     """
-    triang = setup.get("_tri_mpl")
-    if triang is None:
-        triang = mtri.Triangulation(setup["longitudes"], setup["latitudes"])
-        setup["_tri_mpl"] = triang
-    return triang
+    lon_min = setup["lon_min"]
+    lon_max = setup["lon_max"]
+    lat_min = setup["lat_min"]
+    lat_max = setup["lat_max"]
 
-def _triangulacao_com_corte(setup, data):
-    """
-    Triangulacao do matplotlib (em cache) com mascara aplicada nos
-    triangulos que tem algum vertice com data=NaN (fora do 'set cut'),
-    em vez de reconstruir a triangulacao so com os pontos validos - assim
-    o cache continua valendo mesmo com o corte ligado/desligado.
-    """
-    triang = _obter_triangulacao_mpl(setup)
-    visivel = ~np.isnan(np.asarray(data))
-    if np.all(visivel):
-        triang.set_mask(None)
-    else:
-        mask_tri = ~visivel[triang.triangles].all(axis=1)
-        triang.set_mask(mask_tri)
-    return triang
+    largura, altura = 800, 400
+    try:
+        fig = ax.get_figure()
+        largura = int(np.clip(fig.get_size_inches()[0]*fig.dpi, 200, 1600))
+        altura = int(np.clip(fig.get_size_inches()[1]*fig.dpi, 150, 1600))
+    except Exception:
+        pass
+
+    xs = np.linspace(lon_min, lon_max, largura)
+    ys = np.linspace(lat_min, lat_max, altura)
+    grade_x, grade_y = np.meshgrid(xs, ys)
+    pontos_destino = np.column_stack((grade_x.ravel(), grade_y.ravel()))
+
+    campo = _interpolar(setup, data, pontos_destino).reshape(altura, largura)
+    return grade_x, grade_y, campo
 
 def _aplicar_corte(data, cut):
     """
@@ -399,53 +476,81 @@ def plot_corte(setup, var, cbar=None):
 
     return ax, cbar
 
+def _obter_arvore_celulas(setup):
+    """
+    Cria (uma vez por arquivo aberto) e reaproveita uma arvore cKDTree dos
+    centros das celulas (longitude, latitude), usada para rasterizar o
+    'gxout voronoi' rapidamente.
+    """
+    arvore = setup.get("_arvore_celulas")
+    if arvore is None:
+        pontos = np.column_stack((setup["longitudes"], setup["latitudes"]))
+        arvore = cKDTree(pontos)
+        setup["_arvore_celulas"] = arvore
+    return arvore
+
 def plot_voronoi(setup, data):
     """
-    Plota o poligono de Voronoi real de cada celula da malha nao estruturada,
-    colorido pelo valor de 'data' - sem interpolar/triangular como o shaded
-    ou o contour. Requer conectividade da malha (verticesOnCell, latVertex,
-    lonVertex), disponivel apenas em arquivos de grade completos.
+    Plota o diagrama de Voronoi da malha, rasterizado: para cada pixel da
+    imagem final, usa o valor da celula mais proxima - que e, por
+    definicao, a propria regiao de Voronoi correta para aquele ponto
+    (nearest-neighbor = Voronoi). Muito mais rapido que desenhar o poligono
+    exato de cada celula via PolyCollection (que nao escala bem para
+    milhoes de celulas - mesmo ja vetorizado, a propria construcao do
+    PolyCollection e o desenho subsequente dominam o tempo). So precisa de
+    latCell/lonCell (sempre disponivel), nao da conectividade completa
+    (verticesOnCell/latVertex/lonVertex).
+
+    Limitacao conhecida: opera em coordenadas lon/lat planas (nao
+    esfericas), entao pode haver uma costura sutil perto da linha
+    internacional de data (+-180 graus) em malhas globais.
     """
-    if not setup.get("tem_conectividade_voronoi", False):
-        print("Aviso: este arquivo/grade nao tem conectividade da malha (verticesOnCell/latVertex/lonVertex).")
-        print("Nao e possivel desenhar os poligonos de Voronoi; forneca um arquivo de grade completo no comando 'open'.")
+    label = setup.get("label", "variavel")
+    if not _tamanho_malha_ok(label, len(data), len(setup["longitudes"])):
         return None
 
-    vertices_on_cell = np.asarray(setup["vertices_on_cell"])
-    n_edges_on_cell = setup["n_edges_on_cell"]
-    lat_vertex = np.array(setup["lat_vertex"])
-    lon_vertex = np.array(setup["lon_vertex"])
+    data = np.asarray(data, dtype=float)
+    lon_min = setup["lon_min"]
+    lon_max = setup["lon_max"]
+    lat_min = setup["lat_min"]
+    lat_max = setup["lat_max"]
 
-    n_cells = len(data)
-    poligonos = []
-    valores = []
-    for i in range(n_cells):
-        if np.isnan(data[i]):
-            # Fora do corte (set cut) - fica transparente (nao desenha o poligono)
-            continue
-        n_edges = int(n_edges_on_cell[i]) if n_edges_on_cell is not None else vertices_on_cell.shape[1]
-        idx = vertices_on_cell[i, :n_edges] - 1  # verticesOnCell e 1-indexado (Fortran)
-        idx = idx[idx >= 0]
-        if len(idx) < 3:
-            continue
-        lons = lon_vertex[idx]
-        lats = lat_vertex[idx]
-        if lons.max() - lons.min() > 180:
-            # poligono "esticado" na borda +-180 (wrap de longitude) - ignora
-            continue
-        poligonos.append(np.column_stack((lons, lats)))
-        valores.append(data[i])
+    ax = plt.gca()
 
-    if not poligonos:
+    # Resolucao da imagem acompanha o tamanho real da figura (em pixels),
+    # com limites de sanidade - nao ha ganho visual em rasterizar mais fino
+    # que a propria figura vai exibir.
+    largura, altura = 1400, 700
+    try:
+        fig = ax.get_figure()
+        largura = int(np.clip(fig.get_size_inches()[0]*fig.dpi, 200, 2400))
+        altura = int(np.clip(fig.get_size_inches()[1]*fig.dpi, 150, 2400))
+    except Exception:
+        pass
+
+    xs = np.linspace(lon_min, lon_max, largura)
+    ys = np.linspace(lat_min, lat_max, altura)
+    grade_x, grade_y = np.meshgrid(xs, ys)
+    pontos_pixel = np.column_stack((grade_x.ravel(), grade_y.ravel()))
+
+    arvore = _obter_arvore_celulas(setup)
+    _, indices = arvore.query(pontos_pixel)
+
+    imagem = np.ma.masked_invalid(data[indices].reshape(altura, largura))
+    if np.all(imagem.mask):
         print("Aviso: nenhuma celula com valor dentro do corte (set cut) nesta selecao.")
         return None
 
-    ax = plt.gca()
-    coll = PolyCollection(poligonos, array=np.array(valores), cmap=setup["cmap"], edgecolors='none')
-    ax.add_collection(coll)
-    ax.set_xlim(setup["lon_min"], setup["lon_max"])
-    ax.set_ylim(setup["lat_min"], setup["lat_max"])
-    return coll
+    niveis = _niveis_cor(setup)
+    norm = None
+    if isinstance(niveis, (list, tuple, np.ndarray)) and len(niveis) > 1:
+        norm = BoundaryNorm(niveis, ncolors=plt.get_cmap(setup["cmap"]).N)
+
+    im = ax.imshow(imagem, extent=(lon_min, lon_max, lat_min, lat_max), origin='lower',
+                    cmap=setup["cmap"], norm=norm, interpolation='nearest', aspect='auto')
+    ax.set_xlim(lon_min, lon_max)
+    ax.set_ylim(lat_min, lat_max)
+    return im
 
 def plot_var_3d(setup, var):
     """
@@ -649,22 +754,28 @@ def plot_var(setup, var, cbar=None):
     plt.ylim(lat_min, lat_max)  # Limitar o eixo Y (latitude)
 
     if gxout == "shaded":
-        # Plotar contornos PREENCHIDOS em malha não estruturada, reaproveitando
-        # a triangulacao em cache (ver _obter_triangulacao_mpl) em vez de
-        # triangular de novo a cada troca de variavel.
+        # Preenchido, interpolando para uma grade regular (reaproveitando a
+        # triangulacao em cache) e usando o contourf de GRADE REGULAR do
+        # matplotlib, bem mais rapido que o tricontourf para malhas grandes.
         if np.all(np.isnan(data)):
             print("Aviso: nenhum valor dentro do corte (set cut) nesta selecao.")
         else:
-            triang = _triangulacao_com_corte(setup, data)
-            cs = ax.tricontourf(triang, data, levels=_niveis_cor(setup), cmap=cmap)
-            cbar = plt.colorbar(cs,ax=ax,label=label)
+            grade_x, grade_y, campo = _grade_regular_interpolada(setup, ax, data)
+            if np.all(np.isnan(campo)):
+                print("Aviso: a interpolacao nao gerou nenhum ponto valido nesta selecao.")
+            else:
+                cs = ax.contourf(grade_x, grade_y, campo, levels=_niveis_cor(setup), cmap=cmap)
+                cbar = plt.colorbar(cs,ax=ax,label=label)
     elif gxout == "contour":
         if np.all(np.isnan(data)):
             print("Aviso: nenhum valor dentro do corte (set cut) nesta selecao.")
         else:
-            triang = _triangulacao_com_corte(setup, data)
-            cs = ax.tricontour(triang, data, levels=_niveis_cor(setup), cmap=cmap)
-            plt.clabel(cs, inline=True, fontsize=10)
+            grade_x, grade_y, campo = _grade_regular_interpolada(setup, ax, data)
+            if np.all(np.isnan(campo)):
+                print("Aviso: a interpolacao nao gerou nenhum ponto valido nesta selecao.")
+            else:
+                cs = ax.contour(grade_x, grade_y, campo, levels=_niveis_cor(setup), cmap=cmap)
+                plt.clabel(cs, inline=True, fontsize=10)
     elif gxout == "voronoi":
         # Plota o poligono real de cada celula (sem interpolar/triangular)
         coll = plot_voronoi(setup, data)
