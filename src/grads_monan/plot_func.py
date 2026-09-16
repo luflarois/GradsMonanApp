@@ -138,15 +138,36 @@ def _interpolar(setup, valores, pontos_destino):
     interpolador = LinearNDInterpolator(tri, valores)
     return interpolador(pontos_destino)
 
-def _filtrar_nan(longitudes, latitudes, data):
+def _obter_triangulacao_mpl(setup):
     """
-    Remove os pontos com data=NaN (ex: fora do intervalo de 'set cut') antes
-    de triangular com tricontourf/tricontour, que - ao contrario do contourf
-    de grade regular - nao aceita NaN diretamente.
+    Cria (uma unica vez por arquivo aberto) e reaproveita a triangulacao do
+    matplotlib (mtri.Triangulation) dos pontos da malha, usada por
+    tricontourf/tricontour. A geometria (longitude/latitude) e sempre a
+    mesma independente de qual variavel esta sendo exibida - triangular de
+    novo a cada 'd' e o principal gargalo de desempenho em malhas grandes
+    (ex: x5898242, a resolucao operacional).
     """
-    data = np.asarray(data)
-    mask = ~np.isnan(data)
-    return np.asarray(longitudes)[mask], np.asarray(latitudes)[mask], data[mask]
+    triang = setup.get("_tri_mpl")
+    if triang is None:
+        triang = mtri.Triangulation(setup["longitudes"], setup["latitudes"])
+        setup["_tri_mpl"] = triang
+    return triang
+
+def _triangulacao_com_corte(setup, data):
+    """
+    Triangulacao do matplotlib (em cache) com mascara aplicada nos
+    triangulos que tem algum vertice com data=NaN (fora do 'set cut'),
+    em vez de reconstruir a triangulacao so com os pontos validos - assim
+    o cache continua valendo mesmo com o corte ligado/desligado.
+    """
+    triang = _obter_triangulacao_mpl(setup)
+    visivel = ~np.isnan(np.asarray(data))
+    if np.all(visivel):
+        triang.set_mask(None)
+    else:
+        mask_tri = ~visivel[triang.triangles].all(axis=1)
+        triang.set_mask(mask_tri)
+    return triang
 
 def _aplicar_corte(data, cut):
     """
@@ -628,20 +649,21 @@ def plot_var(setup, var, cbar=None):
     plt.ylim(lat_min, lat_max)  # Limitar o eixo Y (latitude)
 
     if gxout == "shaded":
-        # Plotar contornos PREENCHIDOS em malha não estruturada
-        # tricontourf nao aceita NaN (precisa filtrar os pontos, nao so mascarar)
-        lon_validos, lat_validos, data_validos = _filtrar_nan(longitudes, latitudes, data)
-        if len(data_validos) == 0:
+        # Plotar contornos PREENCHIDOS em malha não estruturada, reaproveitando
+        # a triangulacao em cache (ver _obter_triangulacao_mpl) em vez de
+        # triangular de novo a cada troca de variavel.
+        if np.all(np.isnan(data)):
             print("Aviso: nenhum valor dentro do corte (set cut) nesta selecao.")
         else:
-            cs = ax.tricontourf(lon_validos, lat_validos, data_validos, levels=_niveis_cor(setup), cmap=cmap)
+            triang = _triangulacao_com_corte(setup, data)
+            cs = ax.tricontourf(triang, data, levels=_niveis_cor(setup), cmap=cmap)
             cbar = plt.colorbar(cs,ax=ax,label=label)
     elif gxout == "contour":
-        lon_validos, lat_validos, data_validos = _filtrar_nan(longitudes, latitudes, data)
-        if len(data_validos) == 0:
+        if np.all(np.isnan(data)):
             print("Aviso: nenhum valor dentro do corte (set cut) nesta selecao.")
         else:
-            cs = ax.tricontour(lon_validos, lat_validos, data_validos, levels=_niveis_cor(setup), cmap=cmap)
+            triang = _triangulacao_com_corte(setup, data)
+            cs = ax.tricontour(triang, data, levels=_niveis_cor(setup), cmap=cmap)
             plt.clabel(cs, inline=True, fontsize=10)
     elif gxout == "voronoi":
         # Plota o poligono real de cada celula (sem interpolar/triangular)
