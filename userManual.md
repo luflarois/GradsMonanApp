@@ -31,7 +31,7 @@ executados com `run <arquivo>`.
 
 | Comando | Descrição |
 |---|---|
-| `open <arquivo.nc> [grade.nc]` | Abre um arquivo NetCDF de saída do MONAN/MPAS. Pode ser chamado **mais de uma vez na mesma sessão**, para trabalhar com vários arquivos ao mesmo tempo — ver seção 2.1. O segundo argumento (opcional) é um arquivo de grade externo — necessário quando o arquivo de dados não traz `latCell`/`lonCell`/`nCells` embutidos. Ver seção 10 para o detalhe de cada caso. Qualquer falha (inclusive um arquivo com malha diferente da já aberta) avisa e **mantém a sessão anterior intacta**, sem encerrar o programa. |
+| `open <arquivo.nc> [grade.nc]` | Abre um arquivo NetCDF de saída do MONAN/MPAS. Pode ser chamado **mais de uma vez na mesma sessão**, para trabalhar com vários arquivos ao mesmo tempo — ver seção 2.1. `<arquivo.nc>` também aceita **wildcards** (`*`, `?`, `[...]`), abrindo em sequência todos os arquivos que derem match (ordem alfabética dos nomes — ver seção 2.1). O segundo argumento (opcional) é um arquivo de grade externo — necessário quando o arquivo de dados não traz `latCell`/`lonCell`/`nCells` embutidos. Ver seção 10 para o detalhe de cada caso. Qualquer falha (inclusive um arquivo com malha diferente da já aberta) avisa e **mantém a sessão anterior intacta**, sem encerrar o programa. |
 | `reinit` | Fecha **todos** os arquivos abertos na sessão, apaga toda a configuração associada a eles (inclusive os caches de triangulação em memória) e volta ao estado inicial, pronto para um novo `open`. Também limpa a janela de gráficos. |
 | `run <script>` | Executa, em sequência, os comandos contidos no arquivo de script informado (um comando por linha). |
 | `c` | Limpa o gráfico ativo no momento. Se o `d3` foi o último a plotar, limpa a **janela 3D** (recriando o eixo); se foi o `d`, limpa a janela 2D (só o painel atual, se `set pages` estiver ativo). |
@@ -67,6 +67,19 @@ Num  Arquivo                                        Timestamp
 
 - O primeiro `open` bem-sucedido da sessão vira o **arquivo 1**; cada `open`
   seguinte que for aceito vira o próximo número em sequência (2, 3, ...).
+- **Wildcards**: `open <padrão>` aceita `*`, `?` e `[...]` no nome do
+  arquivo. Nesse caso, todos os arquivos que derem match são abertos em
+  sequência, em ordem alfabética (que normalmente corresponde à ordem
+  cronológica, já que os nomes trazem a data/hora), cada um recebendo o
+  próximo número disponível. A mesma validação de malha (abaixo) vale para
+  cada arquivo do lote: um arquivo do padrão com grade diferente é pulado
+  (com aviso), sem interromper a abertura dos demais. Exemplo:
+  ```
+  > open SP_O_2022071400_2022071400.00.00.x40962L55.nc  grade.nc
+  > open SP_O_2022071400_20220714*.nc                   grade.nc
+  ```
+  (o argumento de grade externo, se necessário, é opcional e vale igual
+  para todos os arquivos do padrão.)
 - **Mesma malha é obrigatória**: um novo arquivo só é aceito se tiver
   exatamente a mesma malha (mesmo número de células e mesmas coordenadas
   `latCell`/`lonCell`) do(s) arquivo(s) já aberto(s) — a mesma técnica de
@@ -114,6 +127,47 @@ e também funciona com `mag(...)` e com a forma vetorial `u;v`:
 Se o número do arquivo referenciado não estiver aberto, ou a variável não
 existir naquele arquivo, o programa avisa (com sugestões por similaridade,
 quando aplicável) e **não trava** — nem interrompe a sessão.
+
+### Série temporal entre arquivos (`set t <inicio> <fim>`)
+
+Com mais de um arquivo aberto, `set t <arquivo_inicial> <arquivo_final>`
+(ou `set time <arquivo_inicial> <arquivo_final>`) seleciona um **intervalo
+de arquivos** pelo número de abertura (não um índice de tempo dentro de um
+arquivo — isso continua sendo `set t <indice>`, com um único argumento).
+A partir daí, `d <variavel>` (ou `d3 <variavel>`) — na forma simples, sem
+`mag(...)`, sem `<u>;<v>` e sem expressão aritmética — passa a considerar
+todos os arquivos do intervalo, em vez de um só. O que ele plota depende
+de `set lat`/`set lon`/`set lev`:
+
+| Seleção de lat/lon/nível | Resultado de `d <variavel>` |
+|---|---|
+| Latitude **e** longitude fixadas num ponto único | **Gráfico de linha**: valor da variável (na célula mais próxima do ponto) x tempo, um ponto por arquivo do intervalo. |
+| Latitude, longitude ou nível como uma **faixa única** (as outras duas num ponto/nível fixo) | **Diagrama tipo Hovmöller**: tempo no eixo X, a dimensão em faixa (latitude, longitude ou nível — com a mesma hierarquia pressão/altura/índice da seção 8) no eixo Y, valor da variável na cor, com barra de cores. |
+| Nem latitude nem longitude fixadas num ponto (mapa horizontal "normal") | **Animação**: plota o mapa de cada arquivo do intervalo, em sequência, na mesma janela, aguardando `set tint <segundos>` entre cada quadro (ver abaixo). O timestamp de cada arquivo aparece anexado ao título do gráfico, quadro a quadro. |
+| Mais de uma das três (lat, lon, nível) como faixa ao mesmo tempo — exceto o caso do mapa acima | Não suportado: avisa e não plota (ambíguo demais para um único gráfico). |
+
+`d3 <variavel>` no modo de série temporal sempre anima (precisa de faixas
+reais em lat/lon/nível de qualquer forma — regra normal do `d3`, seção 4):
+plota o quadro de cada arquivo do intervalo, em sequência, na mesma janela
+3D, aguardando `set tint` entre cada um.
+
+`set tint <segundos>` define o intervalo, em segundos, entre os quadros da
+animação (`d`/`d3` no modo mapa/3D acima). Padrão: 1 segundo. Fica
+guardado no `setup` da sessão (seção 11), valendo para toda animação
+seguinte até ser trocado.
+
+Um sufixo `.N` na variável (`d t2m.2`, por exemplo) é **ignorado** nesse
+modo, com um aviso — o arquivo já vem do intervalo de `set t`.
+
+**Mapa de fundo e níveis de cor entre quadros/plots**: `set clevs` (faixas
+de cor fixas) já vale automaticamente para qualquer plot seguinte, animado
+ou não — é uma configuração de sessão como outra qualquer, e não é
+resetada em nenhum momento. O mapa de fundo (`draw map`), por sua vez,
+antes precisava ser chamado de novo a cada plot para continuar visível
+(cada novo `d`/`d3` reaproveita ou limpa o mesmo eixo); agora, `draw map`
+liga um modo persistente (ver tabela da seção 7) que o redesenha
+automaticamente em cima de cada plot seguinte — inclusive quadro a quadro
+na animação — até um `draw map off`.
 
 ---
 
@@ -229,7 +283,9 @@ faltando avisa e **mantém a configuração anterior**, sem travar.
 | `set mpt <cor> <espessura>` | Cor e espessura da linha do mapa de fundo. |
 | `set plot_line <espessura> <cor>` | Espessura/cor de linha usada em perfis. |
 | `set grid on\|off` | Liga/desliga a grade (gridlines) do gráfico. |
-| `set time <n>` (ou `set t <n>`) | Índice de tempo selecionado. |
+| `set time <n>` (ou `set t <n>`) | Índice de tempo selecionado, dentro do arquivo. |
+| `set time <ini> <fim>` (ou `set t <ini> <fim>`) | Com mais de um arquivo aberto: intervalo de arquivos (pelo número de abertura) para a série temporal entre arquivos — ver seção 2.1. |
+| `set tint <segundos>` | Intervalo, em segundos, entre os quadros da animação da série temporal (`d`/`d3` no modo mapa/3D — seção 2.1). Padrão: 1 segundo. |
 | `set mark <x> <y> <cor> <tamanho> <legenda>` | Mecanismo antigo de acumular pontos de marcação. **Legado**: não é mais usado por `draw mark` (seção 7), que hoje é autossuficiente. |
 | `set fig_dpi <n>` / `set fig_inches <modo>` / `set fig_transparency <bool>` | Resolução/margens/transparência ao salvar (`gxprint`). |
 | `set title_color <cor>` / `set title_fs <n>` / `set title_fw <peso>` | Aparência do título do gráfico. |
@@ -243,7 +299,8 @@ faltando avisa e **mantém a configuração anterior**, sem travar.
 | `draw title <texto>` | Define e desenha o título do gráfico. |
 | `draw mark <lat> <lon> <simbolo>` | Desenha um símbolo de marca na coordenada geográfica informada. `simbolo` é um inteiro de 1 a 11 (tabela abaixo). Entradas inválidas avisam sem travar. |
 | `draw legend` | Mostra a legenda do gráfico atual. |
-| `draw map` | Desenha o mapa de fundo. Se a janela **3D** (`d3`) for a ativa no momento, desenha projetado na "superfície" da caixa 3D em vez do comportamento 2D padrão. |
+| `draw map` | Desenha o mapa de fundo e **liga** o modo "mapa persistente": a partir daqui, o mapa é **redesenhado automaticamente** em todo `d`/`d3` seguinte — inclusive quadro a quadro na animação da série temporal (seção 2.1) — até um `draw map off`. Se a janela **3D** (`d3`) for a ativa no momento, desenha projetado na "superfície" da caixa 3D em vez do comportamento 2D padrão. |
+| `draw map off` | Desliga o modo "mapa persistente": os próximos `d`/`d3` (e a animação) deixam de redesenhar o mapa automaticamente. |
 | `draw label <texto>` | Define o rótulo da barra de cores atual. |
 
 ### 7.1 Tabela de símbolos (`draw mark`)
@@ -386,6 +443,9 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 | `variables` | Referência a `dataset.variables` do **arquivo 1**. |
 | `files` | Lista com um registro por arquivo aberto na sessão (índice, nome do arquivo, arquivo de grade, `dataset`, informações de tempo) — ver seção 2.1. |
 | `_malha_assinatura` | Assinatura (nº de células + hash `md5` de lat/lon) da malha da sessão, usada para validar que um novo `open` tem a mesma grade (uso interno — seção 2.1). |
+| `time_ini`, `time_fim` | Intervalo de arquivos (pelo número de abertura) selecionado por `set t <ini> <fim>`, para a série temporal entre arquivos — ver seção 2.1. `None` se ainda não definido. |
+| `tint` | Intervalo, em segundos, entre os quadros da animação da série temporal (`set tint`) — padrão 1.0. |
+| `draw_map_on` | `True` depois de `draw map` (até um `draw map off`): o mapa de fundo é redesenhado automaticamente em todo `d`/`d3` seguinte, inclusive quadro a quadro na animação — ver seção 2.1. |
 | `latitudes` / `longitudes` | Coordenadas de cada célula da malha (graus, longitude normalizada). |
 | `levels` / `eixo_pressao` | Lista de níveis; se representam pressão (`True`) ou índice de modelo (`False`). |
 | `lat_min`, `lat_max`, `lon_min`, `lon_max` | Domínio geográfico selecionado. |
@@ -418,6 +478,8 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 - `_resolver_variavel(setup, token)` — resolve um token de variável com sufixo opcional `.N` (seção 2.1): localiza o arquivo aberto correspondente e a variável nele, com mensagens de erro/sugestões (`difflib`) quando o arquivo não está aberto ou a variável não existe.
 - `_arquivo_por_indice(setup, indice)` — retorna o registro do arquivo aberto com aquele índice, ou `None`.
 - `_avaliar_expressao(setup, expr)` — avaliador seguro de expressões aritméticas (`d (expr)`), agora resolvendo cada variável via `_resolver_variavel` — aceita sufixos `.N` e expressões cruzando arquivos, ex. `t2m.2 - t2m.1`.
+- `_modo_serie_ativo(setup)` — `True` quando `set t <ini> <fim>` está definido e há mais de um arquivo aberto (seção 2.1).
+- `_dados_serie_temporal(setup, nome_var)` — reúne o array de `nome_var` de cada arquivo do intervalo `time_ini`/`time_fim`, com mensagens de erro/sugestões se a variável faltar em algum.
 
 ### `files_nc.py`
 - `file_open(fileName, setup_toml, gridFile=None, setup_anterior=None)` — abre o arquivo (e a grade, se necessária). Se `setup_anterior` for passado (já há um arquivo aberto na sessão), valida a malha do novo arquivo contra a assinatura já registrada (seção 2.1): rejeita com `(None, None)` se forem diferentes (preservando `setup_anterior` intacto), ou adiciona o novo arquivo a `setup["files"]` com o próximo índice sequencial, se forem iguais. Sem `setup_anterior` (primeiro `open`), monta o `setup` do zero, como antes. Resiliente à ausência de `nCells`, malha, `xtime`/`initial_time`, `t_iso_levels`.
@@ -438,14 +500,21 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 
 ### `plot_func.py`
 **Plotagem 2D:**
-- `plot_var(setup, var, cbar=None)` — despacha mapa/corte/perfil (seção 8) e `shaded`/`contour`/`voronoi`.
+- `plot_var(setup, var, cbar=None)` — despacha mapa/corte/perfil (seção 8) e `shaded`/`contour`/`voronoi`. No mapa horizontal, redesenha o mapa de fundo (`plot_map`) automaticamente se `setup["draw_map_on"]` estiver ligado (seção 7/2.1).
 - `plot_perfil`, `plot_corte` — perfil vertical e corte, com hachura em áreas sem dado.
 - `plot_voronoi(setup, data)` — rasterização via `cKDTree` (seção 8.1).
-- `plot_wind`, `plot_vector_field`, `plot_barbs`, `plot_streams` — vento (`vect`/`barb`/`stream`).
+- `plot_wind`, `plot_vector_field`, `plot_barbs`, `plot_streams` — vento (`vect`/`barb`/`stream`); `plot_wind` também redesenha o mapa automaticamente se ligado.
 - `plot_marks(setup)` — mecanismo antigo de `set mark` (legado).
 
 **Plotagem 3D:**
-- `plot_var_3d(setup, var)` — `d3` (seção 4): *scatter* ou superfícies empilhadas (`shaded`).
+- `plot_var_3d(setup, var)` — `d3` (seção 4): *scatter* ou superfícies empilhadas (`shaded`). Redesenha o mapa (`plot_map_3d`) automaticamente se `setup["draw_map_on"]` estiver ligado.
+
+**Série temporal entre arquivos (seção 2.1):**
+- `plot_serie(setup, var_name, dados, cbar=None)` — despachante de `d <variavel>` no modo de série temporal: decide entre linha/Hovmöller (`plot_serie_temporal`) e animação de mapa (`plot_serie_mapa`).
+- `plot_serie_temporal(setup, var_name, dados, cbar=None)` — linha (ponto único) ou diagrama Hovmöller (uma faixa entre lat/lon/nível).
+- `plot_serie_mapa(setup, var_name, dados, cbar=None)` — animação 2D (mapa completo), quadro a quadro, pausando `tint` segundos entre cada um.
+- `plot_serie_mapa_3d(setup, var_name, dados)` — mesma animação, para `d3`.
+- `_eixo_x_tempo(dados)` / `_formatar_eixo_x_tempo(...)` — monta o eixo X (tempo) a partir do `DataDado` de cada arquivo selecionado (datas reais, ou eixo posicional como recurso).
 
 **Triangulação e interpolação (seção 10):**
 - `_obter_triangulacao(setup)` — Delaunay em cache (memória → disco → constrói).

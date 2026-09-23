@@ -10,13 +10,15 @@
 import os
 import pickle
 import hashlib
+from datetime import datetime
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 from matplotlib.colors import BoundaryNorm
 import matplotlib.tri as mtri
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 - registra a projecao '3d'
 from .utils import normalize_lon, mag, load_zgrid_centers
-from .map_func import plot_map
+from .map_func import plot_map, plot_map_3d
 from scipy.interpolate import LinearNDInterpolator
 from scipy.spatial import Delaunay, cKDTree
 
@@ -258,6 +260,39 @@ def _aplicar_corte(data, cut):
     data = np.asarray(data, dtype=float)
     return np.where((data < cmin) | (data > cmax), np.nan, data)
 
+def _aplicar_rotulo_cbar(setup, cbar):
+    """
+    Reaplica o rotulo customizado da barra de cores definido via 'draw
+    label <texto>' (setup['cbar_label']), com o tamanho/peso de fonte de
+    'label_fontsize'/'label_fontweight' - chamada toda vez que uma nova
+    colorbar e criada, para que esse rotulo nao se perca quando a colorbar
+    e recriada (ex: a cada quadro da animacao de mapa - ver
+    plot_serie_mapa/plot_var), o que sem isso reverteria para o rotulo
+    padrao (a description da variavel, 'set label'). Sem 'draw label'
+    definido, nao faz nada (mantem o rotulo padrao ja usado na criacao).
+    """
+    rotulo = setup.get("cbar_label")
+    if rotulo and cbar is not None:
+        try:
+            cbar.set_label(rotulo, fontsize=setup.get("label_fontsize"), fontweight=setup.get("label_fontweight"))
+        except Exception:
+            pass
+    return cbar
+
+def _aplicar_titulo(setup, ax):
+    """
+    Desenha (ou redesenha) o titulo do grafico a partir de setup['title']
+    (definido via 'draw title <texto>'), com as mesmas cores/fonte de
+    'draw_title' (title_fs/title_fw/title_color). Chamada em todo plot que
+    pode ter seu eixo limpo entre uma chamada e outra (ex: 'ax.cla()' a
+    cada quadro da animacao de mapa - ver plot_serie_mapa), para que um
+    titulo definido antes do 'd' nao se perca quando o eixo e limpo; sem
+    titulo definido, nao faz nada.
+    """
+    titulo = setup.get("title")
+    if titulo:
+        ax.set_title(titulo, fontsize=setup.get("title_fs"), fontweight=setup.get("title_fw"), color=setup.get("title_color"))
+
 def _mask_corte(valores, cut):
     """
     Mascara booleana (True = dentro do intervalo de 'set cut', portanto
@@ -470,6 +505,7 @@ def plot_corte(setup, var, cbar=None):
             plt.ylabel('Levels')
 
     cbar = plt.colorbar(cs, ax=ax, label=label)
+    _aplicar_rotulo_cbar(setup, cbar)
     plt.xlabel(xlabel)
     if Title:
         plt.title(Title)
@@ -664,7 +700,8 @@ def plot_var_3d(setup, var):
         if not alguma_superficie:
             print("Aviso: nenhum valor visivel (tudo zero ou fora do corte) em nenhum nivel - nada para plotar em 3D.")
             return None
-        fig3d.colorbar(mappable_ref, ax=ax3d, label=label)
+        cbar3d = fig3d.colorbar(mappable_ref, ax=ax3d, label=label)
+        _aplicar_rotulo_cbar(setup, cbar3d)
     else:
         xs = np.repeat(lons_sel, n_lev)
         ys = np.repeat(lats_sel, n_lev)
@@ -681,7 +718,8 @@ def plot_var_3d(setup, var):
         xs, ys, zs, valores = xs[visivel], ys[visivel], zs[visivel], valores[visivel]
 
         sc = ax3d.scatter(xs, ys, zs, c=valores, cmap=cmap, norm=norm)
-        fig3d.colorbar(sc, ax=ax3d, label=label)
+        cbar3d = fig3d.colorbar(sc, ax=ax3d, label=label)
+        _aplicar_rotulo_cbar(setup, cbar3d)
 
     ax3d.set_xlabel('Longitude')
     ax3d.set_ylabel('Latitude')
@@ -694,6 +732,12 @@ def plot_var_3d(setup, var):
     # Z "da superficie" (para 'draw map' desenhar o mapa junto ao solo/base
     # da caixa 3D, e nao no meio do ar).
     setup["z_superficie_3d"] = float(np.max(zs_2d)) if eixo_pressao else float(np.min(zs_2d))
+
+    if setup.get("draw_map_on"):
+        # 'draw map' ligado (ate um 'draw map off'): redesenha o mapa de
+        # fundo, projetado na superficie da caixa 3D, em todo 'd3' -
+        # inclusive quadro a quadro na animacao (plot_serie_mapa_3d).
+        plot_map_3d(setup, ax3d)
 
     return fig3d, ax3d
 
@@ -766,6 +810,7 @@ def plot_var(setup, var, cbar=None):
             else:
                 cs = ax.contourf(grade_x, grade_y, campo, levels=_niveis_cor(setup), cmap=cmap)
                 cbar = plt.colorbar(cs,ax=ax,label=label)
+                _aplicar_rotulo_cbar(setup, cbar)
     elif gxout == "contour":
         if np.all(np.isnan(data)):
             print("Aviso: nenhum valor dentro do corte (set cut) nesta selecao.")
@@ -781,6 +826,20 @@ def plot_var(setup, var, cbar=None):
         coll = plot_voronoi(setup, data)
         if coll is not None:
             cbar = plt.colorbar(coll, ax=ax, label=label)
+            _aplicar_rotulo_cbar(setup, cbar)
+
+    if setup.get("draw_map_on"):
+        # 'draw map' ligado (ate um 'draw map off'): redesenha o mapa de
+        # fundo por cima do campo recem-plotado, em todo 'd'/'display' -
+        # inclusive quadro a quadro na animacao da serie temporal
+        # (plot_serie_mapa), sem precisar chamar 'draw map' de novo.
+        plot_map(setup, ax)
+
+    # Titulo definido via 'draw title' (setup['title']): reaplicado em
+    # todo plot, para nao se perder quando o eixo e limpo entre quadros da
+    # animacao de mapa (ax.cla() em plot_serie_mapa) ou entre plots
+    # consecutivos apos um 'c'.
+    _aplicar_titulo(setup, ax)
 
     plt.xlabel('Longitude')
     plt.ylabel('Latitude')
@@ -950,6 +1009,11 @@ def plot_wind(setup, var1, var2, cbar):
     else:
         plot_vector_field(setup, var1, var2)
 
+    if setup.get("draw_map_on"):
+        plot_map(setup, ax)
+
+    _aplicar_titulo(setup, ax)
+
     plt.xlabel('Longitude')
     plt.ylabel('Latitude')
 
@@ -960,3 +1024,278 @@ def plot_marks(setup):
         x = setup["xmark"][i]
         y = setup["ymark"][i]
         plt.scatter(x, y, color=setup["colormark"][i], s=setup["sizemark"][i], label='Ponto de Interesse')
+
+def _eixo_x_tempo(dados):
+    """
+    Monta o eixo X (tempo) da serie temporal entre arquivos ('set t
+    <arquivo_inicial> <arquivo_final>', com mais de um arquivo aberto):
+    tenta interpretar o 'DataDado' de cada arquivo selecionado como
+    data/hora real (formato 'AAAA-MM-DDTHH', o mesmo montado em
+    files_nc.py a partir de 'xtime'). Se algum nao for interpretavel (ex:
+    'desconhecida', arquivo sem 'xtime'), cai num eixo posicional simples
+    (0, 1, 2, ...), rotulado com o texto bruto de cada 'DataDado'.
+    Retorna (x_vals, usa_datetime, rotulos).
+    """
+    rotulos = [str(d.get("DataDado") or "arquivo {0}".format(d["index"])) for d in dados]
+    try:
+        datas = [datetime.strptime(r, "%Y-%m-%dT%H") for r in rotulos]
+        return datas, True, rotulos
+    except Exception:
+        return list(range(len(dados))), False, rotulos
+
+def _formatar_eixo_x_tempo(ax, fig, x_vals, usa_datetime, rotulos):
+    if usa_datetime:
+        fig.autofmt_xdate()
+    else:
+        ax.set_xticks(x_vals)
+        ax.set_xticklabels(rotulos, rotation=45, ha='right')
+
+def plot_serie_temporal(setup, var_name, dados, cbar=None):
+    """
+    Comando 'd <variavel>' com o intervalo de arquivos definido por
+    'set t <arquivo_inicial> <arquivo_final>' (mais de um arquivo aberto -
+    ver 'open'): plota uma serie temporal da variavel ao longo dos arquivos
+    selecionados, usando o timestamp de cada arquivo no eixo X.
+
+    'dados' e uma lista, na ordem dos arquivos selecionados, de dicts
+    {"index", "DataDado", "array"} - 'array' e o array bruto (ja sem
+    mascara) da variavel naquele arquivo, no formato (Time, nCells) ou
+    (Time, nCells, nLevels), igual ao usado em plot_var/plot_perfil.
+
+    Se latitude, longitude e nivel estiverem todos fixados num unico ponto
+    ('set lat <valor>' / 'set lon <valor>' / 'set lev <n>'), plota uma
+    linha simples (valor x tempo). Se exatamente uma dessas tres dimensoes
+    estiver com uma faixa (nao um ponto/nivel unico), plota um diagrama de
+    cores (tipo Hovmoller): tempo no eixo X, a dimensao em faixa (latitude,
+    longitude ou nivel) no eixo Y, e o valor da variavel representado pela
+    cor, com barra de cores. Mais de uma faixa aberta ao mesmo tempo nao e
+    suportado (ambiguo: exigiria mais de 2 dimensoes no grafico).
+    """
+    _ativar_figura_2d(setup)
+    ax = plt.gca()
+    fig = ax.get_figure()
+
+    lat_min = setup["lat_min"]
+    lat_max = setup["lat_max"]
+    lon_min = setup["lon_min"]
+    lon_max = setup["lon_max"]
+    lev = setup["lev"]
+    levf = setup["levf"]
+    time_sel = setup.get("time_sel", 0)
+    label = setup.get("label") or var_name
+    cmap = setup["cmap"]
+    Title = setup["title"]
+    latitudes = np.asarray(setup["latitudes"])
+    longitudes = np.asarray(setup["longitudes"])
+    levels = np.asarray(setup["levels"])
+    eixo_pressao = setup.get("eixo_pressao", False)
+    variables = setup.get("variables", {})
+    cut = setup.get("cut")
+
+    lat_e_ponto = (lat_min == lat_max)
+    lon_e_ponto = (lon_min == lon_max)
+    lev_e_ponto = (lev == levf)
+    n_faixas = sum(not p for p in (lat_e_ponto, lon_e_ponto, lev_e_ponto))
+
+    if n_faixas > 1:
+        print("No modo de serie temporal, apenas uma dentre latitude, longitude e nivel pode ficar em faixa; as outras precisam ser um ponto/nivel unico:")
+        print("  set lat <valor>  /  set lon <valor>  /  set lev <n>")
+        return ax, cbar
+
+    x_vals, usa_datetime, rotulos = _eixo_x_tempo(dados)
+
+    if n_faixas == 0:
+        # Ponto unico: uma linha simples, valor x tempo.
+        dist = np.sqrt((latitudes - lat_min)**2 + (longitudes - lon_min)**2)
+        cell_idx = int(np.argmin(dist))
+
+        y_vals = []
+        for d in dados:
+            fatia = d["array"][time_sel]
+            valor = fatia[cell_idx] if fatia.ndim == 1 else fatia[cell_idx, lev]
+            y_vals.append(float(valor))
+        y_vals = _aplicar_corte(np.array(y_vals), cut)
+
+        ax.plot(x_vals, y_vals, marker='o', linestyle='-', color=setup.get("lc", "black"))
+        _formatar_eixo_x_tempo(ax, fig, x_vals, usa_datetime, rotulos)
+        ax.set_xlabel('Tempo')
+        ax.set_ylabel(label)
+        if Title:
+            ax.set_title(Title)
+        ax.grid()
+        return ax, cbar
+
+    # Exatamente uma faixa (lat, lon ou nivel): diagrama tempo x faixa,
+    # colorido pelo valor (tipo Hovmoller).
+    if not lev_e_ponto:
+        # Faixa de niveis, num ponto fixo de lat/lon.
+        dist = np.sqrt((latitudes - lat_min)**2 + (longitudes - lon_min)**2)
+        cell_idx = int(np.argmin(dist))
+
+        if dados[0]["array"][time_sel].ndim == 1:
+            print("Nao e possivel fazer faixa de niveis: a variavel e bidimensional (sem dimensao de nivel).")
+            return ax, cbar
+
+        y_vals = np.array(levels[lev:levf])
+        imagem = np.full((len(y_vals), len(dados)), np.nan)
+        for j, d in enumerate(dados):
+            fatia = d["array"][time_sel]
+            imagem[:, j] = fatia[cell_idx, lev:levf]
+
+        zgrid_arr = None
+        if not eixo_pressao:
+            zgrid_arr = load_zgrid_centers(variables, len(latitudes), len(levels))
+        if eixo_pressao:
+            ylabel = 'Pressao (hPa)'
+        elif zgrid_arr is not None and np.mean(np.isfinite(zgrid_arr[cell_idx, lev:levf])) >= 0.5:
+            y_vals = zgrid_arr[cell_idx, lev:levf]
+            ylabel = 'Altura (m)'
+        else:
+            ylabel = 'Levels'
+
+    elif not lat_e_ponto:
+        # Faixa de latitude, com longitude e nivel fixos: corte ao longo da
+        # latitude, repetido para cada arquivo (tempo).
+        y_vals = np.linspace(lat_min, lat_max, 100)
+        pontos_destino = np.column_stack((np.full_like(y_vals, lon_min), y_vals))
+        imagem = np.full((len(y_vals), len(dados)), np.nan)
+        for j, d in enumerate(dados):
+            fatia = d["array"][time_sel]
+            dado_nivel = fatia[:, lev] if fatia.ndim > 1 else fatia
+            imagem[:, j] = _interpolar(setup, dado_nivel, pontos_destino)
+        ylabel = 'Latitude'
+
+    else:
+        # Faixa de longitude, com latitude e nivel fixos: corte ao longo da
+        # longitude, repetido para cada arquivo (tempo).
+        y_vals = np.linspace(lon_min, lon_max, 100)
+        pontos_destino = np.column_stack((y_vals, np.full_like(y_vals, lat_min)))
+        imagem = np.full((len(y_vals), len(dados)), np.nan)
+        for j, d in enumerate(dados):
+            fatia = d["array"][time_sel]
+            dado_nivel = fatia[:, lev] if fatia.ndim > 1 else fatia
+            imagem[:, j] = _interpolar(setup, dado_nivel, pontos_destino)
+        ylabel = 'Longitude'
+
+    imagem = _aplicar_corte(imagem, cut)
+    if np.all(np.isnan(imagem)):
+        print("Aviso: nao ha nenhum valor valido para plotar nesta selecao.")
+        return ax, cbar
+
+    x_num = mdates.date2num(x_vals) if usa_datetime else np.array(x_vals, dtype=float)
+    X = np.tile(x_num.reshape(1, -1), (len(y_vals), 1))
+    Y = np.tile(np.asarray(y_vals).reshape(-1, 1), (1, len(x_num)))
+
+    cs = ax.contourf(X, Y, imagem, levels=_niveis_cor(setup), cmap=cmap)
+    cbar = plt.colorbar(cs, ax=ax, label=label)
+    _aplicar_rotulo_cbar(setup, cbar)
+
+    if usa_datetime:
+        ax.xaxis_date()
+        fig.autofmt_xdate()
+    else:
+        ax.set_xticks(x_num)
+        ax.set_xticklabels(rotulos, rotation=45, ha='right')
+
+    ax.set_xlabel('Tempo')
+    ax.set_ylabel(ylabel)
+    if eixo_pressao and ylabel == 'Pressao (hPa)':
+        ax.invert_yaxis()
+    if Title:
+        ax.set_title(Title)
+
+    return ax, cbar
+
+def plot_serie_mapa(setup, var_name, dados, cbar=None):
+    """
+    Comando 'd <variavel>' (mapa horizontal - nem latitude nem longitude
+    fixadas num ponto unico) com o intervalo de arquivos definido por
+    'set t <arquivo_inicial> <arquivo_final>' (mais de um arquivo aberto):
+    em vez de um unico grafico, ANIMA a plotagem, transitando de um
+    arquivo (tempo) para o proximo, reaproveitando a mesma janela/eixo 2D,
+    a cada 'set tint <segundos>' (padrao: 1 segundo). Ao final, fica
+    visivel o ultimo quadro (o timestamp de cada arquivo aparece anexado
+    ao titulo do grafico, quadro a quadro).
+    """
+    _ativar_figura_2d(setup)
+    ax = plt.gca()
+    fig = ax.get_figure()
+    intervalo = setup.get("tint", 1.0)
+    Title_base = setup.get("title") or ""
+
+    for d in dados:
+        if cbar is not None:
+            try:
+                cbar.remove()
+            except Exception:
+                pass
+            cbar = None
+        ax.cla()
+        rotulo_tempo = d.get("DataDado") or "arquivo {0}".format(d["index"])
+        setup["title"] = (Title_base + "  [" + str(rotulo_tempo) + "]").strip()
+        ax, cbar = plot_var(setup, d["array"], cbar)
+        try:
+            fig.canvas.draw_idle()
+            plt.pause(max(float(intervalo), 0.001))
+        except Exception:
+            pass
+
+    setup["title"] = Title_base
+    return ax, cbar
+
+def plot_serie_mapa_3d(setup, var_name, dados):
+    """
+    Comando 'd3 <variavel>' com o intervalo de arquivos definido por
+    'set t <arquivo_inicial> <arquivo_final>' (mais de um arquivo aberto):
+    anima a plotagem 3D, transitando de um arquivo (tempo) para o proximo
+    na mesma janela 3D, a cada 'set tint <segundos>' (padrao: 1 segundo).
+    As faixas de lat/lon/lev continuam exigidas (regra normal do 'd3' -
+    ver plot_var_3d), a cada quadro.
+    """
+    intervalo = setup.get("tint", 1.0)
+    Title_base = setup.get("title") or ""
+    resultado = None
+
+    for d in dados:
+        fig3d = setup.get("fig3d")
+        if fig3d is not None and plt.fignum_exists(fig3d.number):
+            # Limpa a janela 3D inteira (inclusive barra de cores do quadro
+            # anterior) e recria o eixo, para nao empilhar um quadro sobre
+            # o outro - mesma logica usada por clear_plots() para o 'c'.
+            fig3d.clf()
+            setup["ax3d"] = fig3d.add_subplot(111, projection='3d')
+
+        rotulo_tempo = d.get("DataDado") or "arquivo {0}".format(d["index"])
+        setup["title"] = (Title_base + "  [" + str(rotulo_tempo) + "]").strip()
+        resultado = plot_var_3d(setup, d["array"])
+
+        try:
+            fig3d = setup.get("fig3d")
+            if fig3d is not None:
+                fig3d.canvas.draw_idle()
+            plt.pause(max(float(intervalo), 0.001))
+        except Exception:
+            pass
+
+    setup["title"] = Title_base
+    return resultado
+
+def plot_serie(setup, var_name, dados, cbar=None):
+    """
+    Despachante do modo de serie temporal entre arquivos ('d <variavel>'
+    com 'set t <arquivo_inicial> <arquivo_final>', mais de um arquivo
+    aberto): se nem latitude nem longitude estiverem fixadas num ponto
+    unico (mapa horizontal completo), anima a plotagem no tempo
+    (plot_serie_mapa); caso contrario (ponto unico, ou uma faixa de
+    lat/lon/nivel), usa o grafico de linha ou o diagrama tipo Hovmoller
+    (plot_serie_temporal).
+    """
+    lat_min = setup["lat_min"]
+    lat_max = setup["lat_max"]
+    lon_min = setup["lon_min"]
+    lon_max = setup["lon_max"]
+
+    if lat_min != lat_max and lon_min != lon_max:
+        return plot_serie_mapa(setup, var_name, dados, cbar)
+
+    return plot_serie_temporal(setup, var_name, dados, cbar)

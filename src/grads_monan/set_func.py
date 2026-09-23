@@ -195,7 +195,41 @@ def _cmd_set_dispatch(cmd_split, setup, cmd_user):
         setup["clevs"] = [float(x) for x in levs_in]
         return setup
     elif cmd_split[1] == "time" or cmd_split[1] == "t":
-        setup["time_sel"] = int(cmd_split[2])
+        # 'set t <n>' (ou 'set time <n>'): indice de tempo unico, dentro do
+        # arquivo (comportamento classico, inalterado).
+        # 'set t <inicio> <fim>': quando ha mais de um arquivo aberto (ver
+        # 'open', secao 2.1 do manual), seleciona um INTERVALO DE ARQUIVOS
+        # (pelo indice de abertura, 1, 2, 3...) para plotar como serie
+        # temporal (ver plot_serie_temporal em plot_func.py).
+        if len(cmd_split) == 3:
+            setup["time_sel"] = int(cmd_split[2])
+            return setup
+        elif len(cmd_split) == 4:
+            i1 = int(cmd_split[2])
+            i2 = int(cmd_split[3])
+            arquivos = setup.get("files") or []
+            if arquivos:
+                n = len(arquivos)
+                if i1 < 1 or i1 > n or i2 < 1 or i2 > n:
+                    print("Arquivos abertos vao de 1 a {0}.".format(n))
+                    return setup
+            if i1 > i2:
+                print("Erro: o arquivo inicial ({0}) nao pode ser maior que o final ({1}).".format(i1, i2))
+                return setup
+            setup["time_ini"] = i1
+            setup["time_fim"] = i2
+            return setup
+        else:
+            print("Uso: set t <indice>  ou  set t <arquivo_inicial> <arquivo_final>")
+            return setup
+    elif cmd_split[1] == "tint":
+        # Intervalo (em segundos) entre quadros na animacao da serie
+        # temporal entre arquivos (ver 'set t <ini> <fim>' e 'd'/'d3').
+        x = float(cmd_split[2])
+        if x <= 0:
+            print("Erro: o intervalo (set tint) deve ser um numero positivo de segundos.")
+            return setup
+        setup["tint"] = x
         return setup
     elif cmd_split[1] == "mark":
         setup["xmark"].append(float(cmd_split[2]))
