@@ -31,8 +31,8 @@ executados com `run <arquivo>`.
 
 | Comando | Descrição |
 |---|---|
-| `open <arquivo.nc> [grade.nc]` | Abre um arquivo NetCDF de saída do MONAN/MPAS. O segundo argumento (opcional) é um arquivo de grade externo — necessário quando o arquivo de dados não traz `latCell`/`lonCell`/`nCells` embutidos. Ver seção 10 para o detalhe de cada caso. Qualquer falha avisa e **mantém a sessão anterior**, sem encerrar o programa. |
-| `reinit` | Fecha o arquivo aberto, apaga toda a configuração associada a ele (inclusive os caches de triangulação em memória) e volta ao estado inicial. Também limpa a janela de gráficos. |
+| `open <arquivo.nc> [grade.nc]` | Abre um arquivo NetCDF de saída do MONAN/MPAS. Pode ser chamado **mais de uma vez na mesma sessão**, para trabalhar com vários arquivos ao mesmo tempo — ver seção 2.1. O segundo argumento (opcional) é um arquivo de grade externo — necessário quando o arquivo de dados não traz `latCell`/`lonCell`/`nCells` embutidos. Ver seção 10 para o detalhe de cada caso. Qualquer falha (inclusive um arquivo com malha diferente da já aberta) avisa e **mantém a sessão anterior intacta**, sem encerrar o programa. |
+| `reinit` | Fecha **todos** os arquivos abertos na sessão, apaga toda a configuração associada a eles (inclusive os caches de triangulação em memória) e volta ao estado inicial, pronto para um novo `open`. Também limpa a janela de gráficos. |
 | `run <script>` | Executa, em sequência, os comandos contidos no arquivo de script informado (um comando por linha). |
 | `c` | Limpa o gráfico ativo no momento. Se o `d3` foi o último a plotar, limpa a **janela 3D** (recriando o eixo); se foi o `d`, limpa a janela 2D (só o painel atual, se `set pages` estiver ativo). |
 | `gxprint <arquivo_saida>` | Salva a figura atual em disco (PNG, PDF, etc.), usando `fig_dpi`/`fig_inches`/`fig_transparency` do `setup`. |
@@ -49,18 +49,90 @@ exige um arquivo aberto; sem isso, o programa avisa e volta ao prompt.
 
 ---
 
+## 2.1 Abrindo mais de um arquivo (`open`, `show files`, sufixo `.N`)
+
+O `open` pode ser chamado várias vezes na mesma sessão, para trabalhar com
+mais de um arquivo ao mesmo tempo (por exemplo, comparar dois horários de
+previsão, ou dois membros de um ensemble):
+
+```
+> open SP_O_2022071400_2022071400.00.00.x40962L55.nc
+> open SP_O_2022071400_2022071412.00.00.x40962L55.nc
+> show files
+Num  Arquivo                                        Timestamp
+---------------------------------------------------------------
+1    SP_O_2022071400_2022071400.00.00.x40962L55.nc   2022-07-14T00
+2    SP_O_2022071400_2022071412.00.00.x40962L55.nc    2022-07-14T12
+```
+
+- O primeiro `open` bem-sucedido da sessão vira o **arquivo 1**; cada `open`
+  seguinte que for aceito vira o próximo número em sequência (2, 3, ...).
+- **Mesma malha é obrigatória**: um novo arquivo só é aceito se tiver
+  exatamente a mesma malha (mesmo número de células e mesmas coordenadas
+  `latCell`/`lonCell`) do(s) arquivo(s) já aberto(s) — a mesma técnica de
+  assinatura (nº de células + hash) usada no cache de Delaunay (seção 10.2).
+  Se a malha for diferente, o `open` é **rejeitado**, com uma mensagem de
+  erro, e a sessão anterior (com todos os arquivos já abertos e as
+  configurações feitas até então) permanece **intacta**. Para trocar de
+  malha, rode `reinit` primeiro.
+- `show files` (ver também seção 5) lista, em forma de tabela, todos os
+  arquivos abertos na sessão: número, nome do arquivo e o timestamp
+  (data/hora), quando disponível — "desconhecida" caso contrário.
+- Abrir um novo arquivo **não reseta** as configurações já feitas na sessão
+  (`set lev`, `set gxout`, `title`, etc.) — elas continuam valendo; só o(s)
+  arquivo(s) adicional(is) entram na lista.
+- `reinit` fecha todos os arquivos abertos e reinicia a sessão do zero.
+
+### Referenciando o arquivo de uma variável (sufixo `.N`)
+
+Em qualquer lugar onde uma variável é referenciada para plotagem — `d`/
+`display`, `d3`, `mag(...)`, a forma vetorial `<u>;<v>`, ou dentro de uma
+expressão aritmética — ela pode trazer um sufixo `.N` indicando de qual
+arquivo aberto ler:
+
+```
+> d t2m         (sem sufixo -> le do arquivo 1)
+> d t2m.1       (equivalente ao de cima, arquivo 1 explicito)
+> d t2m.2       (le a variavel t2m do arquivo 2)
+```
+
+Isso permite comparar diretamente dois arquivos numa mesma expressão
+aritmética — por exemplo, a diferença entre os dois horários abertos:
+
+```
+> d (t2m.2 - t2m.1)
+```
+
+e também funciona com `mag(...)` e com a forma vetorial `u;v`:
+
+```
+> d mag(u10.2,v10.2)
+> d u10.1;v10.1
+> d3 t2m.2
+```
+
+Se o número do arquivo referenciado não estiver aberto, ou a variável não
+existir naquele arquivo, o programa avisa (com sugestões por similaridade,
+quando aplicável) e **não trava** — nem interrompe a sessão.
+
+---
+
 ## 3. Sintaxe do comando `d` / `display` (2D)
 
 | Forma | Efeito |
 |---|---|
 | `d <variavel>` | Plota a variável diretamente do arquivo (mapa, corte vertical ou perfil, dependendo de `lat`/`lon`/`lev` selecionados — ver seção 8). |
-| `d (<expressão>)` | Avalia uma expressão aritmética (`+ - * / **` e parênteses) substituindo os nomes de variáveis do arquivo, e plota o resultado. Ex.: `d (t2m - 273.15)`. Avaliação restrita (sem acesso a funções do Python) — variáveis não encontradas são reportadas com sugestões. |
+| `d (<expressão>)` | Avalia uma expressão aritmética (`+ - * / **` e parênteses) substituindo os nomes de variáveis do arquivo, e plota o resultado. Ex.: `d (t2m - 273.15)`, ou cruzando arquivos: `d (t2m.2 - t2m.1)`. Avaliação restrita (sem acesso a funções do Python) — variáveis/arquivos não encontrados são reportados com sugestões. |
 | `d mag(<var_u>,<var_v>)` (ou `d mag <var_u> <var_v>`) | Calcula a magnitude `sqrt(u²+v²)` das duas variáveis e a trata como uma variável escalar comum: obedece `shaded`/`contour`/`voronoi`, corte vertical e perfil. |
 | `d <var_u>;<var_v>` | Plotagem de **vento**: sempre desenha vetores/streamlines/barbelas (conforme `set gxout`), nunca `shaded`/`contour`. Não limpa a figura — sobrepõe a um campo escalar já plotado. |
 
 Em qualquer forma:
-- variável não encontrada → sugestões por similaridade, sem travar;
-- número de pontos da variável diferente do número de pontos da malha aberta → aviso claro (seção 10.2), sem travar.
+- cada nome de variável pode trazer o sufixo `.N` apontando para o
+  N-ésimo arquivo aberto (seção 2.1); sem sufixo, assume o arquivo 1;
+- variável (ou arquivo `.N`) não encontrado → sugestões/mensagem clara por
+  similaridade, sem travar;
+- número de pontos da variável diferente do número de pontos da malha
+  aberta → aviso claro (seção 10.2), sem travar.
 
 ---
 
@@ -69,6 +141,10 @@ Em qualquer forma:
 ```
 d3 <variavel>
 ```
+
+Assim como no `d`/`display`, `<variavel>` aceita o sufixo `.N` (seção 2.1)
+para escolher de qual arquivo aberto ler — ex.: `d3 t2m.2`. Sem sufixo,
+assume o arquivo 1.
 
 Exige **faixas reais** (não pontos únicos) nas três dimensões:
 
@@ -113,7 +189,8 @@ globais muito amplos.
 
 | Opção | Mostra |
 |---|---|
-| `show info` | Nome do arquivo NetCDF (e da grade, se houver), dimensões e a lista completa de variáveis, com nº de níveis, descrição e unidade. |
+| `show info` | Nome do arquivo NetCDF (e da grade, se houver), dimensões e a lista completa de variáveis, com nº de níveis, descrição e unidade — sempre referente ao **arquivo 1**. Se houver mais de um arquivo aberto, avisa e aponta para `show files`. |
+| `show files` | Tabela com todos os arquivos abertos na sessão: número, nome do arquivo e timestamp (data/hora, quando disponível) — ver seção 2.1. Se nenhum arquivo estiver aberto, informa isso. |
 | `show latitudes` / `show longitudes` | Lista de coordenadas da malha, ordenada. |
 | `show levels` | Lista de níveis (pressão em hPa, ou índice de nível). |
 | `show lev` | Nível/intervalo de nível atualmente selecionado. |
@@ -305,8 +382,10 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 
 | Chave | Conteúdo |
 |---|---|
-| `openFile` / `openFileName` / `gridFileName` | Se há arquivo aberto; caminho do arquivo de dados; caminho do arquivo de grade usado (ou `None` se embutido no arquivo de dados). |
-| `variables` | Referência a `dataset.variables`. |
+| `openFile` / `openFileName` / `gridFileName` | Se há arquivo aberto; caminho do arquivo de dados; caminho do arquivo de grade usado (ou `None` se embutido no arquivo de dados) — sempre referentes ao **arquivo 1** (seção 2.1). |
+| `variables` | Referência a `dataset.variables` do **arquivo 1**. |
+| `files` | Lista com um registro por arquivo aberto na sessão (índice, nome do arquivo, arquivo de grade, `dataset`, informações de tempo) — ver seção 2.1. |
+| `_malha_assinatura` | Assinatura (nº de células + hash `md5` de lat/lon) da malha da sessão, usada para validar que um novo `open` tem a mesma grade (uso interno — seção 2.1). |
 | `latitudes` / `longitudes` | Coordenadas de cada célula da malha (graus, longitude normalizada). |
 | `levels` / `eixo_pressao` | Lista de níveis; se representam pressão (`True`) ou índice de modelo (`False`). |
 | `lat_min`, `lat_max`, `lon_min`, `lon_max` | Domínio geográfico selecionado. |
@@ -336,11 +415,12 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 ### `exec_func.py`
 - `exec_cmd(...)` — despachante central de todos os comandos do prompt.
 - `run_file(...)` — executa um script de comandos linha a linha.
-- `_var_not_found(dataset, varname)` — mensagem de variável não encontrada, com sugestões (`difflib`).
-- `_avaliar_expressao(dataset, expr)` — avaliador seguro de expressões aritméticas (`d (expr)`).
+- `_resolver_variavel(setup, token)` — resolve um token de variável com sufixo opcional `.N` (seção 2.1): localiza o arquivo aberto correspondente e a variável nele, com mensagens de erro/sugestões (`difflib`) quando o arquivo não está aberto ou a variável não existe.
+- `_arquivo_por_indice(setup, indice)` — retorna o registro do arquivo aberto com aquele índice, ou `None`.
+- `_avaliar_expressao(setup, expr)` — avaliador seguro de expressões aritméticas (`d (expr)`), agora resolvendo cada variável via `_resolver_variavel` — aceita sufixos `.N` e expressões cruzando arquivos, ex. `t2m.2 - t2m.1`.
 
 ### `files_nc.py`
-- `file_open(fileName, setup_toml, gridFile=None)` — abre o arquivo (e a grade, se necessária), monta o `setup`. Resiliente à ausência de `nCells`, malha, `xtime`/`initial_time`, `t_iso_levels`. Retorna `(None, None)` em falha irrecuperável.
+- `file_open(fileName, setup_toml, gridFile=None, setup_anterior=None)` — abre o arquivo (e a grade, se necessária). Se `setup_anterior` for passado (já há um arquivo aberto na sessão), valida a malha do novo arquivo contra a assinatura já registrada (seção 2.1): rejeita com `(None, None)` se forem diferentes (preservando `setup_anterior` intacto), ou adiciona o novo arquivo a `setup["files"]` com o próximo índice sequencial, se forem iguais. Sem `setup_anterior` (primeiro `open`), monta o `setup` do zero, como antes. Resiliente à ausência de `nCells`, malha, `xtime`/`initial_time`, `t_iso_levels`.
 
 ### `set_func.py`
 - `cmd_set(...)` / `_cmd_set_dispatch(...)` — comando `set` (tabela da seção 6), com validação numérica segura.
@@ -348,6 +428,7 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 
 ### `show_func.py`
 - `cmd_show(setup, cmd_split)` / `_mostrar_info_arquivo(setup)` — comando `show` (tabela da seção 5).
+- `_mostrar_arquivos(setup)` — `show files`: tabela com os arquivos abertos na sessão (seção 2.1).
 - `show_legend()` — `draw legend`.
 
 ### `draw_func.py`
@@ -390,6 +471,7 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 - `normalize_lon(lon)` — normaliza longitude para (-180, 180].
 - `mag(u, v)` — magnitude vetorial.
 - `sem_mascara(arr)` — converte array mascarado do `netCDF4` (`numpy.ma.MaskedArray`) para array comum com `NaN`, evitando que `scipy`/`Delaunay`/`cKDTree` rejeitem o dado.
+- `assinatura_malha(latitudes, longitudes)` — nº de células + hash `md5` de lat/lon, usada para validar que arquivos abertos na mesma sessão compartilham a mesma malha (seção 2.1).
 - `load_zgrid_centers(...)` — extrai e alinha a variável `zgrid`.
 - `encontrar_posicao_mais_proxima(...)` — busca binária.
 - `custom_input()` / `load_history` / `save_command_to_history` — prompt com histórico.
