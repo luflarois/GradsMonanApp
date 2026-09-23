@@ -55,6 +55,35 @@ def _mostrar_info_arquivo(setup):
 
         print("  {0} - niveis: {1} - {2}".format(vname, n_niveis_var, texto))
 
+    arquivos = setup.get("files") or []
+    if len(arquivos) > 1:
+        print("")
+        print("Ha {0} arquivos abertos nesta sessao. Use 'show files' para ve-los.".format(len(arquivos)))
+
+def _mostrar_arquivos(setup):
+    """
+    Comando 'show files': mostra uma tabela com os arquivos abertos na
+    sessao (numero, nome do arquivo e timestamp, quando disponivel).
+    """
+    arquivos = setup.get("files") or []
+    if not arquivos:
+        print("Nenhum arquivo aberto.")
+        return
+
+    cab_num, cab_nome, cab_tempo = "Num", "Arquivo", "Timestamp"
+    largura_num = max(len(cab_num), max(len(str(info["index"])) for info in arquivos))
+    largura_nome = max(len(cab_nome), max(len(info["fileName"]) for info in arquivos))
+    largura_tempo = max(len(cab_tempo), max(len(str(info.get("DataDado") or "desconhecida")) for info in arquivos))
+
+    linha_fmt = "{0:<{w0}}  {1:<{w1}}  {2:<{w2}}"
+    cabecalho = linha_fmt.format(cab_num, cab_nome, cab_tempo, w0=largura_num, w1=largura_nome, w2=largura_tempo)
+    print(cabecalho)
+    print("-" * len(cabecalho))
+    for info in arquivos:
+        timestamp = info.get("DataDado") or "desconhecida"
+        print(linha_fmt.format(info["index"], info["fileName"], timestamp,
+                                w0=largura_num, w1=largura_nome, w2=largura_tempo))
+
 def cmd_show(setup, cmd_split):
     latitudes = setup["latitudes"]
     longitudes = setup["longitudes"]
@@ -65,6 +94,9 @@ def cmd_show(setup, cmd_split):
 
     if cmd_split[1] == "info":
         _mostrar_info_arquivo(setup)
+        return
+    if cmd_split[1] == "files":
+        _mostrar_arquivos(setup)
         return
     if cmd_split[1] == "latitudes":
         lat = sorted(latitudes)

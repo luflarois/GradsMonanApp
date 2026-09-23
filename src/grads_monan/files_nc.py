@@ -11,9 +11,9 @@ import os
 import numpy as np
 from netCDF4 import Dataset
 from .plot_func import set_ion, set_window_title
-from .utils import normalize_lon, sem_mascara
+from .utils import normalize_lon, sem_mascara, assinatura_malha
 
-def file_open(fileName, setup_toml, gridFile=None):
+def file_open(fileName, setup_toml, gridFile=None, setup_anterior=None):
 
     caminho_do_arquivo = os.path.dirname(fileName)
     if os.path.exists(fileName):
@@ -140,6 +140,48 @@ def file_open(fileName, setup_toml, gridFile=None):
                 print("Nenhuma dimensao vertical identificada. Assumindo nivel unico (dado 2D).")
             eixo_pressao = False
 
+        malha_atual = assinatura_malha(latitudes, longitudes)
+
+        if setup_anterior is not None and setup_anterior.get("openFile"):
+            malha_anterior = setup_anterior.get("_malha_assinatura")
+            if malha_anterior is not None and malha_anterior != malha_atual:
+                print("Erro: o arquivo '{0}' tem uma malha diferente do(s) arquivo(s) ja aberto(s) nesta sessao.".format(fileName))
+                print("Nao e possivel abrir arquivos com grades diferentes na mesma sessao.")
+                print("Use 'reinit' se quiser comecar uma nova sessao com outra grade.")
+                try:
+                    dataset.close()
+                except Exception:
+                    pass
+                if mesh is not dataset:
+                    try:
+                        mesh.close()
+                    except Exception:
+                        pass
+                return None, None
+
+            setup = setup_anterior
+            novo_indice = len(setup.get("files", [])) + 1
+
+            set_ion()
+            set_window_title(os.path.basename(fileName))
+
+            file_info = {
+                "index"        : novo_indice,
+                "fileName"     : fileName,
+                "gridFileName" : (None if new_file == fileName else new_file),
+                "dataset"      : dataset,
+                "time"         : time,
+                "time_variable": time_variable,
+                "time_units"   : time_units,
+                "time_str"     : time_str,
+                "DataDado"     : DataDado,
+            }
+            setup["files"].append(file_info)
+
+            return dataset, setup
+
+        novo_indice = 1
+
         setup = {"xmark"           : setup_toml["xmark"],
                  "ymark"           : setup_toml["ymark"],
                  "colormark"       : setup_toml["colormark"],
@@ -188,14 +230,29 @@ def file_open(fileName, setup_toml, gridFile=None):
                  "page_row"        : 1,
                  "page_col"        : 1,
                  "cut"             : None,
-                 "variables"       :variables}
+                 "variables"       :variables,
+                 "_malha_assinatura": malha_atual,
+                 "files"           : []}
 
         set_ion()
         set_window_title(os.path.basename(fileName))
+
+        file_info = {
+            "index"        : novo_indice,
+            "fileName"     : fileName,
+            "gridFileName" : (None if new_file == fileName else new_file),
+            "dataset"      : dataset,
+            "time"         : time,
+            "time_variable": time_variable,
+            "time_units"   : time_units,
+            "time_str"     : time_str,
+            "DataDado"     : DataDado,
+        }
+        setup["files"].append(file_info)
     else:
         dataset = None
         print(f"O arquivo {fileName} não foi encontrado.")
-        print("Verifique o caminho ou o arquivo!")   
+        print("Verifique o caminho ou o arquivo!")
         return None, None
 
     return dataset,setup

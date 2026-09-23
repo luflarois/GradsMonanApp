@@ -8,6 +8,7 @@
 """ This script plot data from NetCDF data generated From MONAN MODEL"""  
 # ---------------------------------------------------------------------------
 import bisect
+import hashlib
 import numpy as np
 import readline
 import os
@@ -54,6 +55,19 @@ def sem_mascara(arr):
 
 def normalize_lon(lon):
     return ((lon + 180) % 360) - 180
+
+def assinatura_malha(latitudes, longitudes):
+    """
+    Assinatura curta (numero de celulas + hash md5) que identifica as
+    caracteristicas de uma malha (coordenadas lat/lon de cada celula).
+    Usada para conferir se dois arquivos abertos na mesma sessao
+    compartilham a mesma grade.
+    """
+    lons = np.asarray(longitudes)
+    lats = np.asarray(latitudes)
+    n_cells = len(lons)
+    resumo = hashlib.md5(lons.tobytes() + lats.tobytes()).hexdigest()
+    return n_cells, resumo
 
 def mag(u,v):
     return np.sqrt(u**2+v**2)
