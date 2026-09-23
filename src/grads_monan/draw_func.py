@@ -84,14 +84,29 @@ def draw_mark(cmd_split):
 #     ax.set_ylabel()
 
 def draw_label(setup,cbar,lbl):
-    # Se ainda nao existe uma barra de cores de verdade (ex: 'draw label'
-    # chamado antes de qualquer 'd'/'display' - 'cbar' ainda vale o inteiro
-    # inicial 0 de cli.py), nao ha o que estilizar agora: o texto ja foi
-    # guardado em setup['cbar_label'] por quem chamou (ver exec_func.py) e
-    # sera aplicado automaticamente assim que a primeira colorbar for
-    # criada (ver _aplicar_rotulo_cbar em plot_func.py).
+    """
+    Comando 'draw label <texto>': define o rotulo da barra de cores
+    (colorbar) do grafico atual. O texto (com o tamanho/peso de fonte de
+    'set label_fs'/'set label_fw') fica guardado em setup['cbar_label']
+    (ver exec_func.py) e e reaplicado automaticamente TODA vez que uma
+    barra de cores for (re)criada - inclusive quadro a quadro numa
+    animacao de mapa (plot_serie_mapa), onde a colorbar e recriada a cada
+    frame - ver _aplicar_rotulo_cbar em plot_func.py.
+    """
+    # Se ja existe uma barra de cores de verdade no grafico atual, escreve
+    # o rotulo nela imediatamente (e forca o redesenho, para o texto
+    # aparecer na hora, sem precisar de um novo 'd'). Se ainda nao existe
+    # (ex: 'draw label' chamado antes de qualquer 'd'/'display' - 'cbar'
+    # ainda vale o inteiro inicial 0 de cli.py), nao ha o que escrever
+    # agora; o texto ja guardado entra em vigor sozinho assim que a
+    # primeira colorbar for criada.
     if not hasattr(cbar, "set_label"):
+        print("Rotulo da barra de cores guardado: sera aplicado automaticamente no proximo grafico com barra de cores.")
         return
     cbar.set_label(lbl, fontsize=setup["label_fontsize"], fontweight=setup["label_fontweight"])
+    try:
+        cbar.ax.figure.canvas.draw_idle()
+    except Exception:
+        pass
 
 

@@ -134,10 +134,19 @@ Com mais de um arquivo aberto, `set t <arquivo_inicial> <arquivo_final>`
 (ou `set time <arquivo_inicial> <arquivo_final>`) seleciona um **intervalo
 de arquivos** pelo número de abertura (não um índice de tempo dentro de um
 arquivo — isso continua sendo `set t <indice>`, com um único argumento).
-A partir daí, `d <variavel>` (ou `d3 <variavel>`) — na forma simples, sem
-`mag(...)`, sem `<u>;<v>` e sem expressão aritmética — passa a considerar
-todos os arquivos do intervalo, em vez de um só. O que ele plota depende
-de `set lat`/`set lon`/`set lev`:
+A partir daí, `d <variavel>` (ou `d3 <variavel>`) — em forma simples ou
+como **expressão aritmética** (mas ainda sem `mag(...)` nem `<u>;<v>`) —
+passa a considerar todos os arquivos do intervalo, em vez de um só. O que
+ele plota depende de `set lat`/`set lon`/`set lev`:
+
+```
+> open SP_O_2022071400_20220714*.nc
+> set t 1 24
+> set lat -22
+> set lon -55
+> set lev 0
+> d t2m-273.15
+```
 
 | Seleção de lat/lon/nível | Resultado de `d <variavel>` |
 |---|---|
@@ -154,20 +163,68 @@ plota o quadro de cada arquivo do intervalo, em sequência, na mesma janela
 `set tint <segundos>` define o intervalo, em segundos, entre os quadros da
 animação (`d`/`d3` no modo mapa/3D acima). Padrão: 1 segundo. Fica
 guardado no `setup` da sessão (seção 11), valendo para toda animação
-seguinte até ser trocado.
+seguinte até ser trocado. Exemplo:
 
-Um sufixo `.N` na variável (`d t2m.2`, por exemplo) é **ignorado** nesse
-modo, com um aviso — o arquivo já vem do intervalo de `set t`.
+```
+> set tint 0.5
+> d t2m
+```
 
-**Mapa de fundo e níveis de cor entre quadros/plots**: `set clevs` (faixas
-de cor fixas) já vale automaticamente para qualquer plot seguinte, animado
-ou não — é uma configuração de sessão como outra qualquer, e não é
-resetada em nenhum momento. O mapa de fundo (`draw map`), por sua vez,
-antes precisava ser chamado de novo a cada plot para continuar visível
-(cada novo `d`/`d3` reaproveita ou limpa o mesmo eixo); agora, `draw map`
-liga um modo persistente (ver tabela da seção 7) que o redesenha
-automaticamente em cima de cada plot seguinte — inclusive quadro a quadro
-na animação — até um `draw map off`.
+Um sufixo `.N` na variável simples (`d t2m.2`, por exemplo) é **ignorado**
+nesse modo, com um aviso — o arquivo já vem do intervalo de `set t`.
+
+### Expressões aritméticas no modo de série temporal
+
+`d <expressão>` também funciona no modo de série temporal — por exemplo,
+para converter unidades ao longo do tempo:
+
+```
+> set t 1 24
+> d t2m-273.15
+> d (t2m - 273.15) * 1.0
+```
+
+Dentro da expressão, cada nome de variável **sem** sufixo `.N` é resolvido
+no arquivo do **próprio quadro** (o arquivo daquele instante da série) —
+não sempre no arquivo 1. Um nome **com** sufixo `.N` explícito continua
+fixo naquele arquivo específico em todos os quadros — útil para calcular
+uma anomalia contra um arquivo de referência:
+
+```
+> d t2m - t2m.1        (anomalia de cada arquivo em relação ao primeiro)
+```
+
+### Título e rótulo da barra de cores entre quadros/plots
+
+**Mapa de fundo e níveis de cor**: `set clevs` (faixas de cor fixas) já
+vale automaticamente para qualquer plot seguinte, animado ou não — é uma
+configuração de sessão como outra qualquer, e não é resetada em nenhum
+momento. O mapa de fundo (`draw map`), por sua vez, antes precisava ser
+chamado de novo a cada plot para continuar visível (cada novo `d`/`d3`
+reaproveita ou limpa o mesmo eixo); agora, `draw map` liga um modo
+persistente (ver tabela da seção 7) que o redesenha automaticamente em
+cima de cada plot seguinte — inclusive quadro a quadro na animação — até
+um `draw map off`.
+
+**Título** (`draw title <texto>`) e **rótulo da barra de cores**
+(`draw label <texto>`), definidos antes de um `d`/`d3`, também ficam
+**preservados** em todo plot seguinte, incluindo quadro a quadro na
+animação (cada eixo é limpo e redesenhado a cada quadro — sem essa
+persistência, o título/rótulo sumiriam depois do primeiro quadro). No caso
+do título, durante a animação o timestamp de cada arquivo é anexado a ele,
+quadro a quadro, voltando ao texto original ao final:
+
+```
+> draw title Temperatura a 2m
+> draw label Temp. (C)
+> set t 1 24
+> d t2m-273.15
+```
+
+Não é preciso que já exista um gráfico para usar `draw title`/`draw
+label`: se chamados antes de qualquer `d`/`d3`, o texto fica guardado e
+passa a valer automaticamente assim que o primeiro gráfico (com barra de
+cores, no caso do `draw label`) for criado.
 
 ---
 
@@ -176,7 +233,7 @@ na animação — até um `draw map off`.
 | Forma | Efeito |
 |---|---|
 | `d <variavel>` | Plota a variável diretamente do arquivo (mapa, corte vertical ou perfil, dependendo de `lat`/`lon`/`lev` selecionados — ver seção 8). |
-| `d (<expressão>)` | Avalia uma expressão aritmética (`+ - * / **` e parênteses) substituindo os nomes de variáveis do arquivo, e plota o resultado. Ex.: `d (t2m - 273.15)`, ou cruzando arquivos: `d (t2m.2 - t2m.1)`. Avaliação restrita (sem acesso a funções do Python) — variáveis/arquivos não encontrados são reportados com sugestões. |
+| `d (<expressão>)` | Avalia uma expressão aritmética (`+ - * / **` e parênteses) substituindo os nomes de variáveis do arquivo, e plota o resultado. Ex.: `d t2m-273.15`, `d (t2m - 273.15)`, ou cruzando arquivos: `d (t2m.2 - t2m.1)`. Avaliação restrita (sem acesso a funções do Python) — variáveis/arquivos não encontrados são reportados com sugestões. Também funciona no modo de série temporal entre arquivos (seção 2.1), onde cada nome sem sufixo `.N` é lido do arquivo do próprio quadro. |
 | `d mag(<var_u>,<var_v>)` (ou `d mag <var_u> <var_v>`) | Calcula a magnitude `sqrt(u²+v²)` das duas variáveis e a trata como uma variável escalar comum: obedece `shaded`/`contour`/`voronoi`, corte vertical e perfil. |
 | `d <var_u>;<var_v>` | Plotagem de **vento**: sempre desenha vetores/streamlines/barbelas (conforme `set gxout`), nunca `shaded`/`contour`. Não limpa a figura — sobrepõe a um campo escalar já plotado. |
 
@@ -299,9 +356,9 @@ faltando avisa e **mantém a configuração anterior**, sem travar.
 | `draw title <texto>` | Define e desenha o título do gráfico. |
 | `draw mark <lat> <lon> <simbolo>` | Desenha um símbolo de marca na coordenada geográfica informada. `simbolo` é um inteiro de 1 a 11 (tabela abaixo). Entradas inválidas avisam sem travar. |
 | `draw legend` | Mostra a legenda do gráfico atual. |
-| `draw map` | Desenha o mapa de fundo e **liga** o modo "mapa persistente": a partir daqui, o mapa é **redesenhado automaticamente** em todo `d`/`d3` seguinte — inclusive quadro a quadro na animação da série temporal (seção 2.1) — até um `draw map off`. Se a janela **3D** (`d3`) for a ativa no momento, desenha projetado na "superfície" da caixa 3D em vez do comportamento 2D padrão. |
+| `draw map` | Desenha o mapa de fundo e **liga** o modo "mapa persistente": a partir daqui, o mapa é **redesenhado automaticamente** em todo `d`/`d3` seguinte — inclusive quadro a quadro na animação da série temporal (seção 2.1) — até um `draw map off`. Se a janela **3D** (`d3`) for a ativa no momento, desenha projetado na "superfície" da caixa 3D em vez do comportamento 2D padrão. Pode ser chamado antes de qualquer `d`/`d3` (garante sozinho uma janela/eixo 2D válidos). |
 | `draw map off` | Desliga o modo "mapa persistente": os próximos `d`/`d3` (e a animação) deixam de redesenhar o mapa automaticamente. |
-| `draw label <texto>` | Define o rótulo da barra de cores atual. |
+| `draw label <texto>` | Define o rótulo da barra de cores. Se já existe uma barra de cores no gráfico atual, escreve o texto nela **na hora**. O texto também fica guardado na sessão e é **reaplicado automaticamente** toda vez que uma nova barra de cores for criada — inclusive quadro a quadro na animação (seção 2.1), onde a colorbar é recriada a cada quadro — e pode ser chamado mesmo antes de qualquer `d`/`d3` (o texto entra em vigor assim que a primeira barra de cores for criada). |
 
 ### 7.1 Tabela de símbolos (`draw mark`)
 
@@ -446,6 +503,7 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 | `time_ini`, `time_fim` | Intervalo de arquivos (pelo número de abertura) selecionado por `set t <ini> <fim>`, para a série temporal entre arquivos — ver seção 2.1. `None` se ainda não definido. |
 | `tint` | Intervalo, em segundos, entre os quadros da animação da série temporal (`set tint`) — padrão 1.0. |
 | `draw_map_on` | `True` depois de `draw map` (até um `draw map off`): o mapa de fundo é redesenhado automaticamente em todo `d`/`d3` seguinte, inclusive quadro a quadro na animação — ver seção 2.1. |
+| `cbar_label` | Texto definido por `draw label <texto>` (ou `None`/ausente se nunca usado): reaplicado automaticamente toda vez que uma nova barra de cores é criada, inclusive quadro a quadro na animação — ver seção 2.1/7. |
 | `latitudes` / `longitudes` | Coordenadas de cada célula da malha (graus, longitude normalizada). |
 | `levels` / `eixo_pressao` | Lista de níveis; se representam pressão (`True`) ou índice de modelo (`False`). |
 | `lat_min`, `lat_max`, `lon_min`, `lon_max` | Domínio geográfico selecionado. |
@@ -480,6 +538,9 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 - `_avaliar_expressao(setup, expr)` — avaliador seguro de expressões aritméticas (`d (expr)`), agora resolvendo cada variável via `_resolver_variavel` — aceita sufixos `.N` e expressões cruzando arquivos, ex. `t2m.2 - t2m.1`.
 - `_modo_serie_ativo(setup)` — `True` quando `set t <ini> <fim>` está definido e há mais de um arquivo aberto (seção 2.1).
 - `_dados_serie_temporal(setup, nome_var)` — reúne o array de `nome_var` de cada arquivo do intervalo `time_ini`/`time_fim`, com mensagens de erro/sugestões se a variável faltar em algum.
+- `_resolver_variavel_serie(setup, info, token)` — como `_resolver_variavel`, mas para uso dentro do modo de série: um token sem sufixo `.N` resolve para o arquivo do quadro atual (`info`), não sempre o arquivo 1; com sufixo, continua fixo naquele arquivo.
+- `_avaliar_expressao_serie(setup, info, expr)` — como `_avaliar_expressao`, mas usando `_resolver_variavel_serie` (expressões no modo série, ex. `t2m-273.15`).
+- `_dados_serie_temporal_expr(setup, expr)` — como `_dados_serie_temporal`, mas para uma expressão aritmética: avalia `expr` arquivo a arquivo (via `_avaliar_expressao_serie`) dentro do intervalo `time_ini`/`time_fim`.
 
 ### `files_nc.py`
 - `file_open(fileName, setup_toml, gridFile=None, setup_anterior=None)` — abre o arquivo (e a grade, se necessária). Se `setup_anterior` for passado (já há um arquivo aberto na sessão), valida a malha do novo arquivo contra a assinatura já registrada (seção 2.1): rejeita com `(None, None)` se forem diferentes (preservando `setup_anterior` intacto), ou adiciona o novo arquivo a `setup["files"]` com o próximo índice sequencial, se forem iguais. Sem `setup_anterior` (primeiro `open`), monta o `setup` do zero, como antes. Resiliente à ausência de `nCells`, malha, `xtime`/`initial_time`, `t_iso_levels`.
@@ -494,24 +555,28 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 - `show_legend()` — `draw legend`.
 
 ### `draw_func.py`
-- `draw_title`, `draw_map`, `draw_label` — demais subcomandos `draw`.
+- `draw_title(setup)` — `draw title <texto>`: desenha direto no eixo atual (`plt.title`).
+- `draw_map(setup, ax=None)` — `draw map`: garante uma figura/eixo 2D de verdade (via `_ativar_figura_2d`, de `plot_func.py`) antes de desenhar — não depende do `ax` recebido do chamador, que pode ainda ser o inteiro inicial `0` (de `cli.py`) se nenhum `d`/`d3` tiver rodado ainda na sessão. Se a janela 3D estiver ativa, desenha via `plot_map_3d` na superfície da caixa.
+- `draw_label(setup, cbar, lbl)` — `draw label <texto>`: se `cbar` já é uma barra de cores de verdade, aplica o texto na hora (e força o redesenho); senão (nenhum `d`/`d3` rodou ainda), não faz nada aqui — o texto já foi guardado em `setup["cbar_label"]` por quem chamou (`exec_func.py`) e é reaplicado sozinho pela primeira colorbar criada (`_aplicar_rotulo_cbar`, em `plot_func.py`).
 - `draw_mark(cmd_split)` — `draw mark <lat> <lon> <simbolo>` (seção 7.1).
 - `_SIMBOLOS_MARK` — tabela símbolo → `marker`/`fillstyle`.
 
 ### `plot_func.py`
 **Plotagem 2D:**
-- `plot_var(setup, var, cbar=None)` — despacha mapa/corte/perfil (seção 8) e `shaded`/`contour`/`voronoi`. No mapa horizontal, redesenha o mapa de fundo (`plot_map`) automaticamente se `setup["draw_map_on"]` estiver ligado (seção 7/2.1).
-- `plot_perfil`, `plot_corte` — perfil vertical e corte, com hachura em áreas sem dado.
+- `plot_var(setup, var, cbar=None)` — despacha mapa/corte/perfil (seção 8) e `shaded`/`contour`/`voronoi`. No mapa horizontal, redesenha o mapa de fundo (`plot_map`) automaticamente se `setup["draw_map_on"]` estiver ligado (seção 7/2.1), e reaplica título (`_aplicar_titulo`) e rótulo da colorbar (`_aplicar_rotulo_cbar`), se definidos.
+- `plot_perfil`, `plot_corte` — perfil vertical e corte, com hachura em áreas sem dado; `plot_corte` também reaplica o rótulo customizado da colorbar.
 - `plot_voronoi(setup, data)` — rasterização via `cKDTree` (seção 8.1).
-- `plot_wind`, `plot_vector_field`, `plot_barbs`, `plot_streams` — vento (`vect`/`barb`/`stream`); `plot_wind` também redesenha o mapa automaticamente se ligado.
+- `plot_wind`, `plot_vector_field`, `plot_barbs`, `plot_streams` — vento (`vect`/`barb`/`stream`); `plot_wind` também redesenha o mapa e reaplica o título automaticamente se definidos.
 - `plot_marks(setup)` — mecanismo antigo de `set mark` (legado).
+- `_aplicar_titulo(setup, ax)` — desenha/redesenha `setup["title"]` (definido por `draw title`) no eixo, com o estilo de `title_fs`/`title_fw`/`title_color`; chamada em todo plot cujo eixo pode ter sido limpo entre uma chamada e outra (ex.: quadro a quadro na animação de mapa), para o título não se perder.
+- `_aplicar_rotulo_cbar(setup, cbar)` — reaplica `setup["cbar_label"]` (definido por `draw label`) numa colorbar recém-criada, com o tamanho/peso de `label_fontsize`/`label_fontweight`; chamada em toda criação de colorbar (2D e 3D), para o rótulo customizado não se perder quando a colorbar é recriada (ex.: a cada quadro da animação).
 
 **Plotagem 3D:**
-- `plot_var_3d(setup, var)` — `d3` (seção 4): *scatter* ou superfícies empilhadas (`shaded`). Redesenha o mapa (`plot_map_3d`) automaticamente se `setup["draw_map_on"]` estiver ligado.
+- `plot_var_3d(setup, var)` — `d3` (seção 4): *scatter* ou superfícies empilhadas (`shaded`). Redesenha o mapa (`plot_map_3d`) automaticamente se `setup["draw_map_on"]` estiver ligado, e reaplica o rótulo customizado da colorbar (`_aplicar_rotulo_cbar`), se definido.
 
 **Série temporal entre arquivos (seção 2.1):**
 - `plot_serie(setup, var_name, dados, cbar=None)` — despachante de `d <variavel>` no modo de série temporal: decide entre linha/Hovmöller (`plot_serie_temporal`) e animação de mapa (`plot_serie_mapa`).
-- `plot_serie_temporal(setup, var_name, dados, cbar=None)` — linha (ponto único) ou diagrama Hovmöller (uma faixa entre lat/lon/nível).
+- `plot_serie_temporal(setup, var_name, dados, cbar=None)` — linha (ponto único) ou diagrama Hovmöller (uma faixa entre lat/lon/nível); no Hovmöller, também reaplica o rótulo customizado da colorbar.
 - `plot_serie_mapa(setup, var_name, dados, cbar=None)` — animação 2D (mapa completo), quadro a quadro, pausando `tint` segundos entre cada um.
 - `plot_serie_mapa_3d(setup, var_name, dados)` — mesma animação, para `d3`.
 - `_eixo_x_tempo(dados)` / `_formatar_eixo_x_tempo(...)` — monta o eixo X (tempo) a partir do `DataDado` de cada arquivo selecionado (datas reais, ou eixo posicional como recurso).
