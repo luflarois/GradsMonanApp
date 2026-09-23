@@ -327,7 +327,7 @@ faltando avisa e **mantém a configuração anterior**, sem travar.
 | `set lev <n1> <n2>` | Intervalo de níveis (corte vertical, perfil, `d3`). |
 | `set lat <valor>` / `set lat <min> <max>` | Latitude fixa num ponto, ou intervalo (domínio do mapa). |
 | `set lon <valor>` / `set lon <min> <max>` | Longitude fixa num ponto, ou intervalo. |
-| `set gxout <tipo>` | `shaded`/`contour`/`voronoi` (2D, variáveis escalares — também vale `shaded` no `d3`); `vect` (padrão)/`stream`/`barb` (vento, `d u;v` ou `d mag(...)`). |
+| `set gxout <tipo>` | `shaded`/`contour`/`voronoi`/`hex` (2D, variáveis escalares — também vale `shaded` no `d3`); `vect` (padrão)/`stream`/`barb` (vento, `d u;v` ou `d mag(...)`). |
 | `set cut <minimo> <maximo>` | Só plota valores dentro de `[minimo, maximo]`; fora disso fica transparente. Vale para `d` (mapa, corte, perfil) e `d3`. `set cut` sem valores desliga. |
 | `set clevs <v0> <v1> ... <vn>` | Fronteiras exatas dos intervalos de cor/contorno (ex.: `0 100 200 ... 1500`). Usadas em todo tipo de plotagem com barra de cores, inclusive `d3`. Lista vazia volta ao padrão automático (20 níveis). |
 | `set cmap <nome>` | Colormap do matplotlib. |
@@ -394,13 +394,14 @@ No **eixo vertical** do corte/perfil (e no eixo Z do `d3`):
 Áreas sem dado válido (corte/superfície abaixo da topografia) aparecem
 **hachuradas** no corte vertical 2D.
 
-### 8.1 Os três modos de `gxout` para mapa 2D
+### 8.1 Os quatro modos de `gxout` para mapa 2D
 
 | `gxout` | Como funciona | Quando usar |
 |---|---|---|
 | `shaded` | Interpola para uma **grade regular** (reaproveitando a triangulação de Delaunay em cache) e usa `contourf` de grade regular. | Campo suave, contínuo. Rápido mesmo em malhas grandes graças ao cache (seção 9). |
 | `contour` | Igual ao `shaded`, mas com `contour` (linhas + rótulos) em vez de preenchido. | Mesma ideia, isolinhas. |
-| `voronoi` | **Rasteriza** o diagrama de Voronoi de verdade: pra cada pixel da imagem, usa o valor da célula mais próxima (via `cKDTree`), sem interpolar. Matematicamente exato — mostra o valor real de cada célula, sem suavização. | Quando quer ver os dados "crus", célula por célula, sem nenhuma interpolação. |
+| `voronoi` | **Rasteriza** o diagrama de Voronoi por aproximação: para cada pixel da imagem, usa o valor da célula mais próxima (via `cKDTree`), sem interpolar. Mostra o valor real de cada célula, sem suavização — mas visualmente sai como "pixels" quadrados, não a forma real da célula. | Quando quer ver os dados "crus", célula por célula, e a malha for grande o suficiente para o modo `hex` (abaixo) ficar pesado. |
+| `hex` | Desenha o **polígono real** de cada célula — o hexágono/pentágono de verdade da malha MPAS/MONAN (pentágonos aparecem nos poucos defeitos topológicos inevitáveis de qualquer malha icosaédrica/Voronoi) — usando a conectividade completa do arquivo de grade (`verticesOnCell`/`nEdgesOnCell`/`latVertex`/`lonVertex`). Exemplo: `set gxout hex` seguido de `d t2m`. Em domínios de área limitada, as células da borda saem automaticamente com o tamanho/formato real (tipicamente diferente das internas) — a geometria vem direto dos vértices do próprio arquivo, sem nenhum tratamento especial de borda. Precisa da conectividade completa; sem ela, avisa e sugere `voronoi`. Mais fiel que `voronoi`, porém mais pesado (constrói e desenha um polígono por célula) — recomendado para domínios regionais ou malhas de porte pequeno/médio; em malhas globais muito grandes (milhões de células), prefira `shaded`/`contour`/`voronoi`. |
 
 ---
 
@@ -514,6 +515,8 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 | `fig2d`, `fig3d`, `ax3d` | Referências às figuras/eixo ativos de `d` e `d3` (uso interno). |
 | `_delaunay_malha` | Triangulação de Delaunay em cache de memória (uso interno — seção 10). |
 | `_arvore_celulas` | Árvore `cKDTree` em cache de memória, para `gxout voronoi` (uso interno). |
+| `_malha_dataset` | Referência ao `dataset` do arquivo de grade (embutido ou externo) usado para extrair `latCell`/`lonCell` do arquivo 1 — reaproveitado para ler `verticesOnCell`/`nEdgesOnCell`/`latVertex`/`lonVertex` sob demanda, quando `gxout hex` é usado (uso interno — seção 8.1). |
+| `_poligonos_celulas` | Lista com o polígono (lon/lat) de cada célula, para `gxout hex`, em cache de memória — ou `None` se o arquivo de grade não tiver a conectividade completa (uso interno). |
 
 ---
 
@@ -543,7 +546,7 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 - `_dados_serie_temporal_expr(setup, expr)` — como `_dados_serie_temporal`, mas para uma expressão aritmética: avalia `expr` arquivo a arquivo (via `_avaliar_expressao_serie`) dentro do intervalo `time_ini`/`time_fim`.
 
 ### `files_nc.py`
-- `file_open(fileName, setup_toml, gridFile=None, setup_anterior=None)` — abre o arquivo (e a grade, se necessária). Se `setup_anterior` for passado (já há um arquivo aberto na sessão), valida a malha do novo arquivo contra a assinatura já registrada (seção 2.1): rejeita com `(None, None)` se forem diferentes (preservando `setup_anterior` intacto), ou adiciona o novo arquivo a `setup["files"]` com o próximo índice sequencial, se forem iguais. Sem `setup_anterior` (primeiro `open`), monta o `setup` do zero, como antes. Resiliente à ausência de `nCells`, malha, `xtime`/`initial_time`, `t_iso_levels`.
+- `file_open(fileName, setup_toml, gridFile=None, setup_anterior=None)` — abre o arquivo (e a grade, se necessária). Se `setup_anterior` for passado (já há um arquivo aberto na sessão), valida a malha do novo arquivo contra a assinatura já registrada (seção 2.1): rejeita com `(None, None)` se forem diferentes (preservando `setup_anterior` intacto), ou adiciona o novo arquivo a `setup["files"]` com o próximo índice sequencial, se forem iguais. Sem `setup_anterior` (primeiro `open`), monta o `setup` do zero, como antes — inclusive guardando a referência ao `dataset` da malha (`setup["_malha_dataset"]`), usada sob demanda por `gxout hex` (seção 8.1) para ler a conectividade completa. Resiliente à ausência de `nCells`, malha, `xtime`/`initial_time`, `t_iso_levels`.
 
 ### `set_func.py`
 - `cmd_set(...)` / `_cmd_set_dispatch(...)` — comando `set` (tabela da seção 6), com validação numérica segura.
@@ -565,7 +568,9 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 **Plotagem 2D:**
 - `plot_var(setup, var, cbar=None)` — despacha mapa/corte/perfil (seção 8) e `shaded`/`contour`/`voronoi`. No mapa horizontal, redesenha o mapa de fundo (`plot_map`) automaticamente se `setup["draw_map_on"]` estiver ligado (seção 7/2.1), e reaplica título (`_aplicar_titulo`) e rótulo da colorbar (`_aplicar_rotulo_cbar`), se definidos.
 - `plot_perfil`, `plot_corte` — perfil vertical e corte, com hachura em áreas sem dado; `plot_corte` também reaplica o rótulo customizado da colorbar.
-- `plot_voronoi(setup, data)` — rasterização via `cKDTree` (seção 8.1).
+- `plot_voronoi(setup, data)` — rasterização por aproximação (nearest-neighbor) via `cKDTree` (seção 8.1, `gxout voronoi`).
+- `plot_hexagonos(setup, data)` — desenha o polígono real de cada célula (`gxout hex`, seção 8.1) via `matplotlib.collections.PolyCollection`; avisa e retorna `None` (sem travar) se a malha não tiver a conectividade completa.
+- `_obter_poligonos_celulas(setup)` — polígonos de cada célula para `gxout hex`, em cache de memória (`setup["_poligonos_celulas"]`); construído uma única vez por sessão via `construir_poligonos_celulas` (utils.py), a partir de `setup["_malha_dataset"]`.
 - `plot_wind`, `plot_vector_field`, `plot_barbs`, `plot_streams` — vento (`vect`/`barb`/`stream`); `plot_wind` também redesenha o mapa e reaplica o título automaticamente se definidos.
 - `plot_marks(setup)` — mecanismo antigo de `set mark` (legado).
 - `_aplicar_titulo(setup, ax)` — desenha/redesenha `setup["title"]` (definido por `draw title`) no eixo, com o estilo de `title_fs`/`title_fw`/`title_color`; chamada em todo plot cujo eixo pode ter sido limpo entre uma chamada e outra (ex.: quadro a quadro na animação de mapa), para o título não se perder.
@@ -606,6 +611,7 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 - `mag(u, v)` — magnitude vetorial.
 - `sem_mascara(arr)` — converte array mascarado do `netCDF4` (`numpy.ma.MaskedArray`) para array comum com `NaN`, evitando que `scipy`/`Delaunay`/`cKDTree` rejeitem o dado.
 - `assinatura_malha(latitudes, longitudes)` — nº de células + hash `md5` de lat/lon, usada para validar que arquivos abertos na mesma sessão compartilham a mesma malha (seção 2.1).
+- `construir_poligonos_celulas(mesh)` — monta o polígono (lon/lat) de cada célula a partir da conectividade completa do arquivo de grade (`verticesOnCell`/`nEdgesOnCell`/`latVertex`/`lonVertex`), incluindo o formato/tamanho real das células de borda em domínios regionais — usado por `gxout hex` (seção 8.1). Retorna `None` se a malha não tiver essa conectividade.
 - `load_zgrid_centers(...)` — extrai e alinha a variável `zgrid`.
 - `encontrar_posicao_mais_proxima(...)` — busca binária.
 - `custom_input()` / `load_history` / `save_command_to_history` — prompt com histórico.
@@ -619,4 +625,5 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 - **Tempo** (opcional, com valores de reserva): `xtime`, `initial_time`.
 - **Níveis de pressão** (opcional): `t_iso_levels`. Sem isso, usa índice de nível do modelo.
 - **Altura real** (opcional, corte/perfil/`d3` por altura): `zgrid`.
-- **`voronoi`/`shaded`/`contour`/corte/`streamlines`**: só precisam de `latCell`/`lonCell` — não é mais necessária a conectividade completa (`verticesOnCell` etc.), que era usada por uma implementação antiga do `voronoi` já substituída pela rasterização via `cKDTree`.
+- **`voronoi`/`shaded`/`contour`/corte/`streamlines`**: só precisam de `latCell`/`lonCell` — não é necessária a conectividade completa (`verticesOnCell` etc.).
+- **`hex`** (seção 8.1): precisa da conectividade completa da malha — `verticesOnCell`, `nEdgesOnCell`, `latVertex`, `lonVertex` — presente no arquivo de grade padrão do MPAS/MONAN (`x1.<nCells>.grid.nc`), mas tipicamente ausente em saídas de diagnóstico/pós-processadas. Sem essa conectividade, o programa avisa e sugere `voronoi` em vez de travar.

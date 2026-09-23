@@ -234,6 +234,7 @@ def file_open(fileName, setup_toml, gridFile=None, setup_anterior=None):
                  "draw_map_on"     : False,
                  "variables"       :variables,
                  "_malha_assinatura": malha_atual,
+                 "_malha_dataset"  : mesh,
                  "files"           : []}
 
         set_ion()

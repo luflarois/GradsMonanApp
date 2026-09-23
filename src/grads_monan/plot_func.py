@@ -16,8 +16,9 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from matplotlib.colors import BoundaryNorm
 import matplotlib.tri as mtri
+from matplotlib.collections import PolyCollection
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 - registra a projecao '3d'
-from .utils import normalize_lon, mag, load_zgrid_centers
+from .utils import normalize_lon, mag, load_zgrid_centers, construir_poligonos_celulas
 from .map_func import plot_map, plot_map_3d
 from scipy.interpolate import LinearNDInterpolator
 from scipy.spatial import Delaunay, cKDTree
@@ -588,6 +589,85 @@ def plot_voronoi(setup, data):
     ax.set_ylim(lat_min, lat_max)
     return im
 
+def _obter_poligonos_celulas(setup):
+    """
+    Poligonos (lon, lat) de cada celula da malha - o hexagono/pentagono
+    REAL usado pelo MPAS/MONAN, ao contrario da aproximacao rasterizada de
+    'plot_voronoi' - ver 'construir_poligonos_celulas' em utils.py.
+    Construido uma unica vez por sessao (o mesmo poligono vale para
+    qualquer arquivo aberto depois, pois a malha e obrigatoriamente a
+    mesma - ver 'assinatura_malha') e guardado em cache de memoria (nao em
+    disco - a diferenca dos poligonos e mais simples/rapida de recalcular
+    que a triangulacao de Delaunay). Retorna None se o arquivo de grade
+    nao tiver a conectividade completa (verticesOnCell/nEdgesOnCell/
+    latVertex/lonVertex) - tipico de saidas que so trazem latCell/lonCell.
+    """
+    if "_poligonos_celulas" in setup:
+        return setup["_poligonos_celulas"]
+    mesh = setup.get("_malha_dataset")
+    poligonos = construir_poligonos_celulas(mesh) if mesh is not None else None
+    setup["_poligonos_celulas"] = poligonos
+    return poligonos
+
+def plot_hexagonos(setup, data):
+    """
+    Comando 'set gxout hex' + 'd <variavel>': desenha o poligono REAL de
+    cada celula da malha (hexagono/pentagono do MPAS/MONAN, ja incluindo
+    os tamanhos/formatos irregulares das celulas de borda em dominios
+    regionais/de area limitada - a geometria vem direto do arquivo de
+    grade, sem nenhum tratamento especial para a borda), coloridas pelo
+    valor de 'data'. Mais fiel que 'voronoi' (que rasteriza por
+    nearest-neighbor, saindo como "pixels" quadrados), porem mais pesado:
+    construir e desenhar um poligono por celula custa mais que a
+    rasterizacao - recomendado para dominios regionais/malhas de porte
+    pequeno/medio; em malhas globais muito grandes (milhoes de celulas),
+    considere 'shaded'/'contour'/'voronoi'.
+    """
+    poligonos = _obter_poligonos_celulas(setup)
+    if poligonos is None:
+        print("Aviso: o arquivo de grade nao tem a conectividade completa da malha")
+        print("(verticesOnCell/nEdgesOnCell/latVertex/lonVertex) - nao e possivel")
+        print("desenhar o poligono real de cada celula. Use 'set gxout voronoi'")
+        print("(aproximacao rasterizada) ou forneca um arquivo de grade completo.")
+        return None
+
+    label = setup.get("label", "variavel")
+    if not _tamanho_malha_ok(label, len(data), len(poligonos)):
+        return None
+
+    data = np.asarray(data, dtype=float)
+    lon_min = setup["lon_min"]
+    lon_max = setup["lon_max"]
+    lat_min = setup["lat_min"]
+    lat_max = setup["lat_max"]
+
+    ax = plt.gca()
+
+    # So os poligonos com dado valido (fora do intervalo de 'set cut' vira
+    # NaN antes de chegar aqui - ver plot_var).
+    visivel = ~np.isnan(data)
+    if not np.any(visivel):
+        print("Aviso: nenhuma celula com valor dentro do corte (set cut) nesta selecao.")
+        return None
+
+    indices_visiveis = np.nonzero(visivel)[0]
+    poligonos_visiveis = [poligonos[i] for i in indices_visiveis]
+    valores_visiveis = data[indices_visiveis]
+
+    niveis = _niveis_cor(setup)
+    norm = None
+    if isinstance(niveis, (list, tuple, np.ndarray)) and len(niveis) > 1:
+        norm = BoundaryNorm(niveis, ncolors=plt.get_cmap(setup["cmap"]).N)
+
+    coll = PolyCollection(poligonos_visiveis, array=valores_visiveis, cmap=setup["cmap"],
+                           norm=norm, edgecolors='face', linewidths=0.1)
+    ax.add_collection(coll)
+    if norm is None:
+        coll.autoscale()
+    ax.set_xlim(lon_min, lon_max)
+    ax.set_ylim(lat_min, lat_max)
+    return coll
+
 def plot_var_3d(setup, var):
     """
     Comando 'd3 <variavel>': plota em 3D (scatter), numa janela separada da
@@ -822,8 +902,18 @@ def plot_var(setup, var, cbar=None):
                 cs = ax.contour(grade_x, grade_y, campo, levels=_niveis_cor(setup), cmap=cmap)
                 plt.clabel(cs, inline=True, fontsize=10)
     elif gxout == "voronoi":
-        # Plota o poligono real de cada celula (sem interpolar/triangular)
+        # Rasteriza por nearest-neighbor (celula mais proxima de cada
+        # pixel) - rapido mesmo em malhas grandes, mas sai como "pixels"
+        # quadrados, nao os hexagonos/pentagonos reais da malha.
         coll = plot_voronoi(setup, data)
+        if coll is not None:
+            cbar = plt.colorbar(coll, ax=ax, label=label)
+            _aplicar_rotulo_cbar(setup, cbar)
+    elif gxout == "hex":
+        # Desenha o poligono REAL de cada celula (hexagono/pentagono do
+        # MPAS/MONAN, incluindo as celulas de borda irregulares de
+        # dominios regionais) - ver plot_hexagonos.
+        coll = plot_hexagonos(setup, data)
         if coll is not None:
             cbar = plt.colorbar(coll, ax=ax, label=label)
             _aplicar_rotulo_cbar(setup, cbar)
