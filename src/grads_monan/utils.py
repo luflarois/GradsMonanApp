@@ -72,6 +72,59 @@ def assinatura_malha(latitudes, longitudes):
 def mag(u,v):
     return np.sqrt(u**2+v**2)
 
+def construir_poligonos_celulas(mesh):
+    """
+    Monta o poligono (lon, lat) de CADA celula da malha MPAS/MONAN, a
+    partir da conectividade completa do arquivo de grade:
+      - 'verticesOnCell' (nCells, maxEdges): indices (1-based, convencao
+        Fortran do MPAS) dos vertices de cada celula, em ordem ao redor
+        dela - o preenchimento apos o vertice valido nao e usado;
+      - 'nEdgesOnCell' (nCells): numero real de vertices/arestas de cada
+        celula (6 para um hexagono, 5 para um pentagono - defeitos
+        topologicos inevitaveis de uma malha icosaedrica/Voronoi -, e
+        possivelmente outros valores em celulas de borda de dominios
+        regionais/de area limitada);
+      - 'latVertex'/'lonVertex' (nVertices): coordenadas (radianos) de
+        cada vertice.
+
+    Retorna uma lista de arrays (n_vertices, 2) - uma por celula, na mesma
+    ordem de latCell/lonCell -, ou None se alguma dessas variaveis nao
+    existir no arquivo de grade (ex: saidas que so trazem latCell/lonCell,
+    sem a malha completa - nesse caso o poligono exato nao pode ser
+    reconstruido, e quem chamar deve usar a aproximacao rasterizada).
+
+    Nao ha NENHUM tratamento especial para bordas de dominios regionais:
+    a geometria de cada celula (inclusive o tamanho/formato irregular das
+    celulas de borda, tipicamente diferentes das internas) vem direto dos
+    vertices do proprio arquivo de grade, que ja e a malha de Voronoi real
+    usada pelo modelo - reconstruir os poligonos a partir dela e suficiente
+    para que a borda saia correta automaticamente.
+    """
+    obrigatorias = ("verticesOnCell", "nEdgesOnCell", "latVertex", "lonVertex")
+    if not all(v in mesh.variables for v in obrigatorias):
+        return None
+
+    vertices_on_cell = np.asarray(mesh.variables["verticesOnCell"][:])  # (nCells, maxEdges), 1-based
+    n_edges_on_cell = np.asarray(mesh.variables["nEdgesOnCell"][:])     # (nCells,)
+    lat_vertex = np.degrees(sem_mascara(mesh.variables["latVertex"][:]))
+    lon_vertex = normalize_lon(np.degrees(sem_mascara(mesh.variables["lonVertex"][:])))
+
+    poligonos = []
+    for i in range(vertices_on_cell.shape[0]):
+        n = int(n_edges_on_cell[i])
+        if n < 3:
+            poligonos.append(np.empty((0, 2)))
+            continue
+        idx = vertices_on_cell[i, :n].astype(int) - 1  # 1-based -> 0-based
+        lons = lon_vertex[idx]
+        lats = lat_vertex[idx]
+        # Celulas que cruzam a linha internacional de data (+-180 graus):
+        # sem isso, o poligono "esticaria" pela largura inteira do mapa.
+        if lons.size and (lons.max() - lons.min() > 180):
+            lons = np.where(lons < 0, lons + 360, lons)
+        poligonos.append(np.column_stack((lons, lats)))
+    return poligonos
+
 def load_zgrid_centers(variables, n_cells, n_levels):
     """
     Retorna o zgrid no formato (nCells, n_levels), alinhado com os indices

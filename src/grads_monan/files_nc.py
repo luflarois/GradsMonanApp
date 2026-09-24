@@ -230,8 +230,11 @@ def file_open(fileName, setup_toml, gridFile=None, setup_anterior=None):
                  "page_row"        : 1,
                  "page_col"        : 1,
                  "cut"             : None,
+                 "tint"            : 1.0,
+                 "draw_map_on"     : False,
                  "variables"       :variables,
                  "_malha_assinatura": malha_atual,
+                 "_malha_dataset"  : mesh,
                  "files"           : []}
 
         set_ion()
