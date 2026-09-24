@@ -32,7 +32,11 @@ executados com `run <arquivo>`.
 | Comando | Descrição |
 |---|---|
 | `open <arquivo.nc> [grade.nc]` | Abre um arquivo NetCDF de saída do MONAN/MPAS. Pode ser chamado **mais de uma vez na mesma sessão**, para trabalhar com vários arquivos ao mesmo tempo — ver seção 2.1. `<arquivo.nc>` também aceita **wildcards** (`*`, `?`, `[...]`), abrindo em sequência todos os arquivos que derem match (ordem alfabética dos nomes — ver seção 2.1). O segundo argumento (opcional) é um arquivo de grade externo — necessário quando o arquivo de dados não traz `latCell`/`lonCell`/`nCells` embutidos. Ver seção 10 para o detalhe de cada caso. Qualquer falha (inclusive um arquivo com malha diferente da já aberta) avisa e **mantém a sessão anterior intacta**, sem encerrar o programa. |
+| `load limits <arquivo.csv>` | Carrega uma área fechada (polígono) a partir de um arquivo de pontos lat/lon, marca quais células da malha aberta caem dentro dela e plota um mapa de conferência — ver seção 2.2. |
+| `sum`/`mean`/`min`/`max`/`p10`..`p90` `all\|inlimits\|point <variavel>` | Imprime uma estatística (soma, média, mínimo, máximo ou percentil) da variável — em todas as células da malha, só nas de dentro da última área de `load limits`, ou (`point`) reduzindo também sobre a faixa de níveis selecionada, mesmo sem um ponto/corte fixado; agregando todos os arquivos do intervalo de `set t`, quando houver mais de um — ver seção 2.3. |
+| `d sum\|mean\|min\|max\|p10..p90 all\|inlimits\|point <variavel>` | Como acima, mas plota o resultado **ponto a ponto** (um mapa, perfil ou corte), em vez de reduzir a um único número — ver seção 2.3. |
 | `reinit` | Fecha **todos** os arquivos abertos na sessão, apaga toda a configuração associada a eles (inclusive os caches de triangulação em memória) e volta ao estado inicial, pronto para um novo `open`. Também limpa a janela de gráficos. |
+| `reset` | Volta a seleção de **latitude/longitude/nível/corte (`set cut`)/arquivo (`set t`)** para a condição inicial (toda a malha, nível padrão da configuração, corte desligado, arquivo 1, série/animação desligada) e **limpa** título, rótulo de linha/legenda, rótulo da colorbar, o mapa de fundo automático (`draw map`) e o gráfico atual — mas **mantém os arquivos abertos** (ao contrário de `reinit`). Ver detalhes abaixo. |
 | `run <script>` | Executa, em sequência, os comandos contidos no arquivo de script informado (um comando por linha). |
 | `c` | Limpa o gráfico ativo no momento. Se o `d3` foi o último a plotar, limpa a **janela 3D** (recriando o eixo); se foi o `d`, limpa a janela 2D (só o painel atual, se `set pages` estiver ativo). |
 | `gxprint <arquivo_saida>` | Salva a figura atual em disco (PNG, PDF, etc.), usando `fig_dpi`/`fig_inches`/`fig_transparency` do `setup`. |
@@ -45,7 +49,51 @@ executados com `run <arquivo>`.
 | `q` / `exit` / `quit` | Encerra o programa. |
 
 Qualquer comando (exceto `!`/`exec`, `open`, `reinit`, `run` e `q`/`exit`/`quit`)
-exige um arquivo aberto; sem isso, o programa avisa e volta ao prompt.
+exige um arquivo aberto; sem isso, o programa avisa e volta ao prompt (`reset`
+inclusive — sem nenhum arquivo aberto, avisa e não faz nada).
+
+**`reset` vs. `reinit`**: `reinit` fecha os arquivos e começa do zero (é
+preciso um novo `open`); `reset` é mais leve — mantém o(s) arquivo(s) já
+aberto(s) (e tudo o que foi lido deles: variáveis, malha, arquivos
+adicionais de `open`/`set t`), só devolvendo à condição inicial a
+**seleção espacial** (`set lat`/`set lon`/`set lev`, que voltam a cobrir
+toda a malha, no nível padrão da configuração; `set cut`, que é
+desligado; e `set t`, que volta ao arquivo 1 e desliga a série/animação
+entre arquivos) e **limpando** o que foi desenhado/rotulado (`draw title`,
+`set label`, `draw label`, `draw map`, e o próprio gráfico na tela —
+equivalente a um `c`). Útil para recomeçar uma nova análise nos mesmos
+arquivos, sem o custo de reabri-los:
+
+```
+> set lat -22
+> set lon -46
+> set lev 5
+> set cut -5 5
+> set t 8
+> draw title Perfil em Sao Paulo
+> draw label Vento (m/s)
+> reset
+Reset: lat/lon voltaram para toda a malha, nivel 0, arquivo 1; titulo, rotulos, corte (cut) e mapa limpos. Arquivos abertos mantidos.
+> d t2m
+```
+
+**Importante**: antes desta correção, `set cut` **não** era desligado por
+`reset` — um corte estreito deixado ligado ao testar uma variável (ex.
+`set cut -5 5` para uma temperatura em °C) continuava filtrando
+silenciosamente **todas as variáveis seguintes**, mesmo depois de um
+`reset`, fazendo campos com valores fora dessa faixa (como ozônio em
+ppmv) aparecerem quase todos como `NaN`/vazios — um mapa com apenas o
+contorno da malha e uma cor quase constante (colorbar num intervalo
+minúsculo, tipo ±1e-14), sem nenhum erro impresso. Se isso já aconteceu
+com você, o `reset` atualizado resolve; se persistir mesmo com `cut`
+desligado (`show setup` mostra `'cut': None`), pode ser a própria variável
+que não tem dado válido naquele nível específico — experimente `d o3` em
+outros níveis (`set lev <n>`) para comparar.
+
+`load limits` (seção 2.2), `set clevs`/`set gxout`/`set cmap` e as marcas
+de `draw mark` **não** são alterados por `reset` (só a seleção espacial —
+incluindo `cut` e `set t`, arquivo/série — e os elementos de rótulo/mapa
+listados acima).
 
 ---
 
@@ -128,12 +176,61 @@ Se o número do arquivo referenciado não estiver aberto, ou a variável não
 existir naquele arquivo, o programa avisa (com sugestões por similaridade,
 quando aplicável) e **não trava** — nem interrompe a sessão.
 
-### Série temporal entre arquivos (`set t <inicio> <fim>`)
+### Escolhendo um arquivo entre vários abertos (`d <var>.N` e `set t <n>`)
 
-Com mais de um arquivo aberto, `set t <arquivo_inicial> <arquivo_final>`
-(ou `set time <arquivo_inicial> <arquivo_final>`) seleciona um **intervalo
-de arquivos** pelo número de abertura (não um índice de tempo dentro de um
-arquivo — isso continua sendo `set t <indice>`, com um único argumento).
+Com mais de um arquivo aberto (seção 2.1), há **duas formas equivalentes**
+de escolher qual arquivo `d`/`d3` (ou as estatísticas da seção 2.3) usam
+quando não estiver no modo de série/animação (abaixo):
+
+- **Pontual, só para uma chamada**: o sufixo `.N` na própria variável —
+  `d o3.8` mostra o arquivo número 8 uma única vez, sem afetar chamadas
+  seguintes.
+- **Persistente, para as próximas chamadas**: `set t <n>` (ou
+  `set time <n>`, um único argumento) seleciona o arquivo número `<n>`
+  como o arquivo **padrão** — toda variável **sem** sufixo `.N` (`d o3`,
+  `d t2m`, `mean all o3`, etc.) passa a usar esse arquivo, até o próximo
+  `set t <n>` (ou um `reset`/`reinit`, que voltam ao arquivo 1):
+
+```
+> open SP_O_2022071400_20220714*.nc
+> set lev 45
+> set t 8
+Arquivo 8 selecionado: SP_O_2022071400_2022071407.00.00.x40962L55.nc (2022-07-14T07).
+> d o3
+> d co2
+```
+
+(as duas chamadas de `d` acima usam o arquivo 8; um sufixo `.N` explícito,
+se usado numa delas, vale só para aquela chamada, sem mudar a seleção de
+`set t`.) Sem nenhum `set t`/sufixo, o padrão é o arquivo 1 (o primeiro
+aberto). `set t <n>` fora do intervalo de arquivos abertos (ex: `set t 30`
+com só 24 abertos) avisa com uma mensagem clara e não altera a seleção
+anterior.
+
+`set t <arquivo_inicial> <arquivo_final>` (**dois** argumentos — inclusive
+iguais, ex: `set t 3 3`) é um comando **diferente**: liga o modo de
+**série temporal/animação** entre um intervalo de arquivos, descrito no
+restante desta seção — não confundir com `set t <n>` (um argumento),
+acima, que só troca o arquivo padrão de uma chamada simples.
+
+**As duas formas são modos mutuamente exclusivos** — vale sempre o último
+`set t` usado: um `set t <n>` (um argumento) **desliga** o modo de série,
+mesmo que um `set t <inicio> <fim>` tenha ligado ele antes na mesma
+sessão. Isso é necessário porque, no modo de série, `d`/`d3` só aceitam
+**uma** dentre latitude/longitude/nível como faixa (as outras duas
+precisam ser um ponto/nível único — ver a tabela abaixo); pedir um
+arquivo/tempo único com `set t <n>` normalmente vem acompanhado de um
+corte de verdade (lat/lon fixa **e** uma faixa de níveis, por exemplo),
+que só faz sentido fora do modo de série:
+
+```
+> set t 1 24          (liga o modo serie/animacao)
+> set t 5              (pontual: desliga a serie, seleciona so o arquivo 5)
+> set lat -22
+> set lev 1 54
+> d o3                 (corte normal no arquivo 5, sem restricao de serie)
+```
+
 A partir daí, `d <variavel>` (ou `d3 <variavel>`) — em forma simples ou
 como **expressão aritmética** (mas ainda sem `mag(...)` nem `<u>;<v>`) —
 passa a considerar todos os arquivos do intervalo, em vez de um só. O que
@@ -226,6 +323,303 @@ label`: se chamados antes de qualquer `d`/`d3`, o texto fica guardado e
 passa a valer automaticamente assim que o primeiro gráfico (com barra de
 cores, no caso do `draw label`) for criado.
 
+### Título da janela (barra superior)
+
+Não confundir com `draw title` (o título **do gráfico**, acima): o
+título da **janela** do matplotlib (a barra no topo da janela do
+sistema operacional) já é atualizado automaticamente ao **abrir** o(s)
+arquivo(s) (`open`, seção 2.1 — cobrindo toda a malha, no nível padrão,
+sem precisar de nenhum `set` antes), e sempre que a seleção de
+tempo/arquivo (`set t`), latitude (`set lat`), longitude (`set lon`) ou
+nível (`set lev`) muda depois disso — inclusive por um `reset`. Formato:
+
+```
+GradsMonan: <timestamp>,<latitude(s)>,<longitude(s)>,L<nível(is)>
+```
+
+- **Timestamp**: o do arquivo/tempo atualmente selecionado (o primeiro
+  do intervalo, no modo de série/animação; o arquivo pontual de `set t
+  <n>`, fora dele).
+- **Latitude(s)**: um valor único, sempre com **2 casas decimais** (ex.
+  `22.00S`) quando um ponto está selecionado, ou uma faixa
+  `x<suf>-y<suf>` (ex. `10.00S-5.00N`) quando há uma faixa — sufixo `S`
+  para negativo (sul), `N` para positivo (norte).
+- **Longitude(s)**: mesma ideia (2 casas decimais), sufixo `W` para
+  negativo (oeste), `E` para positivo (leste) — ex. `60.00W-30.00W`.
+- **Nível(is)**: sempre prefixado com `L` — um único índice (ex. `L3`),
+  ou `L<inicial>-<final>` (ambos inclusivos, ex. `L1-45`) quando há uma
+  faixa de níveis.
+
+Exemplo:
+
+```
+> open SP_O_2022071400_2022071404.00.00.x40962L55.nc
+> set t 5
+> set lat -22
+> set lon -60 -30
+> set lev 1 45
+```
+
+deixa o título da janela como
+`GradsMonan: 2022-07-14T04,22.00S,60.00W-30.00W,L1-45`.
+
+---
+
+## 2.2 Área de limites para estatísticas (`load limits`)
+
+`load limits <arquivo.csv>` carrega uma **área fechada** (polígono) a
+partir de um arquivo de texto/CSV com uma lista de pontos — um por linha,
+no formato `latitude<separador>longitude` — e marca quais células da
+malha aberta (os mesmos centros de `latCell`/`lonCell`) caem **dentro**
+dela. Essa seleção fica pronta para ser reaproveitada pelas próximas
+funções estatísticas dentro da área (média, mínimo, máximo, etc.), que
+não precisarão refazer esse cálculo.
+
+O separador entre latitude e longitude, em cada linha, pode ser vírgula,
+ponto-e-vírgula ou espaço (e combinações deles, como `", "`). Linhas
+vazias e comentários (iniciados por `#`) são ignorados; uma linha que não
+resulte em exatamente dois números (por exemplo, um cabeçalho `lat,lon`)
+é ignorada com um aviso, sem interromper a leitura do restante do
+arquivo. O polígono não precisa repetir o primeiro ponto no final — ele é
+sempre tratado como fechado (o último ponto liga de volta ao primeiro).
+
+Exemplo de arquivo (`bacia.csv`):
+
+```
+lat,lon
+-22.0,-55.0
+-22.0,-45.0
+-15.0,-45.0
+-15.0,-55.0
+```
+
+Uso:
+
+```
+> open SP_O_2022071400_2022071400.00.00.x40962L55.nc
+> load limits bacia.csv
+Limites carregados de 'bacia.csv': 4 ponto(s) no poligono, 8532 celula(s) da malha dentro da area.
+```
+
+O comando plota, na hora, um **mapa de conferência**: o contorno do
+polígono lido (linha preta) e todos os centros de célula da malha,
+destacando em vermelho os que caíram dentro da área (os demais aparecem
+em cinza claro, só para dar contexto espacial) — assim dá para checar
+visualmente se a área foi lida corretamente antes de rodar qualquer
+estatística sobre ela. `show limits` (seção 5) resume o que está
+carregado sem replotar o mapa.
+
+O resultado fica guardado no `setup` da sessão (seção 11):
+`limits_poligono`, `limits_mask`, `limits_indices`, `limits_arquivo`. Um
+novo `load limits` **substitui** a área anterior; se o arquivo informado
+não existir, não puder ser lido, ou não tiver pelo menos 3 pontos válidos,
+a área anterior (se houver) é **preservada** — o comando avisa e não
+altera nada.
+
+---
+
+## 2.3 Funções estatísticas (`sum`, `mean`, `min`, `max`, `p10`..`p90`)
+
+O módulo `estatistics.py` reúne funções estatísticas sobre a variável (ou
+uma **expressão aritmética** sobre variáveis, ex: `t2m-273.15` — seção
+3), usando **exatamente a mesma seleção espacial que `d`/`d3` usariam
+para plotar agora mesmo** (seção 8), conforme `set lat`/`set lon`/`set
+lev`:
+
+- **Mapa horizontal** (nem latitude nem longitude fixadas num único
+  ponto — o caso comum): todas as células da malha, no **nível único**
+  selecionado (`set lev <nivel>`).
+- **Ponto** (`set lat <x>` + `set lon <y>`, fixando os dois no mesmo
+  valor): a estatística vira um **perfil vertical**, calculado na célula
+  mais próxima desse ponto, ao longo da **faixa de níveis** selecionada
+  (`set lev <nivel_inicial> <nivel_final>`).
+- **Corte** (só `set lat` OU só `set lon` fixada, sem a outra): a
+  estatística usa todas as células da malha, também ao longo da faixa de
+  níveis selecionada.
+
+Nos modos **ponto** e **corte**, se nenhuma faixa de níveis tiver sido
+definida explicitamente (`set lev <inicial> <final>`) — ou seja, `set
+lev` só selecionou um nível único —, a estatística usa exatamente esse
+nível (comportamento igual ao do modo mapa, um só nível por vez).
+
+Há duas formas de usar cada estatística:
+
+- **Escalar** (`<estatística> all|inlimits|point <variável>`, sem `d` na
+  frente): reduz a variável a **um único número**, impresso na tela antes
+  do próximo prompt; nenhum gráfico é alterado.
+- **Espacial** (`d <estatística> all|inlimits|point <variável>`): calcula
+  o resultado célula a célula (ou nível a nível, nos modos ponto/corte) e
+  plota exatamente como `d`/`d3` plotariam a própria variável agora —
+  mapa, perfil vertical ou corte vertical, conforme a seleção acima
+  (mesmas regras de `gxout`, mapa de fundo, título e colorbar do `d`
+  normal). Exceção: com `point` e nenhum ponto/corte fixado (mapa
+  horizontal) mais uma faixa de níveis selecionada, não há um mapa nem um
+  corte bem definido para plotar (ver complemento `point`, abaixo) — a
+  forma espacial avisa e não plota; use a forma escalar nesse caso.
+
+### O complemento `point` — estatística sobre o perfil temporal/vertical
+
+Além de `all`/`inlimits`, todo comando de estatística aceita o
+complemento **`point`** (ex.: `max point <variável>`, `d sum point
+<variável>`): pede explicitamente a estatística sobre o **perfil
+temporal e vertical** da seleção atual — reduzindo também sobre a **faixa
+de níveis** selecionada (`set lev <inicial> <final>`), mesmo quando nem
+latitude nem longitude estão fixadas (mapa horizontal). Isso permite
+combinar **qualquer variação** dos quatro componentes de seleção
+(latitude, longitude, nível, tempo) — por exemplo:
+
+- Um ponto (lat e lon fixos) e um único nível, com vários arquivos/tempos
+  (`set t <inicio> <fim>`).
+- Um único tempo, uma latitude e várias longitudes (corte), ou uma lat e
+  uma lon (ponto).
+- Um único tempo, com vários níveis, no mapa inteiro (nem lat nem lon
+  fixa) — combinação que só `point` cobre, já que `all`/`inlimits` olham
+  para um nível só nesse caso.
+
+Nos modos **ponto** e **corte**, `point` se comporta exatamente como
+`all` (a única diferença que `point` acrescenta é ativa apenas no modo
+mapa, sem lat/lon fixados). No **modo mapa com uma faixa genuína de
+níveis selecionada**, `point` reduz também sobre os níveis — um modo
+interno chamado aqui de "mapa com níveis": a forma escalar (`mean point
+u10`, por exemplo) funciona normalmente, reduzindo células, níveis e
+tempos a um único número; a forma espacial (`d mean point u10`) **não
+tem como plotar** esse resultado (não há uma direção de corte definida
+sem lat ou lon fixada) e avisa em vez de arriscar um gráfico incorreto —
+use a forma escalar, ou fixe `set lat`/`set lon` (num único ponto, para
+um perfil, ou só um dos dois, para um corte) para poder plotar.
+
+Em ambas as formas, **quando houver mais de um arquivo aberto com um
+intervalo definido por `set t <arquivo_inicial> <arquivo_final>`**
+(seção 2.1), a estatística usa **todos os arquivos (tempos) desse
+intervalo** — cada arquivo conta como um "tempo" a mais na conta. Sem
+`set t` ativo (ou com um só arquivo aberto), a estatística usa só o
+arquivo/instante atual, como antes (o sufixo `.N` de arquivo, seção 2.1,
+continua funcionando nesse caso — inclusive dentro de uma expressão, ex:
+`mean all (t2m.1 - t2m.2)`; dentro do modo de série, o sufixo é ignorado
+com aviso — quem manda é o intervalo de `set t`, igual ao `d`/`d3` em
+série).
+
+As estatísticas disponíveis:
+
+| Comando | O que calcula |
+|---|---|
+| `sum` | Soma. |
+| `mean` | Média. |
+| `min` | Mínimo. |
+| `max` | Máximo. |
+| `p10`, `p20`, ..., `p90` | Percentis 10 a 90 (de 10 em 10). |
+
+Todas as estatísticas acima têm as duas formas (escalar e espacial) e os
+três complementos abaixo.
+
+E as três variantes de seleção espacial, para todas as estatísticas acima:
+
+- `all` — usa **todas** as células da malha aberta (ou, no modo ponto, o
+  próprio ponto selecionado, sem restrição).
+- `inlimits` — usa apenas as células dentro da **última área carregada**
+  com `load limits` (seção 2.2). Sem nenhuma área carregada, o comando
+  avisa e não calcula nada. Nos modos mapa/corte, na forma espacial
+  (`d ... inlimits ...`), as células de fora da área ficam com **NaN** no
+  mapa/corte (não aparecem plotadas, igual a um `set cut`); no modo
+  ponto, `inlimits` apenas confere se o ponto selecionado cai dentro da
+  área — se não cair, avisa e não calcula nada (não há mais células para
+  restringir).
+- `point` — estatística sobre o perfil temporal/vertical (ver seção
+  acima): igual a `all` nos modos ponto/corte; no modo mapa, reduz
+  também sobre a faixa de níveis selecionada, quando houver uma (a forma
+  espacial não plota esse caso — só a escalar).
+
+Se a variável (ou expressão) for bidimensional (sem dimensão de nível,
+ex: `t2m`), a seleção de ponto/corte não se aplica (mesma regra do
+`d`/`d3` — só faz sentido para variáveis com nível) e o nível não aparece
+na mensagem. Se for tridimensional (ex: `u10`), a estatística usa o
+nível (mapa) ou a faixa de níveis (ponto/corte) atualmente selecionados,
+e a mensagem indica qual foi usado.
+
+Exemplos (forma escalar, mapa horizontal):
+
+```
+> open SP_O_2022071400_2022071400.00.00.x40962L55.nc
+> sum all t2m
+Soma de 't2m' (todos os 8532 ponto(s) da malha): 2394871.5
+
+> mean all t2m-273.15
+Media de 't2m-273.15' (todos os 8532 ponto(s) da malha): 12.4
+
+> set lev 5
+> mean all u10
+Media de 'u10' (todos os 8532 ponto(s) da malha, nivel 5 = 850.0 hPa): 4.92
+
+> load limits bacia.csv
+Limites carregados de 'bacia.csv': 4 ponto(s) no poligono, 812 celula(s) da malha dentro da area.
+> max inlimits t2m
+Maximo de 't2m' (dentro dos limites, 812 celula(s)): 305.1
+
+> p90 all t2m
+Percentil 90 de 't2m' (todos os 8532 ponto(s) da malha): 301.4
+```
+
+Exemplo com vários arquivos (série temporal, seção 2.1) — a estatística
+passa a considerar todos os tempos do intervalo:
+
+```
+> open SP_O_2022071400_2022071400.00.00.x40962L55.nc
+> open SP_O_2022071400_2022071406.00.00.x40962L55.nc
+> open SP_O_2022071400_2022071412.00.00.x40962L55.nc
+> set t 1 3
+> mean all t2m
+Media de 't2m' (todos os 8532 ponto(s) da malha, 3 tempo(s)): 296.7
+```
+
+Exemplo com um **ponto** selecionado (perfil vertical) e um **corte**
+(só latitude fixa):
+
+```
+> set lat -22
+> set lon -46
+> set lev 0 19
+> mean all u10
+Media de 'u10' (ponto lat -22, lon -46, niveis 0-19): 3.7
+
+> set lon -180 180
+> max all u10
+Maximo de 'u10' (todos os 8532 ponto(s) da malha, niveis 0-19): 41.2
+```
+
+Exemplo da forma espacial — plota a média (ponto a ponto, ao longo dos 3
+tempos acima) como um mapa comum; com um ponto ou corte selecionados
+(como acima), plota um perfil ou corte vertical no lugar do mapa. `sum`
+também tem forma espacial:
+
+```
+> d mean all t2m
+> d min inlimits t2m
+> d sum all t2m
+```
+
+Exemplo do complemento `point` — perfil temporal/vertical, em qualquer
+combinação de ponto/lon/lat/nível/tempo:
+
+```
+> set lat -22
+> set lon -46
+> set lev 3
+> set t 1 3
+> mean point u10
+Media de 'u10' (ponto lat -22, lon -46, 3 tempo(s), niveis 3-3): 4.1
+
+> set lat -90 90
+> set lon -180 180
+> set lev 0 19
+> mean point u10
+Media de 'u10' (todos os 8532 ponto(s) da malha, 3 tempo(s), niveis 0-19): 3.8
+> d mean point u10
+Aviso: nao e possivel plotar a estatistica espacial com uma faixa de niveis
+sem fixar latitude e/ou longitude (perfil ou corte) - use a forma escalar
+('mean point <variavel>'), ou fixe 'set lat'/'set lon' num unico ponto
+(perfil) ou so um dos dois (corte).
+```
+
 ---
 
 ## 3. Sintaxe do comando `d` / `display` (2D)
@@ -301,18 +695,20 @@ globais muito amplos.
 | Opção | Mostra |
 |---|---|
 | `show info` | Nome do arquivo NetCDF (e da grade, se houver), dimensões e a lista completa de variáveis, com nº de níveis, descrição e unidade — sempre referente ao **arquivo 1**. Se houver mais de um arquivo aberto, avisa e aponta para `show files`. |
-| `show files` | Tabela com todos os arquivos abertos na sessão: número, nome do arquivo e timestamp (data/hora, quando disponível) — ver seção 2.1. Se nenhum arquivo estiver aberto, informa isso. |
+| `show files` | Tabela com **todos** os arquivos abertos na sessão: número, nome do arquivo e timestamp (data/hora, quando disponível) — ver seção 2.1. Se nenhum arquivo estiver aberto, informa isso. |
+| `show times` | Tabela (número + timestamp) só com o(s) tempo(s) **atualmente selecionado(s)** por `set t` (seção 2.1/6): todos os arquivos do intervalo, um por linha, se o modo de série/animação estiver ligado (`set t <inicio> <fim>`); senão, uma única linha, o arquivo/tempo pontual selecionado (`set t <n>`, padrão o arquivo 1). |
 | `show latitudes` / `show longitudes` | Lista de coordenadas da malha, ordenada. |
 | `show levels` | Lista de níveis (pressão em hPa, ou índice de nível). |
 | `show lev` | Nível/intervalo de nível atualmente selecionado. |
 | `show variables` | Lista de variáveis do arquivo com sua descrição (`long_name`). |
-| `show time` / `show time_variable` / `show time_units` / `show Date` | Informações de tempo do arquivo (com valores de reserva se ausentes). |
+| `show time_variable` / `show time_units` / `show Date` | Informações de tempo do arquivo (com valores de reserva se ausentes). |
 | `show title` / `show label` | Título do gráfico / rótulo da barra de cores atuais. |
 | `show map` | Lista os shapefiles disponíveis em `mappath`, marcando o selecionado. |
 | `show map_color` / `show map_line` | Cor/espessura da linha do mapa de fundo. |
 | `show lat` / `show lon` | Intervalo de latitude/longitude atualmente selecionado. |
 | `show cmap` | Colormap atual. |
 | `show setup` | Imprime o dicionário `setup` inteiro (debug). |
+| `show limits` | Resumo da área de limites carregada por `load limits` (seção 2.2): arquivo, número de pontos do polígono e quantas células da malha caem dentro dela. Avisa se nenhuma área foi carregada ainda. |
 
 ---
 
@@ -324,7 +720,7 @@ faltando avisa e **mantém a configuração anterior**, sem travar.
 | Comando | Efeito |
 |---|---|
 | `set lev <n>` | Nível único. Imprime a informação do nível: pressão em hPa, senão altura média (`zgrid`), senão só o índice. |
-| `set lev <n1> <n2>` | Intervalo de níveis (corte vertical, perfil, `d3`). |
+| `set lev <n1> <n2>` | Intervalo de níveis, **ambos inclusivos** (corte vertical, perfil, `d3`) — `<n1>` e `<n2>` são índices de nível válidos, de `0` a `n_niveis-1` (a mesma faixa aceita por `set lev <n>`), e o nível `<n2>` **entra** na seleção. `<n1>` não pode ser maior que `<n2>`. Um corte vertical/`d3` precisa de pelo menos 2 níveis na faixa; um perfil (seção 8) aceita também uma faixa de 1 nível só (equivalente a `set lev <n1>`, com `<n1> == <n2>`). |
 | `set lat <valor>` / `set lat <min> <max>` | Latitude fixa num ponto, ou intervalo (domínio do mapa). |
 | `set lon <valor>` / `set lon <min> <max>` | Longitude fixa num ponto, ou intervalo. |
 | `set gxout <tipo>` | `shaded`/`contour`/`voronoi`/`hex` (2D, variáveis escalares — também vale `shaded` no `d3`); `vect` (padrão)/`stream`/`barb` (vento, `d u;v` ou `d mag(...)`). |
@@ -340,7 +736,7 @@ faltando avisa e **mantém a configuração anterior**, sem travar.
 | `set mpt <cor> <espessura>` | Cor e espessura da linha do mapa de fundo. |
 | `set plot_line <espessura> <cor>` | Espessura/cor de linha usada em perfis. |
 | `set grid on\|off` | Liga/desliga a grade (gridlines) do gráfico. |
-| `set time <n>` (ou `set t <n>`) | Índice de tempo selecionado, dentro do arquivo. |
+| `set time <n>` (ou `set t <n>`) | Seleciona o arquivo número `<n>` (entre os vários abertos) como o arquivo padrão para as próximas `d`/`d3`/estatísticas sem sufixo `.N` — ver seção 2.1. |
 | `set time <ini> <fim>` (ou `set t <ini> <fim>`) | Com mais de um arquivo aberto: intervalo de arquivos (pelo número de abertura) para a série temporal entre arquivos — ver seção 2.1. |
 | `set tint <segundos>` | Intervalo, em segundos, entre os quadros da animação da série temporal (`d`/`d3` no modo mapa/3D — seção 2.1). Padrão: 1 segundo. |
 | `set mark <x> <y> <cor> <tamanho> <legenda>` | Mecanismo antigo de acumular pontos de marcação. **Legado**: não é mais usado por `draw mark` (seção 7), que hoje é autossuficiente. |
@@ -382,9 +778,9 @@ faltando avisa e **mantém a configuração anterior**, sem travar.
 
 | Condição | Resultado |
 |---|---|
-| Latitude e longitude fixas no mesmo ponto | **Perfil vertical**, no intervalo de níveis selecionado. |
-| Apenas latitude fixa (ou só longitude) | **Corte vertical**, interpolando a malha sobre uma linha. Exige intervalo de níveis. |
-| Nem latitude nem longitude fixas | **Mapa horizontal**, conforme `gxout` (`shaded`/`contour`/`voronoi`). |
+| Latitude e longitude fixas no mesmo ponto | **Perfil vertical**, no intervalo de níveis selecionado (`set lev <n1> <n2>` — seção 6) — ou só no nível único de `set lev <n>`, se nenhuma faixa tiver sido escolhida. |
+| Apenas latitude fixa (ou só longitude) | **Corte vertical**, interpolando a malha sobre uma linha. Exige uma faixa de **pelo menos 2 níveis** (`set lev <n1> <n2>`, com `<n2>` maior que `<n1>`) — um nível único (de `set lev <n>`, ou uma faixa `set lev <n> <n>`) avisa e não plota, pois não há como desenhar um corte 2D com um só nível. |
+| Nem latitude nem longitude fixas | **Mapa horizontal**, conforme `gxout` (`shaded`/`contour`/`voronoi`), sempre no **nível único** de `set lev <n>` (ou no primeiro nível de uma faixa, se uma estiver selecionada). |
 
 No **eixo vertical** do corte/perfil (e no eixo Z do `d3`):
 1. **Pressão** (hPa), se houver `t_iso_levels` — maior pressão embaixo.
@@ -501,10 +897,15 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 | `variables` | Referência a `dataset.variables` do **arquivo 1**. |
 | `files` | Lista com um registro por arquivo aberto na sessão (índice, nome do arquivo, arquivo de grade, `dataset`, informações de tempo) — ver seção 2.1. |
 | `_malha_assinatura` | Assinatura (nº de células + hash `md5` de lat/lon) da malha da sessão, usada para validar que um novo `open` tem a mesma grade (uso interno — seção 2.1). |
+| `arquivo_sel` | Número do arquivo (entre os abertos) usado por padrão em `d`/`d3`/estatísticas sem sufixo `.N` — selecionado por `set t <n>` (um argumento), padrão `1` — ver seção 2.1. |
 | `time_ini`, `time_fim` | Intervalo de arquivos (pelo número de abertura) selecionado por `set t <ini> <fim>`, para a série temporal entre arquivos — ver seção 2.1. `None` se ainda não definido. |
 | `tint` | Intervalo, em segundos, entre os quadros da animação da série temporal (`set tint`) — padrão 1.0. |
 | `draw_map_on` | `True` depois de `draw map` (até um `draw map off`): o mapa de fundo é redesenhado automaticamente em todo `d`/`d3` seguinte, inclusive quadro a quadro na animação — ver seção 2.1. |
 | `cbar_label` | Texto definido por `draw label <texto>` (ou `None`/ausente se nunca usado): reaplicado automaticamente toda vez que uma nova barra de cores é criada, inclusive quadro a quadro na animação — ver seção 2.1/7. |
+| `limits_poligono` | Array `(n_pontos, 2)` com os vértices (longitude, latitude) lidos por `load limits` (seção 2.2), ou ausente se nenhuma área foi carregada. |
+| `limits_mask` | Array booleano `(nCells,)`: `True` nas células cujo centro cai dentro da área carregada por `load limits`. Base para as futuras funções estatísticas dentro da área. |
+| `limits_indices` | Índices (inteiros) das células dentro da área — equivalente a `np.nonzero(limits_mask)[0]`, já pronto para uso direto. |
+| `limits_arquivo` | Caminho do último arquivo de limites carregado com sucesso por `load limits`. |
 | `latitudes` / `longitudes` | Coordenadas de cada célula da malha (graus, longitude normalizada). |
 | `levels` / `eixo_pressao` | Lista de níveis; se representam pressão (`True`) ou índice de modelo (`False`). |
 | `lat_min`, `lat_max`, `lon_min`, `lon_max` | Domínio geográfico selecionado. |
@@ -536,7 +937,7 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 ### `exec_func.py`
 - `exec_cmd(...)` — despachante central de todos os comandos do prompt.
 - `run_file(...)` — executa um script de comandos linha a linha.
-- `_resolver_variavel(setup, token)` — resolve um token de variável com sufixo opcional `.N` (seção 2.1): localiza o arquivo aberto correspondente e a variável nele, com mensagens de erro/sugestões (`difflib`) quando o arquivo não está aberto ou a variável não existe.
+- `_resolver_variavel(setup, token)` — resolve um token de variável com sufixo opcional `.N` (seção 2.1): localiza o arquivo aberto correspondente e a variável nele, com mensagens de erro/sugestões (`difflib`) quando o arquivo não está aberto ou a variável não existe. Sem sufixo `.N`, usa `setup['arquivo_sel']` (padrão `1`, alterado por `set t <n>`) em vez de sempre o arquivo 1.
 - `_arquivo_por_indice(setup, indice)` — retorna o registro do arquivo aberto com aquele índice, ou `None`.
 - `_avaliar_expressao(setup, expr)` — avaliador seguro de expressões aritméticas (`d (expr)`), agora resolvendo cada variável via `_resolver_variavel` — aceita sufixos `.N` e expressões cruzando arquivos, ex. `t2m.2 - t2m.1`.
 - `_modo_serie_ativo(setup)` — `True` quando `set t <ini> <fim>` está definido e há mais de um arquivo aberto (seção 2.1).
@@ -544,17 +945,35 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 - `_resolver_variavel_serie(setup, info, token)` — como `_resolver_variavel`, mas para uso dentro do modo de série: um token sem sufixo `.N` resolve para o arquivo do quadro atual (`info`), não sempre o arquivo 1; com sufixo, continua fixo naquele arquivo.
 - `_avaliar_expressao_serie(setup, info, expr)` — como `_avaliar_expressao`, mas usando `_resolver_variavel_serie` (expressões no modo série, ex. `t2m-273.15`).
 - `_dados_serie_temporal_expr(setup, expr)` — como `_dados_serie_temporal`, mas para uma expressão aritmética: avalia `expr` arquivo a arquivo (via `_avaliar_expressao_serie`) dentro do intervalo `time_ini`/`time_fim`.
+- `_dados_estatistica(setup, expr)` — reúne a lista de arrays "por arquivo/tempo" usada pelas funções estatísticas (seção 2.3): todos os arquivos do intervalo de `set t` quando o modo de série estiver ativo (sufixo `.N` ignorado, com aviso, se `expr` não tiver operador — quem manda é o intervalo), ou só o arquivo indicado por `expr` (com sufixo `.N`) caso contrário. Aceita tanto um nome de variável simples quanto uma expressão aritmética (ex: `t2m-273.15`), avaliada via `_avaliar_expressao`/`_dados_serie_temporal_expr`, igual ao `d`/`d3` (seção 3).
+- Despacho escalar de `sum`/`mean`/`min`/`max`/`p10`..`p90` `all`/`inlimits`/`point <variavel_ou_expressao>` (seção 2.3): reúne os dados via `_dados_estatistica` e chama `calcular_valor` (`estatistics.py`), com `modo_point=True` quando o complemento for `point`.
+- Despacho espacial de `d sum`/`mean`/`min`/`max`/`p10`..`p90` `all`/`inlimits`/`point <variavel_ou_expressao>` (seção 2.3; dentro do dispatch de `d`/`display`): reúne os dados via `_dados_estatistica`, chama `calcular_campo` (`estatistics.py`) — que também retorna o **modo** (mapa/ponto/corte/mapa_niveis, conforme a seleção atual de lat/lon/nível e o complemento `point`) — e plota o resultado com `plot_estatistica_campo` (`plot_func.py`); no modo `mapa_niveis`, `calcular_campo` já recusou e retornou `None`, então nada é plotado.
 
-### `files_nc.py`
+### `files.py` (antigo `files_nc.py`)
 - `file_open(fileName, setup_toml, gridFile=None, setup_anterior=None)` — abre o arquivo (e a grade, se necessária). Se `setup_anterior` for passado (já há um arquivo aberto na sessão), valida a malha do novo arquivo contra a assinatura já registrada (seção 2.1): rejeita com `(None, None)` se forem diferentes (preservando `setup_anterior` intacto), ou adiciona o novo arquivo a `setup["files"]` com o próximo índice sequencial, se forem iguais. Sem `setup_anterior` (primeiro `open`), monta o `setup` do zero, como antes — inclusive guardando a referência ao `dataset` da malha (`setup["_malha_dataset"]`), usada sob demanda por `gxout hex` (seção 8.1) para ler a conectividade completa. Resiliente à ausência de `nCells`, malha, `xtime`/`initial_time`, `t_iso_levels`.
+- `carregar_limites(setup, caminho_csv)` — comando `load limits <arquivo.csv>` (seção 2.2): lê o arquivo de pontos (lat/lon, um por linha), calcula a máscara de células da malha dentro do polígono formado por eles e guarda tudo em `setup["limits_*"]`, pronto para as futuras funções estatísticas dentro da área. Retorna `True`/`False`; em caso de falha, preserva os limites já carregados anteriormente (se houver).
+
+### `estatistics.py`
+- `calcular_valor(setup, nome_funcao, arrays, mask, rotulo, modo_point=False)` — forma **escalar** de todas as estatísticas (`sum`/`mean`/`min`/`max`/`p10`..`p90`, seção 2.3): empilha `arrays` (ver `_empilhar`) e reduz a **um único número**, sobre todos os tempos selecionados e, conforme o modo espacial atual (mapa/ponto/corte/mapa_niveis — ver `_modo_espacial`/`_fatia`): todas as células (ou só as de `mask`) no nível único (modo mapa) ou na faixa de níveis (modo corte, ou mapa com `modo_point=True` e faixa genuína — modo `mapa_niveis`), ou toda a faixa de níveis na célula mais próxima (modo ponto — `mask` aí só confere se esse ponto está dentro da área). Imprime o resultado e o retorna (`float`), ou `None` em caso de erro/aviso (variável com formato inesperado, máscara não batendo com a malha atual, nenhuma célula disponível, ou ponto fora da área de limites).
+- `calcular_campo(setup, nome_funcao, arrays, mask, rotulo, modo_point=False)` — forma **espacial**: como `calcular_valor`, mas reduz **só sobre os tempos**, mantendo a forma do modo atual — `(nCells,)` no mapa, `(nCells, nLevels)` no corte, `(nLevels,)` no ponto (perfil) — pronta para plotar via `plot_estatistica_campo` (`plot_func.py`). Com `mask`, as células de fora ficam com `NaN` (mapa/corte) ou o cálculo é recusado (ponto fora da área). Retorna `(campo, modo)`, ou `None` em caso de erro/aviso — inclusive no modo `mapa_niveis` (nem lat nem lon fixada, com `modo_point=True` e faixa genuína de níveis), onde a função sempre recusa a plotar (não há mapa nem corte bem definido) e retorna `None` com um aviso.
+- `levf_efetivo(lev, levf)` (`utils.py`, compartilhada com `plot_func.py`) — devolve o limite superior efetivo da fatia de níveis: `levf` quando já define uma faixa genuína (`levf > lev`), senão `lev + 1` — evita que `var[..., lev:levf]` fique **vazio** quando `lev == levf` (nível único, sem `set lev <ini> <fim>` explícito), usado nos modos ponto/corte/mapa_niveis (`estatistics.py`) e nos mesmos modos da plotagem direta `d`/`d3` (`plot_func.py`).
+- `_fatia(setup, var, rotulo)` — extrai, de UM array (um arquivo/tempo), a MESMA fatia que `d`/`d3` extrairiam para plotar agora (ver `plot_var`/`plot_perfil`/`plot_corte` em `plot_func.py`), conforme o modo espacial atual: `var[time_sel,:]` (2D), `var[time_sel,:,lev]` (3D, mapa), `var[time_sel,indice_mais_proximo,lev:levf]` (3D, ponto) ou `var[time_sel,:,lev:levf]` (3D, corte). Retorna `(dados, modo, indice_mais_proximo)`.
+- `_empilhar(setup, arrays, rotulo, modo_point=False)` — fatia (`_fatia`) cada array de `arrays` (ver `_dados_estatistica` em `exec_func.py`) e empilha o resultado num eixo extra (o dos "tempos") na frente: `(n_tempos, nCells)` no mapa, `(n_tempos, nCells, nLevels)` no corte/mapa_niveis, ou `(n_tempos, nLevels)` no ponto. Retorna `(matriz, modo, indice_mais_proximo)`.
+- `_modo_espacial(setup)` — decide, a partir de `setup["lat_min"]`/`["lat_max"]`/`["lon_min"]`/`["lon_max"]`, o modo atual: `"ponto"` (lat e lon fixadas no mesmo valor), `"corte"` (só uma das duas fixa) ou `"mapa"` (nenhuma fixa) — mesma decisão que `plot_var` usa para escolher entre `plot_perfil`/`plot_corte`/mapa (seção 8).
+- `_indice_mais_proximo(setup)` — índice da célula da malha mais próxima do ponto de lat/lon selecionado (mesma fórmula usada por `plot_perfil`).
+- `_preparar_mascara(mask, n_cells, ...)` — confere se `mask` bate com o número de células da matriz empilhada (ex: após um `reinit` com outra malha, sem recarregar `load limits`).
+- `_descricao_nivel(setup)` / `_descricao_intervalo_niveis(setup)` — texto curto do nível único (modo mapa) ou da faixa de níveis (modo ponto/corte) atualmente selecionados, para anexar às mensagens de resultado — pressão em hPa quando disponível (`setup["eixo_pressao"]`), senão só o(s) índice(s).
+- `sum_all`/`sum_inlimits`/`mean_all`/`mean_inlimits` — atalhos nomeados equivalentes a `calcular_valor` com o nome da função já fixado (úteis para chamar diretamente, ex. em testes).
+- `NOMES_ESTATISTICA_ESCALAR`, `NOMES_ESTATISTICA_ESPACIAL` — tuplas com os nomes de comando reconhecidos por `exec_func.py` (todas as estatísticas têm tanto a forma escalar quanto a espacial, incluindo `sum`).
 
 ### `set_func.py`
-- `cmd_set(...)` / `_cmd_set_dispatch(...)` — comando `set` (tabela da seção 6), com validação numérica segura.
+- `cmd_set(...)` / `_cmd_set_dispatch(...)` — comando `set` (tabela da seção 6), com validação numérica segura. `set lev <n1> <n2>` valida `<n1>`/`<n2>` como índices de nível **inclusivos** (0 a `n_niveis-1`, com `<n1> <= <n2>`) e guarda internamente `setup["levf"] = <n2> + 1` — o limite EXCLUSIVO usado por toda fatia de nível do resto do código (`var[..., lev:levf]` — ver `levf_efetivo` em `utils.py`); sem esse `+1`, incluir o último nível pedido exigiria um índice inválido.
 - `_print_level_info(setup, l)` — informação do nível ao usar `set lev <n>`.
 
 ### `show_func.py`
 - `cmd_show(setup, cmd_split)` / `_mostrar_info_arquivo(setup)` — comando `show` (tabela da seção 5).
 - `_mostrar_arquivos(setup)` — `show files`: tabela com os arquivos abertos na sessão (seção 2.1).
+- `_mostrar_tempos(setup)` — `show times`: mesma tabela de `_mostrar_arquivos`, restrita ao(s) tempo(s) atualmente selecionado(s) por `set t` (o intervalo inteiro no modo série, ou só o arquivo pontual de `setup['arquivo_sel']` fora dele) — seção 2.1/5.
 - `show_legend()` — `draw legend`.
 
 ### `draw_func.py`
@@ -567,10 +986,14 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 ### `plot_func.py`
 **Plotagem 2D:**
 - `plot_var(setup, var, cbar=None)` — despacha mapa/corte/perfil (seção 8) e `shaded`/`contour`/`voronoi`. No mapa horizontal, redesenha o mapa de fundo (`plot_map`) automaticamente se `setup["draw_map_on"]` estiver ligado (seção 7/2.1), e reaplica título (`_aplicar_titulo`) e rótulo da colorbar (`_aplicar_rotulo_cbar`), se definidos.
-- `plot_perfil`, `plot_corte` — perfil vertical e corte, com hachura em áreas sem dado; `plot_corte` também reaplica o rótulo customizado da colorbar.
+- `plot_perfil(setup, var)` / `plot_corte(setup, var, cbar=None)` — resolvem a fatia bruta (`var[...]`) da variável comum e delegam o desenho a `_plotar_perfil_dados`/`_plotar_corte_dados`.
+- `_plotar_perfil_dados(setup, vertical_profile, closest_index)` / `_plotar_corte_dados(setup, data, cbar=None)` — desenham o perfil vertical/corte a partir de dados JÁ resolvidos (fatiados e, no caso do perfil, já na célula certa) — com hachura em áreas sem dado; reaproveitados tanto por `plot_perfil`/`plot_corte` (variável comum) quanto por `plot_estatistica_campo` (estatísticas num ponto/corte — seção 2.3); `_plotar_corte_dados` também reaplica o rótulo customizado da colorbar.
 - `plot_voronoi(setup, data)` — rasterização por aproximação (nearest-neighbor) via `cKDTree` (seção 8.1, `gxout voronoi`).
 - `plot_hexagonos(setup, data)` — desenha o polígono real de cada célula (`gxout hex`, seção 8.1) via `matplotlib.collections.PolyCollection`; avisa e retorna `None` (sem travar) se a malha não tiver a conectividade completa.
 - `_obter_poligonos_celulas(setup)` — polígonos de cada célula para `gxout hex`, em cache de memória (`setup["_poligonos_celulas"]`); construído uma única vez por sessão via `construir_poligonos_celulas` (utils.py), a partir de `setup["_malha_dataset"]`.
+- `plot_limites(setup)` — `load limits <arquivo.csv>` (seção 2.2): plota o contorno do polígono lido e destaca os centros de célula dentro dele (`setup["limits_mask"]`), com os demais em cinza claro para contexto.
+- `plot_estatistica_campo(setup, campo, modo, cbar=None)` — `d mean|min|max|p10..p90 all|inlimits <variavel>` (seção 2.3): plota `campo`, já reduzido por `calcular_campo` (`estatistics.py`), no formato indicado por `modo` ("mapa"/"ponto"/"corte" — mesma decisão que `plot_var` tomaria para a própria variável, seção 8): mapa (`(nCells,)`, embrulhado como `(1, nCells)` e passado a `plot_var` com `time_sel` forçado a 0 só durante a chamada), perfil (`(nLevels,)`, via `_plotar_perfil_dados`) ou corte (`(nCells, nLevels)`, via `_plotar_corte_dados`).
+- `_indice_mais_proximo_estatistica(setup)` — índice da célula mais próxima do ponto de lat/lon selecionado, usado por `plot_estatistica_campo` no modo "ponto" (mesma fórmula de `_indice_mais_proximo` em `estatistics.py`).
 - `plot_wind`, `plot_vector_field`, `plot_barbs`, `plot_streams` — vento (`vect`/`barb`/`stream`); `plot_wind` também redesenha o mapa e reaplica o título automaticamente se definidos.
 - `plot_marks(setup)` — mecanismo antigo de `set mark` (legado).
 - `_aplicar_titulo(setup, ax)` — desenha/redesenha `setup["title"]` (definido por `draw title`) no eixo, com o estilo de `title_fs`/`title_fw`/`title_color`; chamada em todo plot cujo eixo pode ter sido limpo entre uma chamada e outra (ex.: quadro a quadro na animação de mapa), para o título não se perder.
@@ -597,7 +1020,8 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 **Utilitários de plotagem:**
 - `_ativar_figura_2d` / `_ativar_figura_3d` — garantem a janela certa ativa antes de plotar.
 - `clear_plots(setup=None)` — `c` (painel/janela 2D ou 3D, conforme a ativa).
-- `set_window_title(titulo)` / `set_ion()` — título da janela / modo interativo.
+- `set_window_title(titulo)` / `set_ion()` — título da janela (bruto) / modo interativo.
+- `atualizar_titulo_janela(setup)` — monta e aplica o título da janela no formato `GradsMonan: <timestamp>,<lat>,<lon>,L<nivel>` (lat/lon com 2 casas decimais; nível prefixado com `L` — seção 2.1), chamada por `files.py` logo após cada `open`, por `set_func.py` ao final de `set t`/`set lat`/`set lon`/`set lev`, e por `exec_func.py` no `reset`.
 - `save_fig(fig_name, setup)` — `gxprint`.
 - `_niveis_cor(setup)` — níveis de cor/contorno (`set clevs` ou padrão).
 - `_tamanho_malha_ok`, `_aplicar_corte`, `_mask_corte` — validações e aplicação de `set cut`.

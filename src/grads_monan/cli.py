@@ -21,7 +21,7 @@ def main():
     print("|                  GRADS-MONAN APP                   |")
     print("|        (a Grads/Cola clone for MONAN Model)        |")
     print("| Author: Luiz Flávio Rodrigues : luflarois@pm.me    |")
-    print("| Revision: 0.2.0                                    |")
+    print("| Revision: 0.3.0                                    |")
     print("| Licence: \U0001F12F GPLv3 \U0001F12F                                 |")
     print("+----------------------------------------------------+\n")
 

@@ -12,14 +12,16 @@ import sys
 import re
 import glob
 import difflib
+import numpy as np
 #
 #My functions
-from .files_nc import file_open
+from .files import file_open, carregar_limites
 from .show_func import cmd_show, show_legend
-from .plot_func import plot_wind, plot_var, plot_var_3d, clear_plots,save_fig, plot_serie, plot_serie_mapa_3d
+from .plot_func import plot_wind, plot_var, plot_var_3d, clear_plots,save_fig, plot_serie, plot_serie_mapa_3d, plot_limites, plot_estatistica_campo, atualizar_titulo_janela
 from .draw_func import draw_title, draw_mark, draw_map, draw_label
 from .set_func import cmd_set
 from .utils import mag, sem_mascara
+from .estatistics import calcular_valor, calcular_campo, NOMES_ESTATISTICA_ESCALAR, NOMES_ESTATISTICA_ESPACIAL
 
 _REF_VAR_RE = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*)(?:\.(\d+))?$')
 
@@ -34,8 +36,12 @@ def _arquivo_por_indice(setup, indice):
 def _resolver_variavel(setup, token):
     """
     Resolve um token de variavel que pode trazer um sufixo opcional ".N"
-    apontando para o N-esimo arquivo aberto na sessao (ex: "t2m.2"). Sem
-    sufixo, assume o primeiro arquivo aberto (".1").
+    apontando para o N-esimo arquivo aberto na sessao (ex: "t2m.2") - a
+    forma explicita, valida so para esta chamada. Sem sufixo, usa o
+    arquivo atualmente selecionado por 'set t <n>' (setup['arquivo_sel'],
+    seção 6 do manual - 1, o primeiro aberto, ate que 'set t <n>' mude
+    isso), a forma persistente: 'set t 5' seguido de varios 'd o3', 'd
+    t2m', etc. usa o arquivo 5 em todos, sem repetir o sufixo.
 
     Retorna (nome_base, indice, array). Se o arquivo nao estiver aberto ou
     a variavel nao existir nele, 'array' vem None e a mensagem de erro (com
@@ -47,7 +53,7 @@ def _resolver_variavel(setup, token):
         return token, None, None
 
     nome, indice_str = m.group(1), m.group(2)
-    indice = int(indice_str) if indice_str else 1
+    indice = int(indice_str) if indice_str else setup.get("arquivo_sel", 1)
 
     info = _arquivo_por_indice(setup, indice)
     if info is None:
@@ -237,6 +243,67 @@ def _modo_serie_ativo(setup):
         and len(setup.get("files") or []) > 1
     )
 
+# Nomes de comando das funcoes estatisticas (estatistics.py, secao 2.3):
+# todas tem a forma escalar ('<nome> all|inlimits|point <variavel>') e a
+# forma espacial ('d <nome> all|inlimits|point <variavel>').
+_COMANDOS_ESTATISTICA_ESCALAR = set(NOMES_ESTATISTICA_ESCALAR)
+_COMANDOS_ESTATISTICA_ESPACIAL = set(NOMES_ESTATISTICA_ESPACIAL)
+
+_OPERADOR_RE = re.compile(r'[\+\-\*/()]')
+
+def _dados_estatistica(setup, expr):
+    """
+    Reune a lista de arrays 'por arquivo/tempo' usada pelas funcoes
+    estatisticas (estatistics.py, secao 2.3). 'expr' pode ser um nome de
+    variavel simples (com sufixo '.N' opcional) OU uma expressao
+    aritmetica sobre variaveis (ex: 't2m-273.15', '(t2m.1 - t2m.2)') -
+    mesma sintaxe aceita por 'd'/'d3' (secao 3):
+
+      - Se o modo de serie temporal estiver ativo ('set t <arquivo_inicial>
+        <arquivo_final>' com mais de um arquivo aberto - _modo_serie_ativo),
+        usa TODOS os arquivos desse intervalo, avaliando a expressao
+        arquivo a arquivo se houver operadores (ver
+        _dados_serie_temporal_expr) - mesma convencao do 'd'/'d3' em
+        serie: sem operadores, o sufixo '.N' e ignorado, com aviso, pois
+        quem manda e o intervalo de 'set t' (ver _dados_serie_temporal).
+      - Senao, avalia a expressao (ou resolve a variavel) so no arquivo
+        indicado pelo token/expressao (com suporte ao sufixo '.N', igual
+        ao 'd'/'d3' fora do modo de serie - ver _resolver_variavel/
+        _avaliar_expressao).
+
+    Retorna a lista de arrays (ja avaliados, se houver expressao; ainda
+    sem fatiar tempo/nivel - isso fica por conta de 'estatistics.py'), ou
+    None se algo faltar (mensagem de erro/sugestoes ja impressa).
+    """
+    tem_operador = bool(_OPERADOR_RE.search(expr))
+
+    if _modo_serie_ativo(setup):
+        if tem_operador:
+            dados = _dados_serie_temporal_expr(setup, expr)
+        else:
+            nome_var = re.sub(r'\.\d+$', '', expr)
+            if nome_var != expr:
+                print("Aviso: sufixo de arquivo ('.N') ignorado no modo de serie temporal - usa o intervalo de 'set t'.")
+            dados = _dados_serie_temporal(setup, nome_var)
+        if dados is None:
+            return None
+        return [d["array"] for d in dados]
+
+    if tem_operador:
+        try:
+            arr = _avaliar_expressao(setup, expr)
+        except Exception as e:
+            print("Erro ao avaliar a expressao '{0}': {1}".format(expr, e))
+            return None
+        if arr is None:
+            return None
+        return [arr]
+
+    _, _, var = _resolver_variavel(setup, expr)
+    if var is None:
+        return None
+    return [var]
+
 def exec_cmd(cmd_user, cmd,cmd_split,setup, dataset, ax, cbar, setup_toml):
 
     if cmd == "!" or cmd == "exec":
@@ -314,9 +381,92 @@ def exec_cmd(cmd_user, cmd,cmd_split,setup, dataset, ax, cbar, setup_toml):
         if cmd == "gxprint":
             save_fig(cmd_split[1],setup)
         if cmd == "show":
-            cmd_show(setup, cmd_split)       
+            cmd_show(setup, cmd_split)
         elif cmd == "c":
             clear_plots(setup)
+        elif cmd == "reset":
+            # 'reset': volta a selecao de latitude/longitude/nivel a
+            # CONDICAO INICIAL (a mesma extensao usada quando o(s)
+            # arquivo(s) foi(ram) aberto(s) - toda a malha - e o
+            # nivel/faixa de nivel padrao da configuracao, setup_toml);
+            # limpa o titulo (setup['title']), o rotulo de linha/legenda
+            # (setup['label'], 'set label') e o rotulo da colorbar
+            # (setup['cbar_label'], 'draw label'); desliga o mapa de fundo
+            # automatico ('draw map on') e limpa a figura/grafico atual
+            # (igual ao comando 'c') - mas MANTEM os arquivos abertos, ao
+            # contrario de 'reinit' (que fecha tudo e exige um novo
+            # 'open').
+            latitudes = np.asarray(setup["latitudes"])
+            longitudes = np.asarray(setup["longitudes"])
+            setup["lat_min"] = float(latitudes.min())
+            setup["lat_max"] = float(latitudes.max())
+            setup["lon_min"] = float(longitudes.min())
+            setup["lon_max"] = float(longitudes.max())
+            setup["lev"] = setup_toml["lev"]
+            setup["levf"] = setup_toml["levf"]
+            setup["title"] = setup_toml["title"]
+            setup["label"] = setup_toml["label"]
+            setup["cbar_label"] = None
+            setup["draw_map_on"] = False
+            # 'set cut <min> <max>' tambem e uma selecao/filtro (como lat/
+            # lon/lev) que deveria voltar a condicao inicial (desligado) no
+            # 'reset' - sem isto, um corte deixado ligado de uma variavel
+            # anterior (ex: 'set cut -5 5' testando t2m) continua filtrando
+            # TODAS as variaveis seguintes silenciosamente, mascarando a
+            # maior parte dos dados como fora do intervalo (NaN) e deixando
+            # so uma faixa estreita/quase-zero aparecer no mapa seguinte -
+            # um jeito facil de "d o3" parecer quebrado sem nenhum erro.
+            setup["cut"] = None
+            # 'set t <n>' (arquivo selecionado, secao 6 do manual) e
+            # 'set t <ini> <fim>' (serie/animacao entre arquivos) tambem
+            # sao selecao - voltam ao arquivo 1 e a serie desligada.
+            setup["arquivo_sel"] = 1
+            setup["time_ini"] = None
+            setup["time_fim"] = None
+            clear_plots(setup)
+            ax = 0
+            cbar = 0
+            atualizar_titulo_janela(setup)
+            print("Reset: lat/lon voltaram para toda a malha, nivel {0}, arquivo 1; titulo, rotulos, corte (cut) e mapa limpos. Arquivos abertos mantidos.".format(setup["lev"]))
+        elif cmd == "load":
+            if len(cmd_split) < 3 or cmd_split[1] != "limits":
+                print("Uso: load limits <arquivo.csv>")
+            else:
+                caminho_csv = cmd_split[2]
+                if carregar_limites(setup, caminho_csv):
+                    novo_ax = plot_limites(setup)
+                    if novo_ax is not None:
+                        ax = novo_ax
+        elif cmd in _COMANDOS_ESTATISTICA_ESCALAR:
+            # '<sum|mean|min|max|p10..p90> all <variavel>' / '... inlimits
+            # <variavel>' / '... point <variavel>': estatistica escalar (um
+            # unico numero) sobre a variavel, em todos os pontos da malha,
+            # so nos pontos dentro do ultimo 'load limits', ou (com 'point')
+            # sobre o perfil temporal/vertical completo (reduz tambem sobre
+            # os niveis, mesmo sem lat/lon fixada) - usando todos os
+            # arquivos de 'set t <inicio> <fim>' quando o modo de serie
+            # estiver ativo, senao so o arquivo/instante atual (ver
+            # _dados_estatistica) - ver estatistics.py, secao 2.3. O
+            # resultado e so impresso na tela (antes do proximo prompt),
+            # nao altera setup/ax/cbar.
+            if len(cmd_split) < 3 or cmd_split[1] not in ("all", "inlimits", "point"):
+                print("Uso: {0} all <variavel>  |  {0} inlimits <variavel>  |  {0} point <variavel>".format(cmd))
+            else:
+                # Pega o restante da linha (a partir do 3o token), em vez
+                # de so 'cmd_split[2]', para aceitar expressoes com
+                # espacos (ex: '{0} all t2m - 273.15'), igual ao 'd'.
+                token = cmd_user.split(None, 2)[2]
+                arrays = _dados_estatistica(setup, token)
+                if arrays is not None:
+                    mask = None
+                    modo_point = cmd_split[1] == "point"
+                    if cmd_split[1] == "inlimits":
+                        mask = setup.get("limits_mask")
+                        if mask is None:
+                            print("Nenhuma area de limites carregada. Use 'load limits <arquivo.csv>' primeiro.")
+                            arrays = None
+                    if arrays is not None:
+                        calcular_valor(setup, cmd, arrays, mask, token, modo_point=modo_point)
         elif cmd == "set":
             novo_setup = cmd_set(cmd_split, setup, cmd_user)
             if novo_setup is None:
@@ -377,6 +527,42 @@ def exec_cmd(cmd_user, cmd,cmd_split,setup, dataset, ax, cbar, setup_toml):
         elif cmd == "display" or cmd == "d":
             if len(cmd_split) < 2:
                 print("Uso: d <variavel>  |  d mag(<var_u>,<var_v>)  |  d <var_u>;<var_v>")
+                return setup,dataset,ax, cbar
+
+            # 'd sum|mean|min|max|p10..p90 all|inlimits|point <variavel>':
+            # plota o CAMPO espacial da estatistica (reducao so sobre os
+            # arquivos/tempos selecionados - todos os de 'set t <inicio>
+            # <fim>' no modo de serie, senao so o instante atual; com
+            # 'point', reduz tambem sobre os niveis quando ha uma faixa
+            # selecionada), um valor por celula da malha (ou por
+            # celula+nivel, no perfil/corte) - ver estatistics.py/
+            # plot_estatistica_campo, secao 2.3. Diferente da forma escalar
+            # ('sum'/etc., acima), que reduz tambem sobre o espaco para um
+            # unico numero.
+            if cmd_split[1] in _COMANDOS_ESTATISTICA_ESPACIAL and len(cmd_split) >= 3 and cmd_split[2] in ("all", "inlimits", "point"):
+                nome_funcao = cmd_split[1]
+                if len(cmd_split) < 4:
+                    print("Uso: d {0} all <variavel>  |  d {0} inlimits <variavel>  |  d {0} point <variavel>".format(nome_funcao))
+                    return setup,dataset,ax, cbar
+                # Pega o restante da linha (a partir do 4o token), em vez
+                # de so 'cmd_split[3]', para aceitar expressoes com
+                # espacos (ex: 'd mean all t2m - 273.15'), igual ao 'd'.
+                token = cmd_user.split(None, 3)[3]
+                arrays = _dados_estatistica(setup, token)
+                if arrays is None:
+                    return setup,dataset,ax, cbar
+                mask = None
+                modo_point = cmd_split[2] == "point"
+                if cmd_split[2] == "inlimits":
+                    mask = setup.get("limits_mask")
+                    if mask is None:
+                        print("Nenhuma area de limites carregada. Use 'load limits <arquivo.csv>' primeiro.")
+                        return setup,dataset,ax, cbar
+                resultado = calcular_campo(setup, nome_funcao, arrays, mask, token, modo_point=modo_point)
+                if resultado is None:
+                    return setup,dataset,ax, cbar
+                campo, modo = resultado
+                ax, cbar = plot_estatistica_campo(setup, campo, modo, cbar)
                 return setup,dataset,ax, cbar
 
             resto = cmd_user.split(None, 1)[1]

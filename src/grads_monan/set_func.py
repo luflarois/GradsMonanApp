@@ -10,6 +10,8 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
+from .plot_func import atualizar_titulo_janela
+
 def _print_level_info(setup, l):
     """
     Imprime a informacao do nivel selecionado em 'set lev N':
@@ -46,6 +48,19 @@ def _print_level_info(setup, l):
 
     print("Nivel {0} selecionado.".format(l))
 
+def _print_arquivo_info(setup, n):
+    """
+    Imprime a informacao do arquivo selecionado em 'set t N' (nome do
+    arquivo e timestamp, quando disponivel) - mesmo dado de 'show files',
+    so que so a linha do arquivo escolhido.
+    """
+    for info in setup.get("files", []):
+        if info["index"] == n:
+            timestamp = info.get("DataDado") or "desconhecida"
+            print("Arquivo {0} selecionado: {1} ({2}).".format(n, info["fileName"], timestamp))
+            return
+    print("Arquivo {0} selecionado.".format(n))
+
 def cmd_set(cmd_split, setup, cmd_user):
     """
     Ponto de entrada publico do comando 'set'. Avalia os termos numericos do
@@ -75,15 +90,32 @@ def _cmd_set_dispatch(cmd_split, setup, cmd_user):
             setup["lev"] = l
             setup["levf"] = l
             _print_level_info(setup, l)
+            atualizar_titulo_janela(setup)
         elif len(cmd_split) == 4:
+            # <nivel_inicial> e <nivel_final> sao AMBOS indices de nivel
+            # validos e INCLUSIVOS (0 a n_levels-1) - a mesma faixa usada
+            # por 'set lev <n>' (nivel unico) - entao <nivel_final> pode
+            # (e deve) ser o proprio ultimo nivel da malha (n_levels-1)
+            # para inclui-lo. Internamente, 'levf' guarda o limite
+            # EXCLUSIVO (<nivel_final> + 1), a convencao de fatia usada
+            # em todo o resto do codigo ('var[..., lev:levf]' - ver
+            # 'levf_efetivo' em utils.py); sem esse '+1', o ultimo nivel
+            # pedido ficaria de fora da faixa (bug corrigido em
+            # 24Sep2026: antes, incluir o nivel n_levels-1 exigia passar
+            # o indice invalido n_levels, que a checagem de limites
+            # sempre rejeitava - um beco sem saida).
             l1 = int(cmd_split[2])
             l2 = int(cmd_split[3])
             if l1<0 or l1>=n_levels or l2<0 or l2>=n_levels:
                 print("Levels from 0 to {0}!".format(n_levels-1))
                 return setup
+            if l1 > l2:
+                print("Erro: o nivel inicial ({0}) nao pode ser maior que o final ({1}).".format(l1, l2))
+                return setup
             setup["lev"] = l1
-            setup["levf"] = l2
-            #print("Level set from {0} to {1} : {2} to {3}".format(lev,levf,levels[lev],levels[levf]))               
+            setup["levf"] = l2 + 1
+            #print("Level set from {0} to {1} : {2} to {3}".format(lev,levf,levels[lev],levels[levf]))
+            atualizar_titulo_janela(setup)
         else:
             print("Uso: set lev <nivel>  ou  set lev <nivel_inicial> <nivel_final>")
         return setup
@@ -158,19 +190,23 @@ def _cmd_set_dispatch(cmd_split, setup, cmd_user):
         if len(cmd_split) == 3:
             setup["lat_min"] = float(cmd_split[2])
             setup["lat_max"] = float(cmd_split[2])
+            atualizar_titulo_janela(setup)
             return setup
         elif len(cmd_split) == 4:
             setup["lat_min"] = float(cmd_split[2])
-            setup["lat_max"] = float(cmd_split[3])  
-            return setup              
+            setup["lat_max"] = float(cmd_split[3])
+            atualizar_titulo_janela(setup)
+            return setup
     elif cmd_split[1] == "lon":
         if len(cmd_split) == 3:
             setup["lon_min"] = float(cmd_split[2])
             setup["lon_max"] = float(cmd_split[2])
+            atualizar_titulo_janela(setup)
             return setup
         elif len(cmd_split) == 4:
             setup["lon_min"] = float(cmd_split[2])
-            setup["lon_max"] = float(cmd_split[3]) 
+            setup["lon_max"] = float(cmd_split[3])
+            atualizar_titulo_janela(setup)
             return setup
     elif cmd_split[1] == "cmap":
         setup["cmap"] = cmd_split[2]    
@@ -195,14 +231,46 @@ def _cmd_set_dispatch(cmd_split, setup, cmd_user):
         setup["clevs"] = [float(x) for x in levs_in]
         return setup
     elif cmd_split[1] == "time" or cmd_split[1] == "t":
-        # 'set t <n>' (ou 'set time <n>'): indice de tempo unico, dentro do
-        # arquivo (comportamento classico, inalterado).
-        # 'set t <inicio> <fim>': quando ha mais de um arquivo aberto (ver
-        # 'open', secao 2.1 do manual), seleciona um INTERVALO DE ARQUIVOS
-        # (pelo indice de abertura, 1, 2, 3...) para plotar como serie
-        # temporal (ver plot_serie_temporal em plot_func.py).
+        # 'set t <n>' (ou 'set time <n>'): seleciona o ARQUIVO numero <n>
+        # entre os varios abertos ('open', secao 2.1 do manual) como o
+        # arquivo PADRAO para os proximos 'd'/'d3'/estatisticas sem
+        # sufixo '.N' - equivalente a escrever '.{n}' em toda variavel
+        # seguinte, so que uma unica vez (setup['arquivo_sel'], usado por
+        # '_resolver_variavel' em exec_func.py). Persiste ate o proximo
+        # 'set t <n>' (ou 'reset'/'reinit'); a forma explicita e pontual,
+        # so para uma chamada, continua sendo o sufixo '.N' na propria
+        # variavel (ex: 'd o3.5'; ver secao 2.1 e 3).
+        # 'set t <inicio> <fim>': quando ha mais de um arquivo aberto,
+        # seleciona um INTERVALO DE ARQUIVOS (pelo indice de abertura, 1,
+        # 2, 3...) para plotar como serie temporal/animacao (ver
+        # plot_serie_temporal em plot_func.py) - inclusive com
+        # <inicio> == <fim>, uma "serie" de um unico arquivo.
+        #
+        # As duas formas sao MODOS MUTUAMENTE EXCLUSIVOS de selecao (o
+        # ultimo 'set t' usado e quem vale): 'set t <n>' e um pedido
+        # explicito de UM UNICO arquivo/tempo (nao uma serie/animacao) -
+        # por isso, alem de guardar 'arquivo_sel', ele tem que DESLIGAR
+        # o modo serie (time_ini/time_fim), caso tenha ficado ligado de
+        # um 'set t <ini> <fim>' anterior na mesma sessao. Sem isso,
+        # '_modo_serie_ativo' (exec_func.py) continuava True mesmo depois
+        # de um 'set t 5' pontual, e 'd'/'d3' seguiam recusando qualquer
+        # combinacao de lat/lon/lev fixados que nao coubesse no modo
+        # serie (mensagem "apenas uma dentre latitude, longitude e
+        # nivel..."), quando o usuario so queria um corte/mapa normal no
+        # arquivo/tempo escolhido - bug corrigido em 24Sep2026.
         if len(cmd_split) == 3:
-            setup["time_sel"] = int(cmd_split[2])
+            n = int(cmd_split[2])
+            arquivos = setup.get("files") or []
+            if arquivos:
+                total = len(arquivos)
+                if n < 1 or n > total:
+                    print("Arquivos abertos vao de 1 a {0}.".format(total))
+                    return setup
+            setup["arquivo_sel"] = n
+            setup["time_ini"] = None
+            setup["time_fim"] = None
+            _print_arquivo_info(setup, n)
+            atualizar_titulo_janela(setup)
             return setup
         elif len(cmd_split) == 4:
             i1 = int(cmd_split[2])
@@ -218,6 +286,7 @@ def _cmd_set_dispatch(cmd_split, setup, cmd_user):
                 return setup
             setup["time_ini"] = i1
             setup["time_fim"] = i2
+            atualizar_titulo_janela(setup)
             return setup
         else:
             print("Uso: set t <indice>  ou  set t <arquivo_inicial> <arquivo_final>")

@@ -72,6 +72,28 @@ def assinatura_malha(latitudes, longitudes):
 def mag(u,v):
     return np.sqrt(u**2+v**2)
 
+def levf_efetivo(lev, levf):
+    """
+    'levf' e guardado (por 'set lev', set_func.py) como o limite superior
+    EXCLUSIVO da faixa de niveis - a convencao de fatia do Python usada em
+    toda fatia de nivel do codigo ('var[..., lev:levf]', 'levels[lev:levf]',
+    etc: 'set lev <inicial> <final>' guarda 'levf' = <final> + 1, para que
+    <final> - um indice de nivel de verdade, igual a <inicial> - fique
+    INCLUIDO na fatia).
+
+    So 'levf' de fato define uma faixa quando maior que 'lev' (uma faixa
+    "de verdade", vinda de 'set lev <inicial> <final>'); no caso mais comum
+    - um UNICO nivel selecionado ('set lev <n>', que guarda lev==levf==n) -
+    a fatia 'lev:levf' ficaria VAZIA (limite superior exclusivo do Python
+    aplicado a um par de indices iguais). Esta funcao devolve o limite
+    superior EFETIVO a usar nesse caso (lev+1, incluindo exatamente aquele
+    nivel), preservando o comportamento normal quando ja ha uma faixa
+    genuina - usada tanto pelas estatisticas (estatistics.py) quanto pela
+    plotagem direta de perfil/corte (plot_func.py), para que um UNICO
+    nivel selecionado sempre produza aquele nivel, nunca uma fatia vazia.
+    """
+    return levf if levf > lev else lev + 1
+
 def construir_poligonos_celulas(mesh):
     """
     Monta o poligono (lon, lat) de CADA celula da malha MPAS/MONAN, a

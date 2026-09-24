@@ -18,7 +18,7 @@ from matplotlib.colors import BoundaryNorm
 import matplotlib.tri as mtri
 from matplotlib.collections import PolyCollection
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 - registra a projecao '3d'
-from .utils import normalize_lon, mag, load_zgrid_centers, construir_poligonos_celulas
+from .utils import normalize_lon, mag, load_zgrid_centers, construir_poligonos_celulas, levf_efetivo
 from .map_func import plot_map, plot_map_3d
 from scipy.interpolate import LinearNDInterpolator
 from scipy.spatial import Delaunay, cKDTree
@@ -93,6 +93,74 @@ def set_window_title(titulo):
     except Exception:
         pass
 
+def _formatar_lat(v):
+    """'set lat'/titulo da janela: valor com sufixo S (negativo/sul) ou N
+    (positivo/norte), sem o sinal, com exatamente 2 casas decimais - ex:
+    -22 -> '22.00S', 10.5 -> '10.50N'."""
+    sufixo = "S" if v < 0 else "N"
+    return "{0:.2f}{1}".format(abs(v), sufixo)
+
+def _formatar_lon(v):
+    """'set lon'/titulo da janela: valor com sufixo W (negativo/oeste) ou E
+    (positivo/leste), sem o sinal, com exatamente 2 casas decimais - ex:
+    -60 -> '60.00W', 30.5 -> '30.50E'."""
+    sufixo = "W" if v < 0 else "E"
+    return "{0:.2f}{1}".format(abs(v), sufixo)
+
+def _timestamp_titulo(setup):
+    """
+    Timestamp a usar no titulo da janela: o do arquivo/tempo ATUALMENTE
+    selecionado por 'set t' - o primeiro arquivo do intervalo, no modo de
+    serie/animacao ('set t <inicio> <fim>'), ou o arquivo pontual
+    (setup['arquivo_sel']) fora dele - ver secao 2.1 do manual.
+    """
+    arquivos = setup.get("files") or []
+    if arquivos:
+        time_ini = setup.get("time_ini")
+        time_fim = setup.get("time_fim")
+        if time_ini is not None and time_fim is not None:
+            indice = time_ini
+        else:
+            indice = setup.get("arquivo_sel", 1)
+        for info in arquivos:
+            if info["index"] == indice:
+                return info.get("DataDado") or "desconhecida"
+    return setup.get("DataDado") or "desconhecida"
+
+def atualizar_titulo_janela(setup):
+    """
+    Atualiza o titulo da JANELA (nao confundir com 'set title', o titulo
+    do grafico) sempre que a selecao de tempo ('set t'), latitude, longitude
+    ou nivel mudar - chamada por 'set_func.py' ao final de cada um desses
+    comandos, e por 'files.py' logo apos cada 'open' (arquivo de dados
+    e/ou de grade). Formato:
+    'GradsMonan: <timestamp>,<lat(es)>,<lon(s)>,L<nivel(is)>' - ex:
+    'GradsMonan: 2022-07-14T04,22.00S,60.00W-30.00W,L1-45'. Latitude/
+    longitude aparecem como um unico valor (com sufixo N/S ou W/E, sempre
+    com 2 casas decimais) quando um ponto esta selecionado, ou como
+    'x<suf>-y<suf>' quando ha uma faixa; o nivel vem prefixado com 'L' -
+    um unico indice ('L3'), ou 'L<lev_ini>-<lev_fim>' (ambos inclusivos)
+    quando ha uma faixa de niveis selecionada (ver 'levf_efetivo').
+    """
+    lat_min = setup.get("lat_min", 0.0)
+    lat_max = setup.get("lat_max", 0.0)
+    lon_min = setup.get("lon_min", 0.0)
+    lon_max = setup.get("lon_max", 0.0)
+    lev = setup.get("lev", 0)
+    levf = setup.get("levf", 0)
+
+    timestamp = _timestamp_titulo(setup)
+
+    lat_txt = _formatar_lat(lat_min) if lat_min == lat_max else "{0}-{1}".format(
+        _formatar_lat(lat_min), _formatar_lat(lat_max))
+    lon_txt = _formatar_lon(lon_min) if lon_min == lon_max else "{0}-{1}".format(
+        _formatar_lon(lon_min), _formatar_lon(lon_max))
+
+    ultimo_nivel = max(lev, levf - 1)
+    lev_txt = "L{0}".format(lev) if ultimo_nivel <= lev else "L{0}-{1}".format(lev, ultimo_nivel)
+
+    set_window_title("GradsMonan: {0},{1},{2},{3}".format(timestamp, lat_txt, lon_txt, lev_txt))
+
 def _niveis_cor(setup):
     """
     Niveis de cor/contorno a usar em contourf/tricontourf/tricontour.
@@ -118,6 +186,34 @@ def _tamanho_malha_ok(label, tamanho_dado, tamanho_malha):
             label, tamanho_dado, tamanho_malha))
         print("Isso indica que esta variavel nao esta na mesma malha do arquivo de grade usado no 'open'.")
         print("Verifique se e realmente o arquivo de grade correto para este arquivo de dados.")
+        return False
+    return True
+
+def _tempo_valido(label, var, time_sel):
+    """
+    Confere se 'time_sel' ('set t <n>', indice de tempo DENTRO DO ARQUIVO -
+    secao 6 do manual) e um indice valido da dimensao de tempo da propria
+    variavel, antes de indexar 'var[time_sel, ...]'. Sem isso, um indice
+    fora do intervalo (comum quando o arquivo tem so 1 horario - o caso
+    normal de saidas MONAN/MPAS abertas uma por arquivo, com varios
+    arquivos abertos por vez) derrubava o programa com um IndexError cru
+    do numpy, sem explicar o que houve.
+
+    O erro mais comum que leva a isso: confundir 'set t <n>' (que so
+    afeta o indice de tempo DENTRO do arquivo indicado pela variavel,
+    normalmente o arquivo 1) com selecionar qual dos VARIOS ARQUIVOS
+    abertos mostrar - isso e feito com o sufixo '.N' na propria variavel
+    (ex: 'd o3.8' mostra o arquivo numero 8), ou, para uma serie/animacao
+    de verdade entre arquivos, com 'set t <arquivo_inicial> <arquivo_final>'
+    (2 argumentos) - ver secao 2.1 do manual.
+    """
+    n_tempos = var.shape[0]
+    if time_sel < 0 or time_sel >= n_tempos:
+        if n_tempos == 1:
+            print("Erro: 'set t {0}' invalido para '{1}' - este arquivo tem um unico horario (indice 0).".format(time_sel, label))
+        else:
+            print("Erro: 'set t {0}' invalido para '{1}' - indices de tempo validos neste arquivo: 0 a {2}.".format(time_sel, label, n_tempos-1))
+        print("Para escolher outro ARQUIVO entre os varios abertos, use o sufixo '.N' na variavel (ex: 'd {0}.8' mostra o arquivo numero 8), ou 'set t <arquivo_inicial> <arquivo_final>' para uma serie/animacao entre arquivos.".format(label if label else "<variavel>"))
         return False
     return True
 
@@ -315,23 +411,22 @@ def plot_perfil(setup, var):
     lat_max = setup["lat_max"]
     lon_max = setup["lon_max"]
     time_sel = setup["time_sel"]
-    lev  = setup["lev"] 
+    lev  = setup["lev"]
     levf = setup["levf"]
     label = setup["label"]
-    cmap = setup["cmap"]
-    lc = setup["lc"]
-    lw = setup["lw"]
-    z = setup["levels"]
     latitudes = setup["latitudes"]
     longitudes = setup["longitudes"]
-    levels = setup["levels"]
 
     lon = np.array(longitudes)
     lat = np.array(latitudes)
     if len(var.shape) < 3:
         print("Nao e possivel plotar perfil vertical: a variavel e bidimensional (sem dimensao de nivel).")
         return -1
-    data = var[time_sel, :,lev:levf]
+    # 'levf_efetivo': com um UNICO nivel selecionado ('set lev <n>', que
+    # deixa lev==levf), a fatia 'lev:levf' ficaria vazia (limite superior
+    # exclusivo do Python) - usa exatamente aquele nivel nesse caso, em
+    # vez de nao plotar nada silenciosamente.
+    data = var[time_sel, :, lev:levf_efetivo(lev, levf)]
     lon = normalize_lon(lon)
 
     if not _tamanho_malha_ok(label, data.shape[0], len(lon)):
@@ -349,37 +444,66 @@ def plot_perfil(setup, var):
     if lat_min != lat_max and lon_min == lon_max:
         print("Not implemented!")
         return -1
-        
+
     if lat_min != lat_max or lon_min != lon_max:
          print("Isnt a point lat lon selected!")
-         return -1  
-    
+         return -1
+
     dist = np.sqrt((lat - lat_min)**2 + (lon - lon_min)**2)
-    closest_index = np.argmin(dist)
+    closest_index = int(np.argmin(dist))
     vertical_profile = data[closest_index,:]
+
+    return _plotar_perfil_dados(setup, vertical_profile, closest_index)
+
+def _plotar_perfil_dados(setup, vertical_profile, closest_index):
+    """
+    Desenha o perfil vertical (nivel x valor), a partir de um array
+    'vertical_profile' (nLevels_do_intervalo_lev:levf,) JA RESOLVIDO para a
+    celula mais proxima ('closest_index', dentro do array completo de
+    latitudes/longitudes da malha - usado para achar a altura geometrica
+    daquela celula especifica, se disponivel).
+
+    Reaproveitado por 'plot_perfil' (variavel comum, que resolve
+    'vertical_profile'/'closest_index' a partir do 'var' bruto do arquivo,
+    acima) e por 'plot_estatistica_campo' (estatisticas mean/min/max/
+    p10..p90 num ponto - secao 2.3 do manual), que ja calcula o perfil
+    reduzido no tempo antes de chamar esta funcao. 'set cut' e aplicado
+    aqui (idempotente - tanto faz se o chamador ja tiver aplicado antes).
+    """
+    lev = setup["lev"]
+    label = setup["label"]
+    levels = setup["levels"]
 
     cut = setup.get("cut")
     vertical_profile = _aplicar_corte(vertical_profile, cut)
+
+    # O eixo Y (niveis/altura) e fatiado a partir do COMPRIMENTO REAL de
+    # 'vertical_profile' (nao do 'levf' cru do setup): quem resolveu o
+    # perfil (plot_perfil, ou 'calcular_campo' em estatistics.py, no modo
+    # 'ponto') ja pode ter corrigido um 'lev==levf' degenerado (ver
+    # 'levf_efetivo' em utils.py) - fatiar de novo com o 'levf' original
+    # aqui duplicaria essa logica e poderia dessincronizar os tamanhos.
+    levf_dados = lev + len(vertical_profile)
 
     eixo_pressao = setup.get("eixo_pressao", False)
     variables = setup.get("variables", {})
     zgrid_arr = None
     if not eixo_pressao:
-        zgrid_arr = load_zgrid_centers(variables, len(lat), len(levels))
+        zgrid_arr = load_zgrid_centers(variables, len(setup["latitudes"]), len(levels))
 
     if eixo_pressao:
         # Pressao (t_iso_levels): maior pressao embaixo, menor em cima
-        y_vals = np.array(levels[lev:levf])
+        y_vals = np.array(levels[lev:levf_dados])
         ylabel = 'Pressao (hPa)'
-    elif zgrid_arr is not None and np.mean(np.isfinite(zgrid_arr[closest_index, lev:levf])) >= 0.5:
+    elif zgrid_arr is not None and np.mean(np.isfinite(zgrid_arr[closest_index, lev:levf_dados])) >= 0.5:
         # Sem t_iso_levels, mas com zgrid: altura geometrica, menor embaixo, maior em cima
-        y_vals = zgrid_arr[closest_index, lev:levf]
+        y_vals = zgrid_arr[closest_index, lev:levf_dados]
         ylabel = 'Altura (m)'
     else:
         if zgrid_arr is not None:
             print("Aviso: zgrid majoritariamente invalido para o ponto selecionado (shape={0}); usando indice de nivel no eixo Y.".format(zgrid_arr.shape))
         # Sem os dois: apenas o indice do nivel, menor embaixo, maior em cima
-        y_vals = np.array(levels[lev:levf])
+        y_vals = np.array(levels[lev:levf_dados])
         ylabel = 'Levels'
 
     plt.scatter(vertical_profile,y_vals)
@@ -401,19 +525,11 @@ def plot_corte(setup, var, cbar=None):
     com longitude fixa), interpolando a malha nao estruturada (Voronoi) sobre
     uma linha reta na coordenada fixada.
     """
-    lat_min = setup["lat_min"]
-    lat_max = setup["lat_max"]
-    lon_min = setup["lon_min"]
-    lon_max = setup["lon_max"]
     time_sel = setup["time_sel"]
     lev  = setup["lev"]
     levf = setup["levf"]
     label = setup["label"]
-    cmap = setup["cmap"]
-    Title = setup["title"]
-    latitudes = np.array(setup["latitudes"])
     longitudes = normalize_lon(np.array(setup["longitudes"]))
-    levels = np.array(setup["levels"])
 
     if len(var.shape) < 3:
         print("Nao e possivel fazer corte vertical: a variavel e bidimensional (sem dimensao de nivel).")
@@ -421,9 +537,52 @@ def plot_corte(setup, var, cbar=None):
         return ax, cbar
 
     data = var[time_sel, :, lev:levf]  # (nCells, nLevs)
-    n_lev = data.shape[1]
 
     if not _tamanho_malha_ok(label, data.shape[0], len(longitudes)):
+        ax = plt.gca()
+        return ax, cbar
+
+    return _plotar_corte_dados(setup, data, cbar)
+
+def _plotar_corte_dados(setup, data, cbar=None):
+    """
+    Desenha o corte vertical (nivel x longitude/latitude), a partir de um
+    array 'data' (nCells, nLevels_do_intervalo_lev:levf) JA RESOLVIDO,
+    interpolando a malha nao estruturada sobre uma linha reta na
+    coordenada fixada (lat ou lon).
+
+    Reaproveitado por 'plot_corte' (variavel comum, que resolve 'data' a
+    partir do 'var' bruto do arquivo, acima) e por
+    'plot_estatistica_campo' (estatisticas mean/min/max/p10..p90 num corte
+    - secao 2.3 do manual), que ja calcula 'data' reduzido no tempo antes
+    de chamar esta funcao. 'set cut' e aplicado aqui (idempotente - tanto
+    faz se o chamador ja tiver aplicado antes).
+    """
+    lat_min = setup["lat_min"]
+    lat_max = setup["lat_max"]
+    lon_min = setup["lon_min"]
+    lon_max = setup["lon_max"]
+    lev  = setup["lev"]
+    levf = setup["levf"]
+    label = setup["label"]
+    cmap = setup["cmap"]
+    Title = setup["title"]
+    latitudes = np.array(setup["latitudes"])
+    levels = np.array(setup["levels"])
+    n_lev = data.shape[1]
+
+    if n_lev < 2:
+        # Um corte vertical de verdade (contourf de nivel x lat/lon) exige
+        # PELO MENOS 2 niveis - o matplotlib rejeita 'contourf' com uma
+        # unica linha (shape (1, N)). Isso so pode acontecer aqui vindo da
+        # forma espacial das estatisticas ('d ... corte ... point <var>',
+        # ou mesmo 'all'/'inlimits' com um so nivel selecionado - secao
+        # 2.3 do manual): 'plot_corte' (variavel comum) ja bloqueia esse
+        # caso antes de chegar aqui (ver 'plot_var').
+        print("Aviso: nao e possivel plotar um corte vertical com um unico nivel "
+              "(faltam pontos no eixo vertical para o grafico) - selecione uma "
+              "faixa de pelo menos 2 niveis com 'set lev <ini> <fim>', ou use a "
+              "forma escalar da estatistica.")
         ax = plt.gca()
         return ax, cbar
 
@@ -668,6 +827,113 @@ def plot_hexagonos(setup, data):
     ax.set_ylim(lat_min, lat_max)
     return coll
 
+def plot_limites(setup):
+    """
+    Comando 'load limits <arquivo.csv>': plota um mapa mostrando o
+    poligono lido do arquivo (limite da area, linha preta fechada) e
+    destaca, em vermelho, todos os centros de celula da malha aberta que
+    caem DENTRO dele - a mesma selecao ja guardada em
+    setup['limits_mask']/setup['limits_indices'] (ver 'carregar_limites'
+    em files.py), pronta para ser reaproveitada pelas futuras funcoes
+    estatisticas dentro da area. As demais celulas (fora da area) aparecem
+    em cinza claro, so para dar contexto espacial - nao participam de
+    nenhum calculo.
+
+    Retorna o eixo usado (para o chamador atualizar o 'ax' da sessao), ou
+    None se ainda nao houver limites carregados (setup['limits_poligono']/
+    setup['limits_mask'] ausentes).
+    """
+    poligono = setup.get("limits_poligono")
+    mask = setup.get("limits_mask")
+    if poligono is None or mask is None:
+        return None
+
+    _ativar_figura_2d(setup)
+    ax = plt.gca()
+    ax.cla()
+
+    latitudes = np.asarray(setup["latitudes"])
+    longitudes = np.asarray(setup["longitudes"])
+
+    n_dentro = int(np.count_nonzero(mask))
+    if n_dentro < len(mask):
+        ax.scatter(longitudes[~mask], latitudes[~mask], s=3, color='lightgray',
+                   label='Fora da area', zorder=1)
+    if n_dentro:
+        ax.scatter(longitudes[mask], latitudes[mask], s=4, color='tab:red',
+                   label='Dentro da area ({0})'.format(n_dentro), zorder=2)
+
+    fechado = np.vstack([poligono, poligono[0]])
+    ax.plot(fechado[:, 0], fechado[:, 1], color='black', linewidth=1.5, linestyle='-', zorder=3)
+
+    ax.set_xlim(setup["lon_min"], setup["lon_max"])
+    ax.set_ylim(setup["lat_min"], setup["lat_max"])
+    ax.set_xlabel('Longitude')
+    ax.set_ylabel('Latitude')
+    ax.legend(loc='best', fontsize=8)
+
+    if setup.get("draw_map_on"):
+        plot_map(setup, ax)
+
+    _aplicar_titulo(setup, ax)
+
+    return ax
+
+def plot_estatistica_campo(setup, campo, modo, cbar=None):
+    """
+    Plota o resultado (JA reduzido sobre os arquivos/tempos selecionados)
+    de uma funcao estatistica espacial (mean/min/max/p10..p90 - ver
+    'calcular_campo' em estatistics.py) - comando 'd mean|min|max|
+    p10..p90 all|inlimits <variavel>' (secao 2.3) - reaproveitando a
+    MESMA logica de desenho que 'd'/'d3' usariam para a propria variavel
+    (mapa/perfil/corte, gxout, colorbar e titulo), conforme 'modo'
+    (retornado por 'calcular_campo', igual ao que '_modo_espacial' em
+    estatistics.py decidiria a partir da selecao atual de lat/lon):
+
+      - 'ponto': 'campo' e um perfil vertical (nLevels,) na celula mais
+        proxima do ponto selecionado - desenhado via '_plotar_perfil_dados'
+        (mesma funcao usada por 'plot_perfil' para uma variavel comum).
+      - 'corte': 'campo' e (nCells, nLevels) - desenhado via
+        '_plotar_corte_dados' (mesma funcao usada por 'plot_corte').
+      - 'mapa': 'campo' e (nCells,) - embrulhado como (1, nCells) e
+        passado a 'plot_var' (que espera uma variavel com a dimensao de
+        Tempo, fatiada com setup['time_sel']); 'time_sel' e forcado para 0
+        so durante a chamada (restaurado logo em seguida).
+    """
+    _ativar_figura_2d(setup)
+
+    if modo == "ponto":
+        indice = _indice_mais_proximo_estatistica(setup)
+        _plotar_perfil_dados(setup, np.asarray(campo, dtype=float), indice)
+        ax = plt.gca()
+        return ax, cbar
+
+    if modo == "corte":
+        ax, cbar = _plotar_corte_dados(setup, np.asarray(campo, dtype=float), cbar)
+        return ax, cbar
+
+    campo_2d = np.asarray(campo, dtype=float)[np.newaxis, :]
+    time_sel_anterior = setup.get("time_sel")
+    setup["time_sel"] = 0
+    try:
+        ax, cbar = plot_var(setup, campo_2d, cbar)
+    finally:
+        setup["time_sel"] = time_sel_anterior
+    return ax, cbar
+
+def _indice_mais_proximo_estatistica(setup):
+    """
+    Indice da celula da malha mais proxima do ponto de lat/lon
+    selecionado - mesma formula usada em 'estatistics.py'
+    (_indice_mais_proximo), reaplicada aqui so para desenhar (o resultado
+    e determinista, dado o mesmo 'setup' - nao precisa ser repassado pelo
+    chamador).
+    """
+    lat = np.asarray(setup["latitudes"])
+    lon = np.asarray(setup["longitudes"])
+    dist = np.sqrt((lat - setup["lat_min"]) ** 2 + (lon - setup["lon_min"]) ** 2)
+    return int(np.argmin(dist))
+
 def plot_var_3d(setup, var):
     """
     Comando 'd3 <variavel>': plota em 3D (scatter), numa janela separada da
@@ -695,7 +961,7 @@ def plot_var_3d(setup, var):
     eixo_pressao = setup.get("eixo_pressao", False)
     variables = setup.get("variables", {})
 
-    if lat_min == lat_max or lon_min == lon_max or lev == levf:
+    if lat_min == lat_max or lon_min == lon_max or levf - lev < 2:
         print("Para plotar em 3D, selecione faixas (nao pontos unicos) nas tres dimensoes:")
         print("  set lat <min> <max>")
         print("  set lon <min> <max>")
@@ -844,6 +1110,10 @@ def plot_var(setup, var, cbar=None):
     longitudes = setup["longitudes"]
     levels = setup["levels"]
 
+    if not _tempo_valido(label, var, time_sel):
+        ax = plt.gca()
+        return ax, cbar
+
     ponto_unico = (lat_min == lat_max) and (lon_min == lon_max)
     corte_vertical = (lat_min == lat_max) != (lon_min == lon_max)  # so uma das duas fixa
 
@@ -854,8 +1124,14 @@ def plot_var(setup, var, cbar=None):
         return ax, cbar
 
     if corte_vertical:
-        if lev == levf:
-            print("Para um corte vertical (latitude ou longitude fixa), selecione um intervalo de niveis:")
+        # Um corte vertical de verdade (contourf de nivel x lat/lon) exige
+        # PELO MENOS 2 niveis - com 'levf' guardando o limite EXCLUSIVO da
+        # faixa (ver 'levf_efetivo'/'set_func.py'), isso e 'levf - lev >=
+        # 2'; um so nivel (inclusive uma faixa "set lev <n> <n>", que
+        # tambem cai aqui) nao da um corte, precisa de 'set lev <ini>
+        # <fim>' com <fim> de verdade maior que <ini>.
+        if levf - lev < 2:
+            print("Para um corte vertical (latitude ou longitude fixa), selecione um intervalo de niveis (pelo menos 2):")
             print("  set lev <lev_ini> <lev_fim>")
             ax = plt.gca()
             return ax, cbar
@@ -1079,7 +1355,11 @@ def plot_wind(setup, var1, var2, cbar):
     lat_min = setup["lat_min"]
     lat_max = setup["lat_max"]
 
-    if lev!=levf:
+    if not _tempo_valido("u;v", var1, time_sel):
+        ax = plt.gca()
+        return ax, cbar
+
+    if (levf - lev) > 1:
         plot_perfil(setup, mag(var1,var2))
         ax = plt.gca()
         return ax, cbar
@@ -1121,7 +1401,7 @@ def _eixo_x_tempo(dados):
     <arquivo_inicial> <arquivo_final>', com mais de um arquivo aberto):
     tenta interpretar o 'DataDado' de cada arquivo selecionado como
     data/hora real (formato 'AAAA-MM-DDTHH', o mesmo montado em
-    files_nc.py a partir de 'xtime'). Se algum nao for interpretavel (ex:
+    files.py a partir de 'xtime'). Se algum nao for interpretavel (ex:
     'desconhecida', arquivo sem 'xtime'), cai num eixo posicional simples
     (0, 1, 2, ...), rotulado com o texto bruto de cada 'DataDado'.
     Retorna (x_vals, usa_datetime, rotulos).
@@ -1184,7 +1464,7 @@ def plot_serie_temporal(setup, var_name, dados, cbar=None):
 
     lat_e_ponto = (lat_min == lat_max)
     lon_e_ponto = (lon_min == lon_max)
-    lev_e_ponto = (lev == levf)
+    lev_e_ponto = (levf - lev) <= 1
     n_faixas = sum(not p for p in (lat_e_ponto, lon_e_ponto, lev_e_ponto))
 
     if n_faixas > 1:
