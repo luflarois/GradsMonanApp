@@ -10,6 +10,166 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
+from .plot_func import atualizar_titulo_janela, _fonte_existe
+
+_ESTILOS_TEXTO_VALIDOS = ("bold", "italic", "normal")
+_BAR_POSICOES_VALIDAS = ("U", "D", "L", "R")
+
+def _set_estilo_texto(setup, alvo, cmd_split, cmd_user):
+    """
+    Implementa 'set label font/color/size/style' e 'set title
+    font/color/size/style' (secao 6 do manual): controla, respectivamente,
+    a fonte, a cor, o tamanho e o estilo (negrito/italico/normal) usados
+    para desenhar o rotulo da barra de cores ('alvo' = "label" - colorbar,
+    ver 'draw label'/'set label <texto>') e o titulo do grafico ('alvo' =
+    "title" - ver 'draw title'). Guarda o resultado em
+    setup['<alvo>_font']/setup['<alvo>_color']/setup['<alvo>_size']/
+    setup['<alvo>_style'], consumidos de fato ao desenhar por
+    '_kwargs_texto' (plot_func.py).
+    """
+    sub = cmd_split[2]
+    if sub == "font":
+        if len(cmd_split) < 4:
+            print("Uso: set {0} font <nome_da_fonte>".format(alvo))
+            return setup
+        # Pega o restante da linha (a partir do 4o token), para aceitar
+        # nomes de fonte com espaco (ex: 'DejaVu Sans').
+        nome_fonte = cmd_user.split(None, 3)[3]
+        if not _fonte_existe(nome_fonte):
+            print("Erro: fonte '{0}' nao encontrada no sistema. Use 'show fonts' para ver as fontes disponiveis.".format(nome_fonte))
+            return setup
+        setup["{0}_font".format(alvo)] = nome_fonte
+        print("Fonte de '{0}' definida para '{1}'.".format(alvo, nome_fonte))
+        return setup
+    if sub == "color":
+        if len(cmd_split) < 4:
+            print("Uso: set {0} color <cor>".format(alvo))
+            return setup
+        cor = cmd_split[3]
+        setup["{0}_color".format(alvo)] = cor
+        print("Cor de '{0}' definida para '{1}'.".format(alvo, cor))
+        return setup
+    if sub == "size":
+        if len(cmd_split) < 4:
+            print("Uso: set {0} size <n>".format(alvo))
+            return setup
+        try:
+            tamanho = float(cmd_split[3])
+        except ValueError:
+            print("Erro: tamanho de fonte invalido: '{0}'.".format(cmd_split[3]))
+            return setup
+        if tamanho <= 0:
+            print("Erro: o tamanho de fonte deve ser um numero positivo.")
+            return setup
+        setup["{0}_size".format(alvo)] = tamanho
+        print("Tamanho de fonte de '{0}' definido para '{1}'.".format(alvo, tamanho))
+        return setup
+    # sub == "style"
+    if len(cmd_split) < 4 or cmd_split[3] not in _ESTILOS_TEXTO_VALIDOS:
+        print("Uso: set {0} style <bold/italic/normal>".format(alvo))
+        return setup
+    setup["{0}_style".format(alvo)] = cmd_split[3]
+    print("Estilo de '{0}' definido para '{1}'.".format(alvo, cmd_split[3]))
+    return setup
+
+_MODOS_LINHA_CONTORNO = ("bw", "color")
+
+def _set_contour(setup, cmd_split, cmd_user):
+    """
+    Implementa os comandos 'set contour ...' (secao 6 do manual), que
+    configuram a aparencia das linhas de contorno e dos rotulos inline do
+    'gxout contour' (ver _kwargs_contour_linhas/_aplicar_estilo_contorno_
+    labels em plot_func.py):
+
+      set contour line size <n>            - espessura das linhas
+      set contour line <bw/color>          - preto-e-branco ou coloridas (cmap)
+      set contour font <nome_da_fonte>     - fonte dos rotulos inline
+      set contour font color <cor>         - cor dos rotulos inline
+      set contour font size <n>            - tamanho de fonte dos rotulos inline
+      set contour font style <bold/italic/normal> - estilo dos rotulos inline
+    """
+    uso = ("Uso: set contour line size <n>  |  set contour line <bw/color>  |  "
+           "set contour font <nome_da_fonte>  |  set contour font color <cor>  |  "
+           "set contour font size <n>  |  set contour font style <bold/italic/normal>")
+    if len(cmd_split) < 3:
+        print(uso)
+        return setup
+
+    sub = cmd_split[2]
+
+    if sub == "line":
+        if len(cmd_split) < 4:
+            print("Uso: set contour line size <n>  |  set contour line <bw/color>")
+            return setup
+        if cmd_split[3] == "size":
+            if len(cmd_split) < 5:
+                print("Uso: set contour line size <n>")
+                return setup
+            try:
+                espessura = float(cmd_split[4])
+            except ValueError:
+                print("Erro: tamanho de linha invalido: '{0}'.".format(cmd_split[4]))
+                return setup
+            if espessura <= 0:
+                print("Erro: o tamanho de linha deve ser um numero positivo.")
+                return setup
+            setup["contour_line_size"] = espessura
+            print("Espessura da linha de contorno definida para {0}.".format(espessura))
+            return setup
+        modo = cmd_split[3].lower()
+        if modo not in _MODOS_LINHA_CONTORNO:
+            print("Uso: set contour line size <n>  |  set contour line <bw/color>")
+            return setup
+        setup["contour_line_mode"] = modo
+        print("Linhas de contorno definidas para '{0}'.".format(modo))
+        return setup
+
+    if sub == "font":
+        if len(cmd_split) < 4:
+            print("Uso: set contour font <nome_da_fonte>  |  set contour font color <cor>  |  set contour font size <n>  |  set contour font style <bold/italic/normal>")
+            return setup
+        if cmd_split[3] == "color":
+            if len(cmd_split) < 5:
+                print("Uso: set contour font color <cor>")
+                return setup
+            cor = cmd_split[4]
+            setup["contour_font_color"] = cor
+            print("Cor da fonte do contorno definida para '{0}'.".format(cor))
+            return setup
+        if cmd_split[3] == "size":
+            if len(cmd_split) < 5:
+                print("Uso: set contour font size <n>")
+                return setup
+            try:
+                tamanho = float(cmd_split[4])
+            except ValueError:
+                print("Erro: tamanho de fonte invalido: '{0}'.".format(cmd_split[4]))
+                return setup
+            if tamanho <= 0:
+                print("Erro: o tamanho de fonte deve ser um numero positivo.")
+                return setup
+            setup["contour_font_size"] = tamanho
+            print("Tamanho da fonte do contorno definido para {0}.".format(tamanho))
+            return setup
+        if cmd_split[3] == "style":
+            if len(cmd_split) < 5 or cmd_split[4] not in _ESTILOS_TEXTO_VALIDOS:
+                print("Uso: set contour font style <bold/italic/normal>")
+                return setup
+            setup["contour_font_style"] = cmd_split[4]
+            print("Estilo da fonte do contorno definido para '{0}'.".format(cmd_split[4]))
+            return setup
+        # Nome da fonte propriamente dito (pode ter espaco, ex: 'DejaVu Sans').
+        nome_fonte = cmd_user.split(None, 3)[3]
+        if not _fonte_existe(nome_fonte):
+            print("Erro: fonte '{0}' nao encontrada no sistema. Use 'show fonts' para ver as fontes disponiveis.".format(nome_fonte))
+            return setup
+        setup["contour_font"] = nome_fonte
+        print("Fonte do contorno definida para '{0}'.".format(nome_fonte))
+        return setup
+
+    print(uso)
+    return setup
+
 def _print_level_info(setup, l):
     """
     Imprime a informacao do nivel selecionado em 'set lev N':
@@ -46,6 +206,19 @@ def _print_level_info(setup, l):
 
     print("Nivel {0} selecionado.".format(l))
 
+def _print_arquivo_info(setup, n):
+    """
+    Imprime a informacao do arquivo selecionado em 'set t N' (nome do
+    arquivo e timestamp, quando disponivel) - mesmo dado de 'show files',
+    so que so a linha do arquivo escolhido.
+    """
+    for info in setup.get("files", []):
+        if info["index"] == n:
+            timestamp = info.get("DataDado") or "desconhecida"
+            print("Arquivo {0} selecionado: {1} ({2}).".format(n, info["fileName"], timestamp))
+            return
+    print("Arquivo {0} selecionado.".format(n))
+
 def cmd_set(cmd_split, setup, cmd_user):
     """
     Ponto de entrada publico do comando 'set'. Avalia os termos numericos do
@@ -75,15 +248,32 @@ def _cmd_set_dispatch(cmd_split, setup, cmd_user):
             setup["lev"] = l
             setup["levf"] = l
             _print_level_info(setup, l)
+            atualizar_titulo_janela(setup)
         elif len(cmd_split) == 4:
+            # <nivel_inicial> e <nivel_final> sao AMBOS indices de nivel
+            # validos e INCLUSIVOS (0 a n_levels-1) - a mesma faixa usada
+            # por 'set lev <n>' (nivel unico) - entao <nivel_final> pode
+            # (e deve) ser o proprio ultimo nivel da malha (n_levels-1)
+            # para inclui-lo. Internamente, 'levf' guarda o limite
+            # EXCLUSIVO (<nivel_final> + 1), a convencao de fatia usada
+            # em todo o resto do codigo ('var[..., lev:levf]' - ver
+            # 'levf_efetivo' em utils.py); sem esse '+1', o ultimo nivel
+            # pedido ficaria de fora da faixa (bug corrigido em
+            # 24Sep2026: antes, incluir o nivel n_levels-1 exigia passar
+            # o indice invalido n_levels, que a checagem de limites
+            # sempre rejeitava - um beco sem saida).
             l1 = int(cmd_split[2])
             l2 = int(cmd_split[3])
             if l1<0 or l1>=n_levels or l2<0 or l2>=n_levels:
                 print("Levels from 0 to {0}!".format(n_levels-1))
                 return setup
+            if l1 > l2:
+                print("Erro: o nivel inicial ({0}) nao pode ser maior que o final ({1}).".format(l1, l2))
+                return setup
             setup["lev"] = l1
-            setup["levf"] = l2
-            #print("Level set from {0} to {1} : {2} to {3}".format(lev,levf,levels[lev],levels[levf]))               
+            setup["levf"] = l2 + 1
+            #print("Level set from {0} to {1} : {2} to {3}".format(lev,levf,levels[lev],levels[levf]))
+            atualizar_titulo_janela(setup)
         else:
             print("Uso: set lev <nivel>  ou  set lev <nivel_inicial> <nivel_final>")
         return setup
@@ -138,12 +328,41 @@ def _cmd_set_dispatch(cmd_split, setup, cmd_user):
         plt.subplot(rows, cols, indice)
         return setup
     elif cmd_split[1] == "label":
+        # 'set label font <nome>' / 'set label color <cor>' / 'set label
+        # size <n>' / 'set label style <bold/italic/normal>' (secao 6 do
+        # manual): estilo do rotulo da barra de cores/eixo. Sem um desses
+        # quatro sub-comandos em cmd_split[2], mantem o comportamento
+        # classico de 'set label <texto>' (define o texto do rotulo,
+        # setup['label']).
+        if len(cmd_split) >= 3 and cmd_split[2] in ("font", "color", "size", "style"):
+            return _set_estilo_texto(setup, "label", cmd_split, cmd_user)
         setup["label"] = cmd_user[10:]
         return setup
-    elif cmd_split[1] == "label_fs":
-        setup["label_fontsize"] = int(cmd_split[2])
-    elif cmd_split[1] == "label_fw":    
-        setup["label_fontweight"] = cmd_split[2]
+    elif cmd_split[1] == "title":
+        # 'set title font <nome>' / 'set title color <cor>' / 'set title
+        # size <n>' / 'set title style <bold/italic/normal>' (secao 6 do
+        # manual): estilo do titulo do grafico (o texto em si e definido
+        # por 'draw title <texto>', nao por 'set title').
+        if len(cmd_split) < 3 or cmd_split[2] not in ("font", "color", "size", "style"):
+            print("Uso: set title font <nome_da_fonte>  |  set title color <cor>  |  set title size <n>  |  set title style <bold/italic/normal>")
+            return setup
+        return _set_estilo_texto(setup, "title", cmd_split, cmd_user)
+    elif cmd_split[1] == "contour":
+        return _set_contour(setup, cmd_split, cmd_user)
+    elif cmd_split[1] == "bar":
+        # 'set bar position <U/D/L/R>' (secao 6 do manual): posiciona a
+        # barra de cores em cima (U), embaixo (D), a esquerda (L) ou a
+        # direita (R, o padrao do matplotlib) do grafico.
+        if len(cmd_split) < 4 or cmd_split[2] != "position":
+            print("Uso: set bar position <U/D/L/R>")
+            return setup
+        posicao = cmd_split[3].upper()
+        if posicao not in _BAR_POSICOES_VALIDAS:
+            print("Posicao invalida: '{0}'. Use U (up), D (down), L (left) ou R (right).".format(cmd_split[3]))
+            return setup
+        setup["bar_position"] = posicao
+        print("Posicao da barra de cores definida para '{0}'.".format(posicao))
+        return setup
     elif cmd_split[1] == "mappat":
         setup["mappath"] = cmd_split[2]
         return setup
@@ -158,19 +377,23 @@ def _cmd_set_dispatch(cmd_split, setup, cmd_user):
         if len(cmd_split) == 3:
             setup["lat_min"] = float(cmd_split[2])
             setup["lat_max"] = float(cmd_split[2])
+            atualizar_titulo_janela(setup)
             return setup
         elif len(cmd_split) == 4:
             setup["lat_min"] = float(cmd_split[2])
-            setup["lat_max"] = float(cmd_split[3])  
-            return setup              
+            setup["lat_max"] = float(cmd_split[3])
+            atualizar_titulo_janela(setup)
+            return setup
     elif cmd_split[1] == "lon":
         if len(cmd_split) == 3:
             setup["lon_min"] = float(cmd_split[2])
             setup["lon_max"] = float(cmd_split[2])
+            atualizar_titulo_janela(setup)
             return setup
         elif len(cmd_split) == 4:
             setup["lon_min"] = float(cmd_split[2])
-            setup["lon_max"] = float(cmd_split[3]) 
+            setup["lon_max"] = float(cmd_split[3])
+            atualizar_titulo_janela(setup)
             return setup
     elif cmd_split[1] == "cmap":
         setup["cmap"] = cmd_split[2]    
@@ -195,14 +418,46 @@ def _cmd_set_dispatch(cmd_split, setup, cmd_user):
         setup["clevs"] = [float(x) for x in levs_in]
         return setup
     elif cmd_split[1] == "time" or cmd_split[1] == "t":
-        # 'set t <n>' (ou 'set time <n>'): indice de tempo unico, dentro do
-        # arquivo (comportamento classico, inalterado).
-        # 'set t <inicio> <fim>': quando ha mais de um arquivo aberto (ver
-        # 'open', secao 2.1 do manual), seleciona um INTERVALO DE ARQUIVOS
-        # (pelo indice de abertura, 1, 2, 3...) para plotar como serie
-        # temporal (ver plot_serie_temporal em plot_func.py).
+        # 'set t <n>' (ou 'set time <n>'): seleciona o ARQUIVO numero <n>
+        # entre os varios abertos ('open', secao 2.1 do manual) como o
+        # arquivo PADRAO para os proximos 'd'/'d3'/estatisticas sem
+        # sufixo '.N' - equivalente a escrever '.{n}' em toda variavel
+        # seguinte, so que uma unica vez (setup['arquivo_sel'], usado por
+        # '_resolver_variavel' em exec_func.py). Persiste ate o proximo
+        # 'set t <n>' (ou 'reset'/'reinit'); a forma explicita e pontual,
+        # so para uma chamada, continua sendo o sufixo '.N' na propria
+        # variavel (ex: 'd o3.5'; ver secao 2.1 e 3).
+        # 'set t <inicio> <fim>': quando ha mais de um arquivo aberto,
+        # seleciona um INTERVALO DE ARQUIVOS (pelo indice de abertura, 1,
+        # 2, 3...) para plotar como serie temporal/animacao (ver
+        # plot_serie_temporal em plot_func.py) - inclusive com
+        # <inicio> == <fim>, uma "serie" de um unico arquivo.
+        #
+        # As duas formas sao MODOS MUTUAMENTE EXCLUSIVOS de selecao (o
+        # ultimo 'set t' usado e quem vale): 'set t <n>' e um pedido
+        # explicito de UM UNICO arquivo/tempo (nao uma serie/animacao) -
+        # por isso, alem de guardar 'arquivo_sel', ele tem que DESLIGAR
+        # o modo serie (time_ini/time_fim), caso tenha ficado ligado de
+        # um 'set t <ini> <fim>' anterior na mesma sessao. Sem isso,
+        # '_modo_serie_ativo' (exec_func.py) continuava True mesmo depois
+        # de um 'set t 5' pontual, e 'd'/'d3' seguiam recusando qualquer
+        # combinacao de lat/lon/lev fixados que nao coubesse no modo
+        # serie (mensagem "apenas uma dentre latitude, longitude e
+        # nivel..."), quando o usuario so queria um corte/mapa normal no
+        # arquivo/tempo escolhido - bug corrigido em 24Sep2026.
         if len(cmd_split) == 3:
-            setup["time_sel"] = int(cmd_split[2])
+            n = int(cmd_split[2])
+            arquivos = setup.get("files") or []
+            if arquivos:
+                total = len(arquivos)
+                if n < 1 or n > total:
+                    print("Arquivos abertos vao de 1 a {0}.".format(total))
+                    return setup
+            setup["arquivo_sel"] = n
+            setup["time_ini"] = None
+            setup["time_fim"] = None
+            _print_arquivo_info(setup, n)
+            atualizar_titulo_janela(setup)
             return setup
         elif len(cmd_split) == 4:
             i1 = int(cmd_split[2])
@@ -218,6 +473,7 @@ def _cmd_set_dispatch(cmd_split, setup, cmd_user):
                 return setup
             setup["time_ini"] = i1
             setup["time_fim"] = i2
+            atualizar_titulo_janela(setup)
             return setup
         else:
             print("Uso: set t <indice>  ou  set t <arquivo_inicial> <arquivo_final>")
@@ -243,12 +499,6 @@ def _cmd_set_dispatch(cmd_split, setup, cmd_user):
         setup["fig_inches"] = cmd_split[2]
     elif cmd_split[1] == "fig_transparency":
         setup["fig_transparency"] = cmd_split[2]
-    elif cmd_split[1] == "title_color":
-        setup["title_color"] = cmd_split[2]
-    elif cmd_split[1] == "title_fs":
-        setup["title_fs"] = int(cmd_split[2])
-    elif cmd_split[1] == "title_fw":
-        setup["title_fw"] = cmd_split[2]        
     else:
         print("Command not recognized!")
     return setup
