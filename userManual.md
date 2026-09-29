@@ -21,9 +21,36 @@ o `grads_monan.toml` são criados automaticamente — não é preciso rodar
 nenhum script de instalação à parte. Para recriar a configuração do zero:
 `grads-monan-setup`.
 
-Ao iniciar, abre um prompt `>` interativo, com histórico de comandos (setas
+Ao iniciar, abre um prompt interativo, com histórico de comandos (setas
 para cima/baixo) via `readline`. Comandos com scripts prontos podem ser
 executados com `run <arquivo>`.
+
+### 1.1 O prompt: `>`, `E>` e `?>`
+
+O texto do prompt muda a cada linha, conforme o resultado do **comando
+anterior** (o primeiro prompt da sessão é sempre `> `):
+
+| Prompt | Significado |
+|---|---|
+| `> ` | O comando anterior **existe e foi executado sem erro**. |
+| `E> ` | O comando anterior **existe, mas a execução falhou** (ex.: argumento inválido, arquivo/variável não encontrado, seleção incompatível). |
+| `?> ` | O comando anterior (ou sub-comando, ex.: `set <opção>`) **não existe/não é reconhecido**. |
+
+Como funciona: o primeiro token da linha (`show`, `set`, `d`, `mean`, etc.)
+é conferido contra a lista de comandos de primeiro nível conhecidos pelo
+programa — se não bater com nenhum, o prompt vira `?> ` **sem tentar
+executar nada**. Se bater, o comando é executado normalmente (o usuário vê
+a saída na hora, como sempre) e o texto impresso é conferido em busca dos
+marcadores de erro já usados por convenção em todo o programa (`Erro:`,
+`Erro ao `, `Falha `) ou do marcador de sub-comando desconhecido
+(`Command not recognized!`, usado por `set <opção>` — seção 6). Se nenhum
+marcador de erro aparecer, o prompt volta a `> `; se aparecer um marcador
+de erro, vira `E> `; se aparecer `Command not recognized!`, vira `?> `
+(mesmo com o comando de primeiro nível reconhecido, já que o sub-comando em
+si não existe). Uma exceção não tratada durante a execução de um comando
+também é capturada (a sessão não é derrubada) e vira `E> `. Mensagens que
+começam com `Aviso:` são avisos informativos (ex.: ao abrir um arquivo sem
+`xtime`) e **não** contam como erro.
 
 ---
 
@@ -709,6 +736,7 @@ globais muito amplos.
 | `show cmap` | Colormap atual. |
 | `show setup` | Imprime o dicionário `setup` inteiro (debug). |
 | `show limits` | Resumo da área de limites carregada por `load limits` (seção 2.2): arquivo, número de pontos do polígono e quantas células da malha caem dentro dela. Avisa se nenhuma área foi carregada ainda. |
+| `show fonts` | Lista, em ordem alfabética, as fontes TrueType/OpenType instaladas no sistema e reconhecidas pelo matplotlib — use um destes nomes em `set label font <nome>`/`set title font <nome>` (seção 6). |
 
 ---
 
@@ -730,7 +758,21 @@ faltando avisa e **mantém a configuração anterior**, sem travar.
 | `set pages <linhas> <colunas>` | Grade de painéis da janela 2D (ex.: `set pages 1 2`). Limpa a janela e seleciona o primeiro painel. |
 | `set page <linha> <coluna>` | Seleciona em qual painel plotar. |
 | `set label <texto>` | Rótulo da barra de cores. |
-| `set label_fs <n>` / `set label_fw <peso>` | Tamanho/peso de fonte do rótulo. |
+| `set label font <nome_da_fonte>` | Fonte usada no rótulo (colorbar/eixos) — verifica se a fonte existe no sistema (mesma lista de `show fonts`); se não existir, avisa e mantém a fonte anterior. |
+| `set label color <cor>` | Cor do rótulo — nome de cor do matplotlib (ex.: `red`) ou código `#RRGGBB`. |
+| `set label size <n>` | Tamanho de fonte do rótulo (em pontos). |
+| `set label style <bold\|italic\|normal>` | Estilo do rótulo: negrito, itálico ou normal. |
+| `set title font <nome_da_fonte>` | Fonte usada no título do gráfico (`draw title`) — mesma verificação de `set label font`. |
+| `set title color <cor>` | Cor do título do gráfico. |
+| `set title size <n>` | Tamanho de fonte do título do gráfico (em pontos). |
+| `set title style <bold\|italic\|normal>` | Estilo do título do gráfico: negrito, itálico ou normal. |
+| `set bar position <U\|D\|L\|R>` | Posição da barra de cores: `U` (up/cima), `D` (down/baixo), `L` (left/esquerda) ou `R` (right/direita — padrão do matplotlib). `U`/`D` deixam a barra horizontal; `L`/`R`, vertical. |
+| `set contour line size <n>` | Espessura das linhas de contorno (`set gxout contour`). |
+| `set contour line <bw\|color>` | Linhas de contorno em preto e branco (`bw`) ou coloridas conforme o nível, usando o colormap (`color`, padrão). |
+| `set contour font <nome_da_fonte>` | Fonte dos rótulos inline do contorno (os números escritos sobre as linhas) — verifica se a fonte existe no sistema (mesma lista de `show fonts`). |
+| `set contour font color <cor>` | Cor dos rótulos inline do contorno. |
+| `set contour font size <n>` | Tamanho de fonte dos rótulos inline do contorno (padrão: 10). |
+| `set contour font style <bold\|italic\|normal>` | Estilo dos rótulos inline do contorno: negrito, itálico ou normal. |
 | `set mappat <caminho>` | Diretório dos shapefiles do mapa de fundo. |
 | `set mpdset <arquivo.shp>` | Shapefile a usar como mapa de fundo. |
 | `set mpt <cor> <espessura>` | Cor e espessura da linha do mapa de fundo. |
@@ -741,7 +783,6 @@ faltando avisa e **mantém a configuração anterior**, sem travar.
 | `set tint <segundos>` | Intervalo, em segundos, entre os quadros da animação da série temporal (`d`/`d3` no modo mapa/3D — seção 2.1). Padrão: 1 segundo. |
 | `set mark <x> <y> <cor> <tamanho> <legenda>` | Mecanismo antigo de acumular pontos de marcação. **Legado**: não é mais usado por `draw mark` (seção 7), que hoje é autossuficiente. |
 | `set fig_dpi <n>` / `set fig_inches <modo>` / `set fig_transparency <bool>` | Resolução/margens/transparência ao salvar (`gxprint`). |
-| `set title_color <cor>` / `set title_fs <n>` / `set title_fw <peso>` | Aparência do título do gráfico. |
 
 ---
 
@@ -820,8 +861,10 @@ Define os valores padrão de sessão (usados sempre que um arquivo é aberto):
 `xmark`, `ymark`, `colormark`, `sizemark`, `legend`, `lev`, `levf`, `gxout`,
 `title`, `label`, `map`, `map_color`, `map_line`, `cmap`, `lw`, `lc`, `clevs`,
 `lat_min`, `lat_max`, `lon_min`, `lon_max`, `time_sel`, `mappath`, `fig_dpi`,
-`fig_inches`, `fig_transparency`, `label_fontsize`, `label_fontweight`,
-`title_color`, `title_fs`, `title_fw`.
+`fig_inches`, `fig_transparency`, `label_font`, `label_color`, `label_size`,
+`label_style`, `title_color`, `title_font`, `title_size`, `title_style`,
+`bar_position`, `contour_line_size`, `contour_line_mode`, `contour_font`,
+`contour_font_color`, `contour_font_size`, `contour_font_style`.
 
 ---
 
@@ -925,8 +968,32 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 
 ### `cli.py`
 - `main()` — laço principal: banner, `ensure_config()`, lê comandos
-  (`custom_input`), despacha via `exec_cmd`, força o redesenho da janela
-  (`plt.draw()` + `plt.pause()`) após cada comando.
+  (`custom_input`, passando o prompt atual — seção 1.1), despacha via
+  `_executar_com_status` (que por baixo chama `exec_cmd`), escolhe o
+  prompt da próxima linha a partir do status devolvido
+  (`_PROMPT_POR_STATUS`), força o redesenho da janela (`plt.draw()` +
+  `plt.pause()`) após cada comando.
+- `_COMANDOS_CONHECIDOS` — conjunto com todo comando de primeiro nível
+  reconhecido (mantido em sincronia manualmente com a cadeia de
+  `if`/`elif` de `exec_cmd`, mais os nomes de `NOMES_ESTATISTICA_ESCALAR`
+  — seção 2.3); se o primeiro token da linha não estiver aqui, o prompt
+  vira `?> ` sem sequer chamar `exec_cmd`.
+- `_executar_com_status(...)` — chama `exec_cmd` normalmente (a saída
+  continua aparecendo na hora, via `_TeeStdout`), guarda uma cópia dela e
+  devolve também o status (`_status_comando`); captura qualquer exceção
+  não tratada dentro do comando (vira `'erro'`, sem derrubar a sessão),
+  deixando `SystemExit` (`q`/`exit`/`quit`) passar normalmente.
+- `_status_comando(texto_impresso)` — classifica a saída de um comando
+  reconhecido em `'ok'`, `'erro'` ou `'desconhecido'`, conferindo os
+  marcadores `Erro:`/`Erro ao `/`Falha ` (erro) e `Command not
+  recognized!` (desconhecido — seção 6, sub-comando de `set` inválido);
+  `Aviso:` não conta como erro.
+- `_TeeStdout` — encaminha toda escrita para o stdout real (nada muda
+  para quem está usando o programa) e também guarda uma cópia em memória,
+  usada só por `_executar_com_status` para decidir o status depois que o
+  comando termina.
+- `_PROMPT_POR_STATUS` — mapeia cada status (`'ok'`/`'erro'`/
+  `'desconhecido'`) para o texto do prompt (`'> '`/`'E> '`/`'?> '`).
 
 ### `setup_config.py`
 - `ensure_config(force=False)` — cria `~/.config/grads_monan/` e o
@@ -969,17 +1036,20 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 ### `set_func.py`
 - `cmd_set(...)` / `_cmd_set_dispatch(...)` — comando `set` (tabela da seção 6), com validação numérica segura. `set lev <n1> <n2>` valida `<n1>`/`<n2>` como índices de nível **inclusivos** (0 a `n_niveis-1`, com `<n1> <= <n2>`) e guarda internamente `setup["levf"] = <n2> + 1` — o limite EXCLUSIVO usado por toda fatia de nível do resto do código (`var[..., lev:levf]` — ver `levf_efetivo` em `utils.py`); sem esse `+1`, incluir o último nível pedido exigiria um índice inválido.
 - `_print_level_info(setup, l)` — informação do nível ao usar `set lev <n>`.
+- `_set_estilo_texto(setup, alvo, cmd_split, cmd_user)` — implementa `set label font/color/size/style` e `set title font/color/size/style` (`alvo` é `"label"` ou `"title"`), guardando o resultado em `setup['<alvo>_font']`/`_color`/`_size`/`_style`. `font` verifica a existência da fonte no sistema (`_fonte_existe`, de `plot_func.py`) antes de aceitar.
+- `_set_contour(setup, cmd_split, cmd_user)` — implementa `set contour line size/<bw|color>` e `set contour font/<color|size|style>` (linhas e rótulos inline do `gxout contour`), guardando o resultado em `setup['contour_line_size']`/`_line_mode`/`_font`/`_font_color`/`_font_size`/`_font_style`.
 
 ### `show_func.py`
 - `cmd_show(setup, cmd_split)` / `_mostrar_info_arquivo(setup)` — comando `show` (tabela da seção 5).
 - `_mostrar_arquivos(setup)` — `show files`: tabela com os arquivos abertos na sessão (seção 2.1).
 - `_mostrar_tempos(setup)` — `show times`: mesma tabela de `_mostrar_arquivos`, restrita ao(s) tempo(s) atualmente selecionado(s) por `set t` (o intervalo inteiro no modo série, ou só o arquivo pontual de `setup['arquivo_sel']` fora dele) — seção 2.1/5.
+- `_mostrar_fontes()` — `show fonts`: lista as fontes do sistema (ver `_listar_fontes` em `plot_func.py`) — seção 5/6.
 - `show_legend()` — `draw legend`.
 
 ### `draw_func.py`
-- `draw_title(setup)` — `draw title <texto>`: desenha direto no eixo atual (`plt.title`).
+- `draw_title(setup)` — `draw title <texto>`: desenha direto no eixo atual (`plt.title`), com a fonte/cor/estilo de `set title font/color/style` (`_kwargs_texto`, de `plot_func.py`).
 - `draw_map(setup, ax=None)` — `draw map`: garante uma figura/eixo 2D de verdade (via `_ativar_figura_2d`, de `plot_func.py`) antes de desenhar — não depende do `ax` recebido do chamador, que pode ainda ser o inteiro inicial `0` (de `cli.py`) se nenhum `d`/`d3` tiver rodado ainda na sessão. Se a janela 3D estiver ativa, desenha via `plot_map_3d` na superfície da caixa.
-- `draw_label(setup, cbar, lbl)` — `draw label <texto>`: se `cbar` já é uma barra de cores de verdade, aplica o texto na hora (e força o redesenho); senão (nenhum `d`/`d3` rodou ainda), não faz nada aqui — o texto já foi guardado em `setup["cbar_label"]` por quem chamou (`exec_func.py`) e é reaplicado sozinho pela primeira colorbar criada (`_aplicar_rotulo_cbar`, em `plot_func.py`).
+- `draw_label(setup, cbar, lbl)` — `draw label <texto>`: se `cbar` já é uma barra de cores de verdade, aplica o texto na hora (com a fonte/cor/estilo de `set label font/color/style`, via `_kwargs_texto`) e força o redesenho; senão (nenhum `d`/`d3` rodou ainda), não faz nada aqui — o texto já foi guardado em `setup["cbar_label"]` por quem chamou (`exec_func.py`) e é reaplicado sozinho pela primeira colorbar criada (`_aplicar_rotulo_cbar`, em `plot_func.py`).
 - `draw_mark(cmd_split)` — `draw mark <lat> <lon> <simbolo>` (seção 7.1).
 - `_SIMBOLOS_MARK` — tabela símbolo → `marker`/`fillstyle`.
 
@@ -996,8 +1066,14 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 - `_indice_mais_proximo_estatistica(setup)` — índice da célula mais próxima do ponto de lat/lon selecionado, usado por `plot_estatistica_campo` no modo "ponto" (mesma fórmula de `_indice_mais_proximo` em `estatistics.py`).
 - `plot_wind`, `plot_vector_field`, `plot_barbs`, `plot_streams` — vento (`vect`/`barb`/`stream`); `plot_wind` também redesenha o mapa e reaplica o título automaticamente se definidos.
 - `plot_marks(setup)` — mecanismo antigo de `set mark` (legado).
-- `_aplicar_titulo(setup, ax)` — desenha/redesenha `setup["title"]` (definido por `draw title`) no eixo, com o estilo de `title_fs`/`title_fw`/`title_color`; chamada em todo plot cujo eixo pode ter sido limpo entre uma chamada e outra (ex.: quadro a quadro na animação de mapa), para o título não se perder.
-- `_aplicar_rotulo_cbar(setup, cbar)` — reaplica `setup["cbar_label"]` (definido por `draw label`) numa colorbar recém-criada, com o tamanho/peso de `label_fontsize`/`label_fontweight`; chamada em toda criação de colorbar (2D e 3D), para o rótulo customizado não se perder quando a colorbar é recriada (ex.: a cada quadro da animação).
+- `_aplicar_titulo(setup, ax)` — desenha/redesenha `setup["title"]` (definido por `draw title`) no eixo, com a fonte/cor/estilo de `set title font`/`set title color`/`set title style` (ver `_kwargs_texto`); chamada em todo plot cujo eixo pode ter sido limpo entre uma chamada e outra (ex.: quadro a quadro na animação de mapa), para o título não se perder.
+- `_aplicar_rotulo_cbar(setup, cbar)` — reaplica `setup["cbar_label"]` (definido por `draw label`) numa colorbar recém-criada, com a fonte/cor/estilo de `set label font`/`set label color`/`set label style` (ver `_kwargs_texto`); chamada em toda criação de colorbar (2D e 3D), para o rótulo customizado não se perder quando a colorbar é recriada (ex.: a cada quadro da animação).
+- `_kwargs_texto(setup, prefixo)` — monta os argumentos de estilo (`color`/`fontfamily`/`fontsize`/`fontweight`/`fontstyle`) para desenhar texto (título ou rótulo da colorbar) a partir de `setup['<prefixo>_color']`/`_font`/`_size`/`_style` (`prefixo` é `"title"` ou `"label"`).
+- `_estilo_para_kwargs(estilo)` — traduz `"bold"`/`"italic"`/`"normal"` (`set label style`/`set title style`) para os argumentos independentes do matplotlib `fontweight`/`fontstyle`.
+- `_listar_fontes()` / `_fonte_existe(nome)` — lista as fontes do sistema reconhecidas pelo matplotlib (`show fonts`) e confere se uma fonte existe, antes de aceitar `set label font`/`set title font`.
+- `_kwargs_colorbar(setup)` — monta o argumento `location` para `plt.colorbar`/`fig.colorbar` a partir de `setup['bar_position']` (`set bar position <U/D/L/R>`).
+- `_kwargs_contour_linhas(setup, cmap)` — monta os argumentos de cor/espessura para `ax.contour` (linhas do `gxout contour`) a partir de `setup['contour_line_size']`/`setup['contour_line_mode']` (`set contour line size/<bw|color>`).
+- `_aplicar_estilo_contorno_labels(setup, textos)` — aplica a fonte/cor/tamanho/estilo de `set contour font`/`set contour font color`/`set contour font size`/`set contour font style` a cada rótulo inline (`Text`) devolvido por `ax.clabel`/`plt.clabel` — a API de `clabel` desta versão do matplotlib não aceita fonte/estilo diretamente (só `fontsize`, que também é passado na criação).
 
 **Plotagem 3D:**
 - `plot_var_3d(setup, var)` — `d3` (seção 4): *scatter* ou superfícies empilhadas (`shaded`). Redesenha o mapa (`plot_map_3d`) automaticamente se `setup["draw_map_on"]` estiver ligado, e reaplica o rótulo customizado da colorbar (`_aplicar_rotulo_cbar`), se definido.
@@ -1038,7 +1114,7 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 - `construir_poligonos_celulas(mesh)` — monta o polígono (lon/lat) de cada célula a partir da conectividade completa do arquivo de grade (`verticesOnCell`/`nEdgesOnCell`/`latVertex`/`lonVertex`), incluindo o formato/tamanho real das células de borda em domínios regionais — usado por `gxout hex` (seção 8.1). Retorna `None` se a malha não tiver essa conectividade.
 - `load_zgrid_centers(...)` — extrai e alinha a variável `zgrid`.
 - `encontrar_posicao_mais_proxima(...)` — busca binária.
-- `custom_input()` / `load_history` / `save_command_to_history` — prompt com histórico.
+- `custom_input(prompt="> ")` / `load_history` / `save_command_to_history` — prompt com histórico; `prompt` é escolhido a cada linha por `cli.py` conforme o resultado do comando anterior (seção 1.1: `'> '`/`'E> '`/`'?> '`).
 
 ---
 

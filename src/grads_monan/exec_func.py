@@ -375,7 +375,11 @@ def exec_cmd(cmd_user, cmd,cmd_split,setup, dataset, ax, cbar, setup_toml):
         print("Sessao reinicializada. Nenhum arquivo aberto.")
     else:
         if not setup["openFile"]:
-            print("For use commands, please, open a file or run a script whith 'open' inside!")
+            # Prefixo 'Erro:' (secao 1 do manual): comando reconhecido, mas
+            # a execucao falha por faltar um arquivo aberto - deve virar o
+            # prompt 'E> ' na proxima linha (cli.py), nao '?> ' (o comando
+            # em si existe) nem '> ' (nao executou de fato).
+            print("Erro: for use commands, please, open a file or run a script whith 'open' inside!")
             return setup,dataset,ax,cbar
 
         if cmd == "gxprint":

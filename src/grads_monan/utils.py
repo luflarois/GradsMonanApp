@@ -202,12 +202,19 @@ def load_zgrid_centers(variables, n_cells, n_levels):
 #     sys.stdout.flush()
 #     return input() 
 
-def custom_input():
-    """Input personalizado que salva o histórico."""
+def custom_input(prompt="> "):
+    """
+    Input personalizado que salva o histórico. 'prompt' (secao 1 do
+    manual) muda a cada comando conforme o resultado do anterior: '> '
+    (comando reconhecido e executado sem erro), 'E> ' (comando
+    reconhecido, mas a execucao falhou) ou '?> ' (comando/sub-comando
+    nao reconhecido) - ver '_status_comando'/'_executar_com_status' em
+    cli.py.
+    """
     # O prompt precisa ser passado direto para input() (e nao escrito antes,
     # via stdout.write) para que o readline o redesenhe corretamente ao
     # navegar pelo historico com as setas para cima/baixo.
-    user_input = input("> ")
+    user_input = input(prompt)
     return user_input
 
 def load_history(HISTORY_FILE):

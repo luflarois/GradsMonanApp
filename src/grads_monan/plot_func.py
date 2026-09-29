@@ -14,6 +14,7 @@ from datetime import datetime
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+import matplotlib.font_manager as _font_manager
 from matplotlib.colors import BoundaryNorm
 import matplotlib.tri as mtri
 from matplotlib.collections import PolyCollection
@@ -160,6 +161,128 @@ def atualizar_titulo_janela(setup):
     lev_txt = "L{0}".format(lev) if ultimo_nivel <= lev else "L{0}-{1}".format(lev, ultimo_nivel)
 
     set_window_title("GradsMonan: {0},{1},{2},{3}".format(timestamp, lat_txt, lon_txt, lev_txt))
+
+def _listar_fontes():
+    """
+    Lista (ordenada, sem repeticao) dos nomes das fontes TrueType/OpenType
+    instaladas no sistema e reconhecidas pelo matplotlib - usada pelo
+    comando 'show fonts' (show_func.py) e para validar 'set label font
+    <nome>'/'set title font <nome>' (secao 6 do manual).
+    """
+    return sorted({f.name for f in _font_manager.fontManager.ttflist})
+
+def _fonte_existe(nome):
+    """Confere se 'nome' e uma fonte instalada no sistema (ver _listar_fontes),
+    antes de aceitar 'set label font'/'set title font'."""
+    return nome in _listar_fontes()
+
+def _estilo_para_kwargs(estilo):
+    """
+    Traduz o valor de 'set label style'/'set title style' (secao 6 do
+    manual: 'bold', 'italic' ou 'normal') para os dois argumentos que o
+    matplotlib usa de fato para desenhar texto - 'fontweight' (negrito ou
+    nao) e 'fontstyle' (italico ou nao), que sao independentes entre si na
+    API do matplotlib. Um estilo ausente/invalido cai no padrao ('normal',
+    'normal').
+    """
+    if estilo == "bold":
+        return "bold", "normal"
+    if estilo == "italic":
+        return "normal", "italic"
+    return "normal", "normal"
+
+def _kwargs_texto(setup, prefixo):
+    """
+    Monta os argumentos de estilo de texto (cor/fonte/tamanho/negrito-
+    italico) para 'ax.set_title'/'cbar.set_label'/'plt.title', a partir de
+    setup['<prefixo>_color'], setup['<prefixo>_font'],
+    setup['<prefixo>_size'] e setup['<prefixo>_style'] (definidos por 'set
+    label font/color/size/style' ou 'set title font/color/size/style' -
+    secao 6 do manual). 'fontfamily'/'fontsize' so sao incluidos quando um
+    valor foi de fato escolhido (setup['<prefixo>_font']/'<prefixo>_size'
+    nao vazio) - passar 'fontfamily=None'/'' ou 'fontsize=None' explicitamente
+    ao matplotlib pode gerar um aviso/erro em vez de simplesmente usar o
+    padrao.
+    """
+    kwargs = {}
+    cor = setup.get("{0}_color".format(prefixo))
+    if cor:
+        kwargs["color"] = cor
+    fonte = setup.get("{0}_font".format(prefixo))
+    if fonte:
+        kwargs["fontfamily"] = fonte
+    tamanho = setup.get("{0}_size".format(prefixo))
+    if tamanho:
+        kwargs["fontsize"] = tamanho
+    fontweight, fontstyle = _estilo_para_kwargs(setup.get("{0}_style".format(prefixo)))
+    kwargs["fontweight"] = fontweight
+    kwargs["fontstyle"] = fontstyle
+    return kwargs
+
+# 'set bar position <U/D/L/R>' (secao 6 do manual): posiciona a barra de
+# cores em cima (up), embaixo (down), a esquerda (left) ou a direita
+# (right, o padrao do matplotlib) do grafico - traduzido para o argumento
+# 'location' aceito por 'plt.colorbar'/'fig.colorbar' (que tambem ajusta a
+# orientacao - vertical para left/right, horizontal para top/bottom -
+# automaticamente).
+_BAR_POSICAO_LOCATION = {"U": "top", "D": "bottom", "L": "left", "R": "right"}
+
+def _kwargs_colorbar(setup):
+    """
+    Monta o argumento 'location' para 'plt.colorbar'/'fig.colorbar' a
+    partir de setup['bar_position'] ('set bar position <U/D/L/R>' - secao
+    6 do manual). Sem 'set bar position' (ou com um valor desconhecido),
+    retorna um dict vazio - o padrao do matplotlib (barra vertical a
+    direita) e mantido.
+    """
+    location = _BAR_POSICAO_LOCATION.get(setup.get("bar_position"))
+    return {"location": location} if location else {}
+
+def _kwargs_contour_linhas(setup, cmap):
+    """
+    Monta os argumentos de cor/espessura para 'ax.contour' (gxout
+    'contour', linhas de contorno - secao 6 do manual: 'set contour line
+    size <n>' e 'set contour line <bw/color>'). 'bw' (preto e branco)
+    desenha todas as linhas em preto (colors='black'); 'color' (padrao)
+    colore cada linha conforme o nivel, usando o colormap ('cmap') da
+    sessao - o mesmo comportamento de sempre.
+    """
+    kwargs = {"linewidths": setup.get("contour_line_size", 1.5)}
+    if setup.get("contour_line_mode") == "bw":
+        kwargs["colors"] = "black"
+    else:
+        kwargs["cmap"] = cmap
+    return kwargs
+
+def _aplicar_estilo_contorno_labels(setup, textos):
+    """
+    Aplica a fonte/cor/tamanho/estilo definidos por 'set contour font
+    <nome>'/'set contour font color <cor>'/'set contour font size <n>'/
+    'set contour font style <bold/italic/normal>' (secao 6 do manual) aos
+    rotulos inline do contorno (os 'Text' devolvidos por 'ax.clabel'/
+    'plt.clabel'). A API de 'clabel' desta versao do matplotlib nao
+    aceita fontfamily/fontweight/fontstyle diretamente (so 'fontsize'/
+    'colors'), por isso reaplicamos em cada rotulo depois de criado -
+    igual ao "efeito" de '_kwargs_texto', so que texto a texto em vez de
+    via kwargs. O tamanho tambem e passado direto na criacao (ver
+    'plot_var'), mas e reaplicado aqui por consistencia/robustez.
+    """
+    fonte = setup.get("contour_font")
+    cor = setup.get("contour_font_color")
+    tamanho = setup.get("contour_font_size")
+    fontweight, fontstyle = _estilo_para_kwargs(setup.get("contour_font_style"))
+    for texto in textos:
+        try:
+            if fonte:
+                texto.set_fontfamily(fonte)
+            if cor:
+                texto.set_color(cor)
+            if tamanho:
+                texto.set_fontsize(tamanho)
+            texto.set_fontweight(fontweight)
+            texto.set_fontstyle(fontstyle)
+        except Exception:
+            pass
 
 def _niveis_cor(setup):
     """
@@ -360,10 +483,10 @@ def _aplicar_corte(data, cut):
 def _aplicar_rotulo_cbar(setup, cbar):
     """
     Reaplica o rotulo customizado da barra de cores definido via 'draw
-    label <texto>' (setup['cbar_label']), com o tamanho/peso de fonte de
-    'label_fontsize'/'label_fontweight' - chamada toda vez que uma nova
-    colorbar e criada, para que esse rotulo nao se perca quando a colorbar
-    e recriada (ex: a cada quadro da animacao de mapa - ver
+    label <texto>' (setup['cbar_label']), com a fonte/cor/estilo de 'set
+    label font/color/style' (ver _kwargs_texto) - chamada toda vez que uma
+    nova colorbar e criada, para que esse rotulo nao se perca quando a
+    colorbar e recriada (ex: a cada quadro da animacao de mapa - ver
     plot_serie_mapa/plot_var), o que sem isso reverteria para o rotulo
     padrao (a description da variavel, 'set label'). Sem 'draw label'
     definido, nao faz nada (mantem o rotulo padrao ja usado na criacao).
@@ -371,7 +494,7 @@ def _aplicar_rotulo_cbar(setup, cbar):
     rotulo = setup.get("cbar_label")
     if rotulo and cbar is not None:
         try:
-            cbar.set_label(rotulo, fontsize=setup.get("label_fontsize"), fontweight=setup.get("label_fontweight"))
+            cbar.set_label(rotulo, **_kwargs_texto(setup, "label"))
         except Exception:
             pass
     return cbar
@@ -379,8 +502,8 @@ def _aplicar_rotulo_cbar(setup, cbar):
 def _aplicar_titulo(setup, ax):
     """
     Desenha (ou redesenha) o titulo do grafico a partir de setup['title']
-    (definido via 'draw title <texto>'), com as mesmas cores/fonte de
-    'draw_title' (title_fs/title_fw/title_color). Chamada em todo plot que
+    (definido via 'draw title <texto>'), com a fonte/cor/estilo de 'set
+    title font/color/style' (ver _kwargs_texto). Chamada em todo plot que
     pode ter seu eixo limpo entre uma chamada e outra (ex: 'ax.cla()' a
     cada quadro da animacao de mapa - ver plot_serie_mapa), para que um
     titulo definido antes do 'd' nao se perca quando o eixo e limpo; sem
@@ -388,7 +511,7 @@ def _aplicar_titulo(setup, ax):
     """
     titulo = setup.get("title")
     if titulo:
-        ax.set_title(titulo, fontsize=setup.get("title_fs"), fontweight=setup.get("title_fw"), color=setup.get("title_color"))
+        ax.set_title(titulo, **_kwargs_texto(setup, "title"))
 
 def _mask_corte(valores, cut):
     """
@@ -664,7 +787,7 @@ def _plotar_corte_dados(setup, data, cbar=None):
             # Sem os dois: apenas o indice do nivel, menor embaixo, maior em cima
             plt.ylabel('Levels')
 
-    cbar = plt.colorbar(cs, ax=ax, label=label)
+    cbar = plt.colorbar(cs, ax=ax, label=label, **_kwargs_colorbar(setup))
     _aplicar_rotulo_cbar(setup, cbar)
     plt.xlabel(xlabel)
     if Title:
@@ -1046,7 +1169,7 @@ def plot_var_3d(setup, var):
         if not alguma_superficie:
             print("Aviso: nenhum valor visivel (tudo zero ou fora do corte) em nenhum nivel - nada para plotar em 3D.")
             return None
-        cbar3d = fig3d.colorbar(mappable_ref, ax=ax3d, label=label)
+        cbar3d = fig3d.colorbar(mappable_ref, ax=ax3d, label=label, **_kwargs_colorbar(setup))
         _aplicar_rotulo_cbar(setup, cbar3d)
     else:
         xs = np.repeat(lons_sel, n_lev)
@@ -1064,7 +1187,7 @@ def plot_var_3d(setup, var):
         xs, ys, zs, valores = xs[visivel], ys[visivel], zs[visivel], valores[visivel]
 
         sc = ax3d.scatter(xs, ys, zs, c=valores, cmap=cmap, norm=norm)
-        cbar3d = fig3d.colorbar(sc, ax=ax3d, label=label)
+        cbar3d = fig3d.colorbar(sc, ax=ax3d, label=label, **_kwargs_colorbar(setup))
         _aplicar_rotulo_cbar(setup, cbar3d)
 
     ax3d.set_xlabel('Longitude')
@@ -1165,7 +1288,7 @@ def plot_var(setup, var, cbar=None):
                 print("Aviso: a interpolacao nao gerou nenhum ponto valido nesta selecao.")
             else:
                 cs = ax.contourf(grade_x, grade_y, campo, levels=_niveis_cor(setup), cmap=cmap)
-                cbar = plt.colorbar(cs,ax=ax,label=label)
+                cbar = plt.colorbar(cs,ax=ax,label=label, **_kwargs_colorbar(setup))
                 _aplicar_rotulo_cbar(setup, cbar)
     elif gxout == "contour":
         if np.all(np.isnan(data)):
@@ -1175,15 +1298,17 @@ def plot_var(setup, var, cbar=None):
             if np.all(np.isnan(campo)):
                 print("Aviso: a interpolacao nao gerou nenhum ponto valido nesta selecao.")
             else:
-                cs = ax.contour(grade_x, grade_y, campo, levels=_niveis_cor(setup), cmap=cmap)
-                plt.clabel(cs, inline=True, fontsize=10)
+                cs = ax.contour(grade_x, grade_y, campo, levels=_niveis_cor(setup),
+                                 **_kwargs_contour_linhas(setup, cmap))
+                textos = plt.clabel(cs, inline=True, fontsize=setup.get("contour_font_size", 10))
+                _aplicar_estilo_contorno_labels(setup, textos)
     elif gxout == "voronoi":
         # Rasteriza por nearest-neighbor (celula mais proxima de cada
         # pixel) - rapido mesmo em malhas grandes, mas sai como "pixels"
         # quadrados, nao os hexagonos/pentagonos reais da malha.
         coll = plot_voronoi(setup, data)
         if coll is not None:
-            cbar = plt.colorbar(coll, ax=ax, label=label)
+            cbar = plt.colorbar(coll, ax=ax, label=label, **_kwargs_colorbar(setup))
             _aplicar_rotulo_cbar(setup, cbar)
     elif gxout == "hex":
         # Desenha o poligono REAL de cada celula (hexagono/pentagono do
@@ -1191,7 +1316,7 @@ def plot_var(setup, var, cbar=None):
         # dominios regionais) - ver plot_hexagonos.
         coll = plot_hexagonos(setup, data)
         if coll is not None:
-            cbar = plt.colorbar(coll, ax=ax, label=label)
+            cbar = plt.colorbar(coll, ax=ax, label=label, **_kwargs_colorbar(setup))
             _aplicar_rotulo_cbar(setup, cbar)
 
     if setup.get("draw_map_on"):
@@ -1557,7 +1682,7 @@ def plot_serie_temporal(setup, var_name, dados, cbar=None):
     Y = np.tile(np.asarray(y_vals).reshape(-1, 1), (1, len(x_num)))
 
     cs = ax.contourf(X, Y, imagem, levels=_niveis_cor(setup), cmap=cmap)
-    cbar = plt.colorbar(cs, ax=ax, label=label)
+    cbar = plt.colorbar(cs, ax=ax, label=label, **_kwargs_colorbar(setup))
     _aplicar_rotulo_cbar(setup, cbar)
 
     if usa_datetime:

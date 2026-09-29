@@ -10,7 +10,165 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .plot_func import atualizar_titulo_janela
+from .plot_func import atualizar_titulo_janela, _fonte_existe
+
+_ESTILOS_TEXTO_VALIDOS = ("bold", "italic", "normal")
+_BAR_POSICOES_VALIDAS = ("U", "D", "L", "R")
+
+def _set_estilo_texto(setup, alvo, cmd_split, cmd_user):
+    """
+    Implementa 'set label font/color/size/style' e 'set title
+    font/color/size/style' (secao 6 do manual): controla, respectivamente,
+    a fonte, a cor, o tamanho e o estilo (negrito/italico/normal) usados
+    para desenhar o rotulo da barra de cores ('alvo' = "label" - colorbar,
+    ver 'draw label'/'set label <texto>') e o titulo do grafico ('alvo' =
+    "title" - ver 'draw title'). Guarda o resultado em
+    setup['<alvo>_font']/setup['<alvo>_color']/setup['<alvo>_size']/
+    setup['<alvo>_style'], consumidos de fato ao desenhar por
+    '_kwargs_texto' (plot_func.py).
+    """
+    sub = cmd_split[2]
+    if sub == "font":
+        if len(cmd_split) < 4:
+            print("Uso: set {0} font <nome_da_fonte>".format(alvo))
+            return setup
+        # Pega o restante da linha (a partir do 4o token), para aceitar
+        # nomes de fonte com espaco (ex: 'DejaVu Sans').
+        nome_fonte = cmd_user.split(None, 3)[3]
+        if not _fonte_existe(nome_fonte):
+            print("Erro: fonte '{0}' nao encontrada no sistema. Use 'show fonts' para ver as fontes disponiveis.".format(nome_fonte))
+            return setup
+        setup["{0}_font".format(alvo)] = nome_fonte
+        print("Fonte de '{0}' definida para '{1}'.".format(alvo, nome_fonte))
+        return setup
+    if sub == "color":
+        if len(cmd_split) < 4:
+            print("Uso: set {0} color <cor>".format(alvo))
+            return setup
+        cor = cmd_split[3]
+        setup["{0}_color".format(alvo)] = cor
+        print("Cor de '{0}' definida para '{1}'.".format(alvo, cor))
+        return setup
+    if sub == "size":
+        if len(cmd_split) < 4:
+            print("Uso: set {0} size <n>".format(alvo))
+            return setup
+        try:
+            tamanho = float(cmd_split[3])
+        except ValueError:
+            print("Erro: tamanho de fonte invalido: '{0}'.".format(cmd_split[3]))
+            return setup
+        if tamanho <= 0:
+            print("Erro: o tamanho de fonte deve ser um numero positivo.")
+            return setup
+        setup["{0}_size".format(alvo)] = tamanho
+        print("Tamanho de fonte de '{0}' definido para '{1}'.".format(alvo, tamanho))
+        return setup
+    # sub == "style"
+    if len(cmd_split) < 4 or cmd_split[3] not in _ESTILOS_TEXTO_VALIDOS:
+        print("Uso: set {0} style <bold/italic/normal>".format(alvo))
+        return setup
+    setup["{0}_style".format(alvo)] = cmd_split[3]
+    print("Estilo de '{0}' definido para '{1}'.".format(alvo, cmd_split[3]))
+    return setup
+
+_MODOS_LINHA_CONTORNO = ("bw", "color")
+
+def _set_contour(setup, cmd_split, cmd_user):
+    """
+    Implementa os comandos 'set contour ...' (secao 6 do manual), que
+    configuram a aparencia das linhas de contorno e dos rotulos inline do
+    'gxout contour' (ver _kwargs_contour_linhas/_aplicar_estilo_contorno_
+    labels em plot_func.py):
+
+      set contour line size <n>            - espessura das linhas
+      set contour line <bw/color>          - preto-e-branco ou coloridas (cmap)
+      set contour font <nome_da_fonte>     - fonte dos rotulos inline
+      set contour font color <cor>         - cor dos rotulos inline
+      set contour font size <n>            - tamanho de fonte dos rotulos inline
+      set contour font style <bold/italic/normal> - estilo dos rotulos inline
+    """
+    uso = ("Uso: set contour line size <n>  |  set contour line <bw/color>  |  "
+           "set contour font <nome_da_fonte>  |  set contour font color <cor>  |  "
+           "set contour font size <n>  |  set contour font style <bold/italic/normal>")
+    if len(cmd_split) < 3:
+        print(uso)
+        return setup
+
+    sub = cmd_split[2]
+
+    if sub == "line":
+        if len(cmd_split) < 4:
+            print("Uso: set contour line size <n>  |  set contour line <bw/color>")
+            return setup
+        if cmd_split[3] == "size":
+            if len(cmd_split) < 5:
+                print("Uso: set contour line size <n>")
+                return setup
+            try:
+                espessura = float(cmd_split[4])
+            except ValueError:
+                print("Erro: tamanho de linha invalido: '{0}'.".format(cmd_split[4]))
+                return setup
+            if espessura <= 0:
+                print("Erro: o tamanho de linha deve ser um numero positivo.")
+                return setup
+            setup["contour_line_size"] = espessura
+            print("Espessura da linha de contorno definida para {0}.".format(espessura))
+            return setup
+        modo = cmd_split[3].lower()
+        if modo not in _MODOS_LINHA_CONTORNO:
+            print("Uso: set contour line size <n>  |  set contour line <bw/color>")
+            return setup
+        setup["contour_line_mode"] = modo
+        print("Linhas de contorno definidas para '{0}'.".format(modo))
+        return setup
+
+    if sub == "font":
+        if len(cmd_split) < 4:
+            print("Uso: set contour font <nome_da_fonte>  |  set contour font color <cor>  |  set contour font size <n>  |  set contour font style <bold/italic/normal>")
+            return setup
+        if cmd_split[3] == "color":
+            if len(cmd_split) < 5:
+                print("Uso: set contour font color <cor>")
+                return setup
+            cor = cmd_split[4]
+            setup["contour_font_color"] = cor
+            print("Cor da fonte do contorno definida para '{0}'.".format(cor))
+            return setup
+        if cmd_split[3] == "size":
+            if len(cmd_split) < 5:
+                print("Uso: set contour font size <n>")
+                return setup
+            try:
+                tamanho = float(cmd_split[4])
+            except ValueError:
+                print("Erro: tamanho de fonte invalido: '{0}'.".format(cmd_split[4]))
+                return setup
+            if tamanho <= 0:
+                print("Erro: o tamanho de fonte deve ser um numero positivo.")
+                return setup
+            setup["contour_font_size"] = tamanho
+            print("Tamanho da fonte do contorno definido para {0}.".format(tamanho))
+            return setup
+        if cmd_split[3] == "style":
+            if len(cmd_split) < 5 or cmd_split[4] not in _ESTILOS_TEXTO_VALIDOS:
+                print("Uso: set contour font style <bold/italic/normal>")
+                return setup
+            setup["contour_font_style"] = cmd_split[4]
+            print("Estilo da fonte do contorno definido para '{0}'.".format(cmd_split[4]))
+            return setup
+        # Nome da fonte propriamente dito (pode ter espaco, ex: 'DejaVu Sans').
+        nome_fonte = cmd_user.split(None, 3)[3]
+        if not _fonte_existe(nome_fonte):
+            print("Erro: fonte '{0}' nao encontrada no sistema. Use 'show fonts' para ver as fontes disponiveis.".format(nome_fonte))
+            return setup
+        setup["contour_font"] = nome_fonte
+        print("Fonte do contorno definida para '{0}'.".format(nome_fonte))
+        return setup
+
+    print(uso)
+    return setup
 
 def _print_level_info(setup, l):
     """
@@ -170,12 +328,41 @@ def _cmd_set_dispatch(cmd_split, setup, cmd_user):
         plt.subplot(rows, cols, indice)
         return setup
     elif cmd_split[1] == "label":
+        # 'set label font <nome>' / 'set label color <cor>' / 'set label
+        # size <n>' / 'set label style <bold/italic/normal>' (secao 6 do
+        # manual): estilo do rotulo da barra de cores/eixo. Sem um desses
+        # quatro sub-comandos em cmd_split[2], mantem o comportamento
+        # classico de 'set label <texto>' (define o texto do rotulo,
+        # setup['label']).
+        if len(cmd_split) >= 3 and cmd_split[2] in ("font", "color", "size", "style"):
+            return _set_estilo_texto(setup, "label", cmd_split, cmd_user)
         setup["label"] = cmd_user[10:]
         return setup
-    elif cmd_split[1] == "label_fs":
-        setup["label_fontsize"] = int(cmd_split[2])
-    elif cmd_split[1] == "label_fw":    
-        setup["label_fontweight"] = cmd_split[2]
+    elif cmd_split[1] == "title":
+        # 'set title font <nome>' / 'set title color <cor>' / 'set title
+        # size <n>' / 'set title style <bold/italic/normal>' (secao 6 do
+        # manual): estilo do titulo do grafico (o texto em si e definido
+        # por 'draw title <texto>', nao por 'set title').
+        if len(cmd_split) < 3 or cmd_split[2] not in ("font", "color", "size", "style"):
+            print("Uso: set title font <nome_da_fonte>  |  set title color <cor>  |  set title size <n>  |  set title style <bold/italic/normal>")
+            return setup
+        return _set_estilo_texto(setup, "title", cmd_split, cmd_user)
+    elif cmd_split[1] == "contour":
+        return _set_contour(setup, cmd_split, cmd_user)
+    elif cmd_split[1] == "bar":
+        # 'set bar position <U/D/L/R>' (secao 6 do manual): posiciona a
+        # barra de cores em cima (U), embaixo (D), a esquerda (L) ou a
+        # direita (R, o padrao do matplotlib) do grafico.
+        if len(cmd_split) < 4 or cmd_split[2] != "position":
+            print("Uso: set bar position <U/D/L/R>")
+            return setup
+        posicao = cmd_split[3].upper()
+        if posicao not in _BAR_POSICOES_VALIDAS:
+            print("Posicao invalida: '{0}'. Use U (up), D (down), L (left) ou R (right).".format(cmd_split[3]))
+            return setup
+        setup["bar_position"] = posicao
+        print("Posicao da barra de cores definida para '{0}'.".format(posicao))
+        return setup
     elif cmd_split[1] == "mappat":
         setup["mappath"] = cmd_split[2]
         return setup
@@ -312,12 +499,6 @@ def _cmd_set_dispatch(cmd_split, setup, cmd_user):
         setup["fig_inches"] = cmd_split[2]
     elif cmd_split[1] == "fig_transparency":
         setup["fig_transparency"] = cmd_split[2]
-    elif cmd_split[1] == "title_color":
-        setup["title_color"] = cmd_split[2]
-    elif cmd_split[1] == "title_fs":
-        setup["title_fs"] = int(cmd_split[2])
-    elif cmd_split[1] == "title_fw":
-        setup["title_fw"] = cmd_split[2]        
     else:
         print("Command not recognized!")
     return setup

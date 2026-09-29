@@ -30,8 +30,12 @@ DEFAULT_SETUP = {
     "time": 0, "time_variable": 0, "time_units": 0,
     "time_str": 0, "DataDado": 0, "openFile": False, "variables": [],
     "fig_dpi": 300, "fig_inches": "tight", "fig_transparency": False,
-    "label_fontsize": 12, "label_fontweight": "normal",
-    "title_color": "black", "title_fs": 12, "title_fw": "normal",
+    "label_font": "", "label_color": "black", "label_size": 12, "label_style": "normal",
+    "title_color": "black", "title_font": "", "title_size": 12, "title_style": "normal",
+    "bar_position": "",
+    "contour_line_size": 1.5, "contour_line_mode": "color",
+    "contour_font": "", "contour_font_color": "", "contour_font_size": 10,
+    "contour_font_style": "normal",
 }
 
 

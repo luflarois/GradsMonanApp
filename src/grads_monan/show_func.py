@@ -10,8 +10,24 @@
 import os
 import matplotlib.pyplot as plt
 
+from .plot_func import _listar_fontes
+
 def show_legend():
     plt.legend()
+
+def _mostrar_fontes():
+    """
+    Comando 'show fonts' (secao 6 do manual): lista, em ordem alfabetica,
+    as fontes TrueType/OpenType instaladas no sistema e reconhecidas pelo
+    matplotlib - use um destes nomes em 'set label font <nome>'/'set
+    title font <nome>' (ver _fonte_existe/_listar_fontes em plot_func.py).
+    """
+    fontes = _listar_fontes()
+    if not fontes:
+        print("Nenhuma fonte encontrada no sistema.")
+        return
+    for nome in fontes:
+        print(nome)
 
 def _mostrar_info_arquivo(setup):
     """
@@ -149,6 +165,9 @@ def cmd_show(setup, cmd_split):
         return
     if cmd_split[1] == "times":
         _mostrar_tempos(setup)
+        return
+    if cmd_split[1] == "fonts":
+        _mostrar_fontes()
         return
     if cmd_split[1] == "latitudes":
         lat = sorted(latitudes)
