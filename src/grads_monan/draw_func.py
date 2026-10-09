@@ -15,6 +15,25 @@ from .plot_func import _ativar_figura_2d, _kwargs_texto
 def draw_title(setup):
     plt.title(setup["title"], **_kwargs_texto(setup, "title"))
 
+def draw_axis_label(setup, eixo, texto):
+    """
+    Comandos 'draw xlabel <texto>' / 'draw ylabel <texto>' (eixo = 'x' ou
+    'y'): guarda o texto em setup['xlabel']/setup['ylabel'] - que substitui
+    o rotulo padrao do eixo em toda plotagem seguinte (ver
+    _aplicar_rotulos_eixos em plot_func.py) - e, se ja houver um grafico,
+    aplica na hora no eixo atual.
+    """
+    setup[eixo + "label"] = texto
+    ax = plt.gca()
+    if eixo == "x":
+        ax.set_xlabel(texto)
+    else:
+        ax.set_ylabel(texto)
+    try:
+        ax.figure.canvas.draw_idle()
+    except Exception:
+        pass
+
 def draw_map(setup,ax=None):
     # Se a janela ativa no momento for a 3D (usada pelo 'd3'), desenha o
     # mapa projetado na "superficie" da caixa 3D; senao, o comportamento

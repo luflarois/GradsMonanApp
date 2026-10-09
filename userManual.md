@@ -8,12 +8,51 @@ pensado para malhas grandes (testado até a resolução operacional,
 
 ---
 
-## 1. Instalação e como rodar
+## 0. Instalação do miniconda (anaconda)
+
+Caso você não tenha um ambiente virtual previamente instalado, proceda com a instalação do mesmo.
+
+```bash
+cd $HOME   # ou sua área de trabalho
+wget https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh
+bash Miniforge3-Linux-x86_64.sh -b -p $HOME/miniforge3
+```
+
+Ative o ambiente:
+
+```bash
+source $HOME/miniforge3/bin/activate
+conda init bash      # adiciona ao ~/.bashrc
+```
+
+Faça logout e login de novo, ou rode 
+
+```bash
+source ~/.bashrc.
+```
+
+## 1. Instalação do pacote GradsMonanApp e como rodar
+
+Clone o GradsMonanApp
+
+```bash
+git clone https://github.com/luflarois/GradsMonanApp.git
+```
+
+Entre no diretório clonado e execute os comandos abaixo:
 
 ```bash
 conda env create -f environment.yml   # ou: pip install .
-conda activate grads-monan
+conda deactivate
+conda activate GradsMonanApp
 grads-monan
+```
+
+**OBSERVAÇÃO IMPORTANTE**: se vc for rodar um branch específico que ainda não recebeu
+pull request ou teve pull request aceito, proceda o checkout para o branch:
+
+```bash
+git checkout <branch_de_interesse>
 ```
 
 Na primeira execução, a pasta de configuração (`~/.config/grads_monan/`) e
@@ -689,8 +728,8 @@ Exige **faixas reais** (não pontos únicos) nas três dimensões:
 
 Sem isso, avisa e não plota. Filtra as células da malha dentro dessa caixa
 lat×lon, e os níveis dentro do intervalo escolhido. O eixo Z segue a mesma
-hierarquia do corte 2D (pressão → altura real `zgrid` → índice de nível —
-seção 8).
+coordenada vertical **da própria variável** (pressão, altura do modelo ou
+profundidade do solo — seção 8.2).
 
 Abre numa **janela própria**, separada da 2D, e a **reaproveita** entre
 chamadas sucessivas de `d3` (não acumula uma janela nova a cada vez).
@@ -721,12 +760,12 @@ globais muito amplos.
 
 | Opção | Mostra |
 |---|---|
-| `show info` | Nome do arquivo NetCDF (e da grade, se houver), dimensões e a lista completa de variáveis, com nº de níveis, descrição e unidade — sempre referente ao **arquivo 1**. Se houver mais de um arquivo aberto, avisa e aponta para `show files`. |
+| `show info` | Nome do arquivo NetCDF (e da grade, se houver), dimensões (inclusive **cada tipo de nível vertical** do arquivo, com dimensão, nº de níveis e fonte dos valores) e a lista completa de variáveis, com nº de níveis, **tipo de nível entre colchetes** (`[pressao]`, `[solo]`, `[altura]`), descrição e unidade — sempre referente ao **arquivo 1**. Se houver mais de um arquivo aberto, avisa e aponta para `show files`. |
 | `show files` | Tabela com **todos** os arquivos abertos na sessão: número, nome do arquivo e timestamp (data/hora, quando disponível) — ver seção 2.1. Se nenhum arquivo estiver aberto, informa isso. |
 | `show times` | Tabela (número + timestamp) só com o(s) tempo(s) **atualmente selecionado(s)** por `set t` (seção 2.1/6): todos os arquivos do intervalo, um por linha, se o modo de série/animação estiver ligado (`set t <inicio> <fim>`); senão, uma única linha, o arquivo/tempo pontual selecionado (`set t <n>`, padrão o arquivo 1). |
 | `show latitudes` / `show longitudes` | Lista de coordenadas da malha, ordenada. |
-| `show levels` | Lista de níveis (pressão em hPa, ou índice de nível). |
-| `show lev` | Nível/intervalo de nível atualmente selecionado. |
+| `show levels [pressao\|altura\|solo]` | Lista os níveis de **cada tipo** de coordenada vertical do arquivo, com o índice a usar em `set lev`: pressão em hPa (`t_iso_levels`), níveis do modelo (`nVertLevels`; a altura em m vem do `zgrid`, por célula) e camadas do solo (`nSoilLevels`, profundidade em m — ver seção 8.2). Com o filtro, mostra só um tipo. |
+| `show lev` | `set lev` atual (índice inicial e final), descrito **em cada tipo de nível** (ex.: `500.0 hPa` e `0.150 m de profundidade`); um tipo que não tem esse índice aparece como `fora do intervalo`. |
 | `show variables` | Lista de variáveis do arquivo com sua descrição (`long_name`). |
 | `show time_variable` / `show time_units` / `show Date` | Informações de tempo do arquivo (com valores de reserva se ausentes). |
 | `show title` / `show label` | Título do gráfico / rótulo da barra de cores atuais. |
@@ -747,7 +786,7 @@ faltando avisa e **mantém a configuração anterior**, sem travar.
 
 | Comando | Efeito |
 |---|---|
-| `set lev <n>` | Nível único. Imprime a informação do nível: pressão em hPa, senão altura média (`zgrid`), senão só o índice. |
+| `set lev <n>` | Nível único. É um **índice**, aceito até o maior número de níveis entre os tipos do arquivo (ex.: 0–17 com pressão de 18 níveis e solo de 6). Imprime o nível em cada tipo que o tem: pressão em hPa, profundidade do solo em m, altura média (`zgrid`) ou só o índice. Ao plotar, o índice é conferido contra os níveis **da variável** (ex.: `set lev 10` seguido de `d tslb` avisa que o solo só tem 6 níveis, 0 a 5). |
 | `set lev <n1> <n2>` | Intervalo de níveis, **ambos inclusivos** (corte vertical, perfil, `d3`) — `<n1>` e `<n2>` são índices de nível válidos, de `0` a `n_niveis-1` (a mesma faixa aceita por `set lev <n>`), e o nível `<n2>` **entra** na seleção. `<n1>` não pode ser maior que `<n2>`. Um corte vertical/`d3` precisa de pelo menos 2 níveis na faixa; um perfil (seção 8) aceita também uma faixa de 1 nível só (equivalente a `set lev <n1>`, com `<n1> == <n2>`). |
 | `set lat <valor>` / `set lat <min> <max>` | Latitude fixa num ponto, ou intervalo (domínio do mapa). |
 | `set lon <valor>` / `set lon <min> <max>` | Longitude fixa num ponto, ou intervalo. |
@@ -795,6 +834,7 @@ faltando avisa e **mantém a configuração anterior**, sem travar.
 | `draw legend` | Mostra a legenda do gráfico atual. |
 | `draw map` | Desenha o mapa de fundo e **liga** o modo "mapa persistente": a partir daqui, o mapa é **redesenhado automaticamente** em todo `d`/`d3` seguinte — inclusive quadro a quadro na animação da série temporal (seção 2.1) — até um `draw map off`. Se a janela **3D** (`d3`) for a ativa no momento, desenha projetado na "superfície" da caixa 3D em vez do comportamento 2D padrão. Pode ser chamado antes de qualquer `d`/`d3` (garante sozinho uma janela/eixo 2D válidos). |
 | `draw map off` | Desliga o modo "mapa persistente": os próximos `d`/`d3` (e a animação) deixam de redesenhar o mapa automaticamente. |
+| `draw xlabel <texto>` / `draw ylabel <texto>` | Substitui o rótulo **padrão** do eixo X / Y (`Longitude`, `Latitude`, `Tempo`, `Altura (m)`, `Pressao (hPa)`, etc.) pelo texto informado. Se já existe um gráfico, aplica na hora; o texto fica guardado na sessão (`setup['xlabel']`/`setup['ylabel']`) e é reaplicado em todo `d`/`d3` seguinte, inclusive quadro a quadro nas animações. `reset` volta aos rótulos padrão. Sem texto, mostra o uso. |
 | `draw label <texto>` | Define o rótulo da barra de cores. Se já existe uma barra de cores no gráfico atual, escreve o texto nela **na hora**. O texto também fica guardado na sessão e é **reaplicado automaticamente** toda vez que uma nova barra de cores for criada — inclusive quadro a quadro na animação (seção 2.1), onde a colorbar é recriada a cada quadro — e pode ser chamado mesmo antes de qualquer `d`/`d3` (o texto entra em vigor assim que a primeira barra de cores for criada). |
 
 ### 7.1 Tabela de símbolos (`draw mark`)
@@ -824,9 +864,12 @@ faltando avisa e **mantém a configuração anterior**, sem travar.
 | Nem latitude nem longitude fixas | **Mapa horizontal**, conforme `gxout` (`shaded`/`contour`/`voronoi`), sempre no **nível único** de `set lev <n>` (ou no primeiro nível de uma faixa, se uma estiver selecionada). |
 
 No **eixo vertical** do corte/perfil (e no eixo Z do `d3`):
-1. **Pressão** (hPa), se houver `t_iso_levels` — maior pressão embaixo.
-2. **Altura real** (m), se houver `zgrid` — interpolada ao longo do corte (acompanha o terreno); menor embaixo.
-3. **Índice do nível**, se nenhum dos dois existir; menor embaixo.
+1. **Pressão** (hPa), para variáveis na dimensão isobárica (`t_iso_levels`/`nIsoLevelsT`) — maior pressão embaixo.
+2. **Profundidade do solo** (m), para variáveis em `nSoilLevels` — superfície em cima, profundidade crescendo para baixo.
+3. **Altura real** (m), para variáveis em `nVertLevels` quando houver `zgrid` — interpolada ao longo do corte (acompanha o terreno); menor embaixo.
+4. **Índice do nível**, se não houver como obter o valor; menor embaixo.
+
+O tipo vem da **dimensão vertical da própria variável** (seção 8.2), não de um eixo único para o arquivo.
 
 Áreas sem dado válido (corte/superfície abaixo da topografia) aparecem
 **hachuradas** no corte vertical 2D.
@@ -841,6 +884,32 @@ No **eixo vertical** do corte/perfil (e no eixo Z do `d3`):
 | `hex` | Desenha o **polígono real** de cada célula — o hexágono/pentágono de verdade da malha MPAS/MONAN (pentágonos aparecem nos poucos defeitos topológicos inevitáveis de qualquer malha icosaédrica/Voronoi) — usando a conectividade completa do arquivo de grade (`verticesOnCell`/`nEdgesOnCell`/`latVertex`/`lonVertex`). Exemplo: `set gxout hex` seguido de `d t2m`. Em domínios de área limitada, as células da borda saem automaticamente com o tamanho/formato real (tipicamente diferente das internas) — a geometria vem direto dos vértices do próprio arquivo, sem nenhum tratamento especial de borda. Precisa da conectividade completa; sem ela, avisa e sugere `voronoi`. Mais fiel que `voronoi`, porém mais pesado (constrói e desenha um polígono por célula) — recomendado para domínios regionais ou malhas de porte pequeno/médio; em malhas globais muito grandes (milhões de células), prefira `shaded`/`contour`/`voronoi`. |
 
 ---
+
+### 8.2 Tipos de nível vertical (pressão, altura do modelo, solo)
+
+Um mesmo arquivo MONAN/MPAS pode ter vários tipos de nível, cada um numa
+dimensão do NetCDF. O programa escolhe o tipo **por variável**:
+
+| Dimensão da variável | Tipo | Valores do eixo | Rótulo do eixo | Sentido |
+|---|---|---|---|---|
+| `t_iso_levels` / `nIsoLevelsT` | pressão | variável `t_iso_levels` (Pa → hPa) | `Pressao (hPa)` | invertido (maior pressão embaixo) |
+| `nSoilLevels` | solo | `zs` (com eixo de camadas); senão centros calculados da espessura `dzs` (acumulado − metade); senão índice | `Profundidade do solo (m)` | invertido (superfície em cima) |
+| `nVertLevels` | altura do modelo | `zgrid` (m, por célula), senão índice | `Altura (m)` / `Levels` | normal |
+
+Observações:
+- Nada precisa ser configurado: `d temperature_isobaric` usa o eixo de
+  pressão e `d tslb` o de profundidade, no mesmo arquivo.
+- `set lev <n>` é um índice; cada variável o interpreta na **sua**
+  dimensão (índice 3 = 500 hPa na pressão e 0,15 m no solo). `show lev`
+  mostra a leitura em cada tipo.
+- Se o índice não existir na variável plotada (ex.: `set lev 10` com
+  `tslb`, que tem 6 níveis), o programa avisa com o intervalo válido e
+  não plota.
+- Em alguns arquivos (como o diagnóstico MONAN) `zs` vem como
+  `(Time, nCells)`, sem eixo de camadas; nesse caso as profundidades são
+  calculadas de `dzs`. `show levels solo` informa a fonte usada.
+- O atributo global `num_soil_layers` do arquivo é ignorado: vale o
+  tamanho real da dimensão `nSoilLevels`.
 
 ## 9. Área de configuração (`~/.config/grads_monan/`)
 
@@ -950,7 +1019,8 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 | `limits_indices` | Índices (inteiros) das células dentro da área — equivalente a `np.nonzero(limits_mask)[0]`, já pronto para uso direto. |
 | `limits_arquivo` | Caminho do último arquivo de limites carregado com sucesso por `load limits`. |
 | `latitudes` / `longitudes` | Coordenadas de cada célula da malha (graus, longitude normalizada). |
-| `levels` / `eixo_pressao` | Lista de níveis; se representam pressão (`True`) ou índice de modelo (`False`). |
+| `levels` / `eixo_pressao` | Nível *padrão* do arquivo (pressão se houver `t_iso_levels`; senão níveis do modelo), usado só quando a variável é desconhecida. O tipo de nível de cada variável vem de `utils.descritor_nivel` (seção 8.2). |
+| `_nivel_atual` | Descritor do nível da variável do comando em andamento (tipo, valores, rótulo, sentido do eixo), registrado por `exec_func.py` ao resolver a variável. |
 | `lat_min`, `lat_max`, `lon_min`, `lon_max` | Domínio geográfico selecionado. |
 | `lev`, `levf` | Índice de nível (único ou intervalo) selecionado. |
 | `cut` | `None`, ou `(minimo, maximo)` — ver `set cut`. |
@@ -1029,18 +1099,19 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 - `_modo_espacial(setup)` — decide, a partir de `setup["lat_min"]`/`["lat_max"]`/`["lon_min"]`/`["lon_max"]`, o modo atual: `"ponto"` (lat e lon fixadas no mesmo valor), `"corte"` (só uma das duas fixa) ou `"mapa"` (nenhuma fixa) — mesma decisão que `plot_var` usa para escolher entre `plot_perfil`/`plot_corte`/mapa (seção 8).
 - `_indice_mais_proximo(setup)` — índice da célula da malha mais próxima do ponto de lat/lon selecionado (mesma fórmula usada por `plot_perfil`).
 - `_preparar_mascara(mask, n_cells, ...)` — confere se `mask` bate com o número de células da matriz empilhada (ex: após um `reinit` com outra malha, sem recarregar `load limits`).
-- `_descricao_nivel(setup)` / `_descricao_intervalo_niveis(setup)` — texto curto do nível único (modo mapa) ou da faixa de níveis (modo ponto/corte) atualmente selecionados, para anexar às mensagens de resultado — pressão em hPa quando disponível (`setup["eixo_pressao"]`), senão só o(s) índice(s).
+- `_descricao_nivel(setup)` / `_descricao_intervalo_niveis(setup)` — texto curto do nível único (modo mapa) ou da faixa de níveis (modo ponto/corte) atualmente selecionados, para anexar às mensagens de resultado — pressão em hPa ou profundidade do solo em m, conforme o tipo de nível da variável (`utils.nivel_do_setup`), senão só o(s) índice(s).
 - `sum_all`/`sum_inlimits`/`mean_all`/`mean_inlimits` — atalhos nomeados equivalentes a `calcular_valor` com o nome da função já fixado (úteis para chamar diretamente, ex. em testes).
 - `NOMES_ESTATISTICA_ESCALAR`, `NOMES_ESTATISTICA_ESPACIAL` — tuplas com os nomes de comando reconhecidos por `exec_func.py` (todas as estatísticas têm tanto a forma escalar quanto a espacial, incluindo `sum`).
 
 ### `set_func.py`
 - `cmd_set(...)` / `_cmd_set_dispatch(...)` — comando `set` (tabela da seção 6), com validação numérica segura. `set lev <n1> <n2>` valida `<n1>`/`<n2>` como índices de nível **inclusivos** (0 a `n_niveis-1`, com `<n1> <= <n2>`) e guarda internamente `setup["levf"] = <n2> + 1` — o limite EXCLUSIVO usado por toda fatia de nível do resto do código (`var[..., lev:levf]` — ver `levf_efetivo` em `utils.py`); sem esse `+1`, incluir o último nível pedido exigiria um índice inválido.
-- `_print_level_info(setup, l)` — informação do nível ao usar `set lev <n>`.
+- `_print_level_info(setup, l, lf=None)` — informação do nível (ou faixa) ao usar `set lev`, em cada tipo de nível do arquivo (pressão, solo, altura).
 - `_set_estilo_texto(setup, alvo, cmd_split, cmd_user)` — implementa `set label font/color/size/style` e `set title font/color/size/style` (`alvo` é `"label"` ou `"title"`), guardando o resultado em `setup['<alvo>_font']`/`_color`/`_size`/`_style`. `font` verifica a existência da fonte no sistema (`_fonte_existe`, de `plot_func.py`) antes de aceitar.
 - `_set_contour(setup, cmd_split, cmd_user)` — implementa `set contour line size/<bw|color>` e `set contour font/<color|size|style>` (linhas e rótulos inline do `gxout contour`), guardando o resultado em `setup['contour_line_size']`/`_line_mode`/`_font`/`_font_color`/`_font_size`/`_font_style`.
 
 ### `show_func.py`
 - `cmd_show(setup, cmd_split)` / `_mostrar_info_arquivo(setup)` — comando `show` (tabela da seção 5).
+- `_mostrar_niveis(setup, filtro)` / `_mostrar_lev(setup)` — `show levels [tipo]` e `show lev`: níveis de cada tipo de coordenada vertical (seção 8.2).
 - `_mostrar_arquivos(setup)` — `show files`: tabela com os arquivos abertos na sessão (seção 2.1).
 - `_mostrar_tempos(setup)` — `show times`: mesma tabela de `_mostrar_arquivos`, restrita ao(s) tempo(s) atualmente selecionado(s) por `set t` (o intervalo inteiro no modo série, ou só o arquivo pontual de `setup['arquivo_sel']` fora dele) — seção 2.1/5.
 - `_mostrar_fontes()` — `show fonts`: lista as fontes do sistema (ver `_listar_fontes` em `plot_func.py`) — seção 5/6.
@@ -1049,6 +1120,7 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 ### `draw_func.py`
 - `draw_title(setup)` — `draw title <texto>`: desenha direto no eixo atual (`plt.title`), com a fonte/cor/estilo de `set title font/color/style` (`_kwargs_texto`, de `plot_func.py`).
 - `draw_map(setup, ax=None)` — `draw map`: garante uma figura/eixo 2D de verdade (via `_ativar_figura_2d`, de `plot_func.py`) antes de desenhar — não depende do `ax` recebido do chamador, que pode ainda ser o inteiro inicial `0` (de `cli.py`) se nenhum `d`/`d3` tiver rodado ainda na sessão. Se a janela 3D estiver ativa, desenha via `plot_map_3d` na superfície da caixa.
+- `draw_axis_label(setup, eixo, texto)` — `draw xlabel`/`draw ylabel`: guarda o texto em `setup['xlabel']`/`setup['ylabel']` e aplica no eixo atual; `_aplicar_rotulos_eixos(setup, ax)` (em `plot_func.py`) reaplica por cima do rótulo padrão ao final de toda plotagem.
 - `draw_label(setup, cbar, lbl)` — `draw label <texto>`: se `cbar` já é uma barra de cores de verdade, aplica o texto na hora (com a fonte/cor/estilo de `set label font/color/style`, via `_kwargs_texto`) e força o redesenho; senão (nenhum `d`/`d3` rodou ainda), não faz nada aqui — o texto já foi guardado em `setup["cbar_label"]` por quem chamou (`exec_func.py`) e é reaplicado sozinho pela primeira colorbar criada (`_aplicar_rotulo_cbar`, em `plot_func.py`).
 - `draw_mark(cmd_split)` — `draw mark <lat> <lon> <simbolo>` (seção 7.1).
 - `_SIMBOLOS_MARK` — tabela símbolo → `marker`/`fillstyle`.
@@ -1113,6 +1185,7 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 - `assinatura_malha(latitudes, longitudes)` — nº de células + hash `md5` de lat/lon, usada para validar que arquivos abertos na mesma sessão compartilham a mesma malha (seção 2.1).
 - `construir_poligonos_celulas(mesh)` — monta o polígono (lon/lat) de cada célula a partir da conectividade completa do arquivo de grade (`verticesOnCell`/`nEdgesOnCell`/`latVertex`/`lonVertex`), incluindo o formato/tamanho real das células de borda em domínios regionais — usado por `gxout hex` (seção 8.1). Retorna `None` se a malha não tiver essa conectividade.
 - `load_zgrid_centers(...)` — extrai e alinha a variável `zgrid`.
+- `classificar_dim_vertical(nome)` / `descritor_nivel(setup, var)` / `descritores_disponiveis(setup)` / `nivel_padrao(setup)` / `nivel_do_setup(setup)` / `formatar_nivel(desc, i)` / `checar_niveis(setup, desc, nome)` — coordenada vertical **por variável** (pressão, altura, solo; seção 8.2): o descritor traz tipo, dimensão, nº de níveis, valores, rótulo, sentido do eixo e fonte; `checar_niveis` confere o `set lev` contra os níveis da variável.
 - `encontrar_posicao_mais_proxima(...)` — busca binária.
 - `custom_input(prompt="> ")` / `load_history` / `save_command_to_history` — prompt com histórico; `prompt` é escolhido a cada linha por `cli.py` conforme o resultado do comando anterior (seção 1.1: `'> '`/`'E> '`/`'?> '`).
 
@@ -1123,7 +1196,9 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 - **Sempre necessário**: as variáveis a serem plotadas.
 - **Malha**: `nCells` e `latCell`/`lonCell`, embutidos ou num arquivo de grade externo (seção 10 do manual anterior mantém-se válida: vários cenários de ausência são tratados sem travar).
 - **Tempo** (opcional, com valores de reserva): `xtime`, `initial_time`.
-- **Níveis de pressão** (opcional): `t_iso_levels`. Sem isso, usa índice de nível do modelo.
+- **Níveis de pressão** (opcional): `t_iso_levels` (Pa).
+- **Níveis de solo** (opcional): dimensão `nSoilLevels` com `zs` (profundidade dos centros) ou `dzs` (espessura das camadas). Sem isso, usa o índice.
+- Sem nenhum deles, usa índice de nível do modelo.
 - **Altura real** (opcional, corte/perfil/`d3` por altura): `zgrid`.
 - **`voronoi`/`shaded`/`contour`/corte/`streamlines`**: só precisam de `latCell`/`lonCell` — não é necessária a conectividade completa (`verticesOnCell` etc.).
 - **`hex`** (seção 8.1): precisa da conectividade completa da malha — `verticesOnCell`, `nEdgesOnCell`, `latVertex`, `lonVertex` — presente no arquivo de grade padrão do MPAS/MONAN (`x1.<nCells>.grid.nc`), mas tipicamente ausente em saídas de diagnóstico/pós-processadas. Sem essa conectividade, o programa avisa e sugere `voronoi` em vez de travar.
