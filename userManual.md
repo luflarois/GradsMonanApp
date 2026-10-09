@@ -8,12 +8,51 @@ pensado para malhas grandes (testado até a resolução operacional,
 
 ---
 
-## 1. Instalação e como rodar
+## 0. Instalação do miniconda (anaconda)
+
+Caso você não tenha um ambiente virtual previamente instalado, proceda com a instalação do mesmo.
+
+```bash
+cd $HOME   # ou sua área de trabalho
+wget https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh
+bash Miniforge3-Linux-x86_64.sh -b -p $HOME/miniforge3
+```
+
+Ative o ambiente:
+
+```bash
+source $HOME/miniforge3/bin/activate
+conda init bash      # adiciona ao ~/.bashrc
+```
+
+Faça logout e login de novo, ou rode 
+
+```bash
+source ~/.bashrc.
+```
+
+## 1. Instalação do pacote GradsMonanApp e como rodar
+
+Clone o GradsMonanApp
+
+```bash
+git clone https://github.com/luflarois/GradsMonanApp.git
+```
+
+Entre no diretório clonado e execute os comandos abaixo:
 
 ```bash
 conda env create -f environment.yml   # ou: pip install .
+conda deactivate
 conda activate GradsMonanApp
 grads-monan
+```
+
+**OBSERVAÇÃO IMPORTANTE**: se vc for rodar um branch específico que ainda não recebeu
+pull request ou teve pull request aceito, proceda o checkout para o branch:
+
+```bash
+git checkout <branch_de_interesse>
 ```
 
 Na primeira execução, a pasta de configuração (`~/.config/grads_monan/`) e
