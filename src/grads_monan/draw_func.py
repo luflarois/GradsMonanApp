@@ -25,10 +25,11 @@ def draw_axis_label(setup, eixo, texto):
     """
     setup[eixo + "label"] = texto
     ax = plt.gca()
+    kw = _kwargs_texto(setup, eixo + "label")
     if eixo == "x":
-        ax.set_xlabel(texto)
+        ax.set_xlabel(texto, **kw)
     else:
-        ax.set_ylabel(texto)
+        ax.set_ylabel(texto, **kw)
     try:
         ax.figure.canvas.draw_idle()
     except Exception:
