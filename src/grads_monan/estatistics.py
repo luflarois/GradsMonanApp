@@ -56,7 +56,7 @@ funcoes deste modulo.
 """
 # ---------------------------------------------------------------------------
 import numpy as np
-from .utils import sem_mascara, levf_efetivo as _levf_efetivo
+from .utils import sem_mascara, levf_efetivo as _levf_efetivo, nivel_do_setup, formatar_nivel
 
 # Rotulo (para as mensagens) e a funcao de reducao "sobre tudo" (escalar) de
 # cada estatistica. As funcoes 'np.nan*' ignoram valores sem dado (NaN).
@@ -98,13 +98,13 @@ def _descricao_nivel(setup):
     """
     Texto curto descrevendo o NIVEL UNICO atualmente selecionado
     (setup['lev']) - usado nas mensagens do modo 'mapa' (a estatistica so
-    olha para um nivel de cada vez): pressao em hPa, se disponivel
-    (setup['eixo_pressao']), senao so o indice.
+    olha para um nivel de cada vez): conforme o tipo de nivel da variavel
+    (pressao em hPa, profundidade do solo em m) ou so o indice.
     """
     lev = setup["lev"]
-    levels = setup.get("levels")
-    if setup.get("eixo_pressao") and levels is not None and 0 <= lev < len(levels):
-        return "nivel {0} = {1:.1f} hPa".format(lev, levels[lev])
+    nv = nivel_do_setup(setup)
+    if nv["tipo"] in ("pressao", "solo") and 0 <= lev < len(nv["valores"]):
+        return "nivel {0} = {1}".format(lev, formatar_nivel(nv, lev))
     return "nivel {0}".format(lev)
 
 
@@ -119,10 +119,13 @@ def _descricao_intervalo_niveis(setup):
     """
     lev = setup["lev"]
     levf = setup["levf"]
-    levels = setup.get("levels")
+    nv = nivel_do_setup(setup)
+    valores = nv["valores"]
     ultimo = max(lev, levf - 1)
-    if setup.get("eixo_pressao") and levels is not None and 0 <= lev < len(levels) and 0 <= ultimo < len(levels):
-        return "niveis {0}-{1} ({2:.1f}-{3:.1f} hPa)".format(lev, ultimo, levels[lev], levels[ultimo])
+    if nv["tipo"] in ("pressao", "solo") and 0 <= lev < len(valores) and 0 <= ultimo < len(valores):
+        if nv["tipo"] == "pressao":
+            return "niveis {0}-{1} ({2:.1f}-{3:.1f} hPa)".format(lev, ultimo, valores[lev], valores[ultimo])
+        return "niveis {0}-{1} ({2:.3f}-{3:.3f} m de profundidade)".format(lev, ultimo, valores[lev], valores[ultimo])
     return "niveis {0}-{1}".format(lev, ultimo)
 
 

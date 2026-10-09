@@ -233,3 +233,229 @@ def save_command_to_history(cmd,HISTORY_FILE):
         readline.add_history(cmd)
         with open(HISTORY_FILE, "a") as f:
             f.write(cmd + "\n")
+
+# ---------------------------------------------------------------------------
+# Coordenada vertical POR VARIAVEL
+#
+# Uma saida MONAN/MPAS pode trazer varios tipos de nivel vertical ao mesmo
+# tempo, cada um com a sua dimensao no NetCDF:
+#   - pressao : dimensao 't_iso_levels' / 'nIsoLevelsT' (valores em Pa na
+#               variavel 't_iso_levels'; o programa mostra em hPa);
+#   - altura  : dimensao 'nVertLevels' / 'nVertLevelsP1' (niveis nativos do
+#               modelo; a altura em metros vem da variavel 'zgrid', quando
+#               existe, e varia de celula para celula);
+#   - solo    : dimensao 'nSoilLevels' (profundidade do centro das camadas,
+#               em metros, vem da variavel 'zs'; na falta dela, calculada a
+#               partir da espessura das camadas 'dzs').
+# O tipo de nivel de uma variavel e decidido pela sua PROPRIA dimensao
+# vertical (e nao mais por um unico eixo valido para o arquivo todo).
+# ---------------------------------------------------------------------------
+
+TIPOS_NIVEL = ("pressao", "altura", "solo", "indice")
+
+_NOME_TIPO_NIVEL = {
+    "pressao": "pressao (hPa)",
+    "altura": "altura do modelo",
+    "solo": "solo (profundidade, m)",
+    "indice": "indice de nivel",
+}
+
+def classificar_dim_vertical(nome_dim):
+    """Tipo de nivel ('pressao'/'solo'/'altura'/'indice') de uma dimensao
+    pelo nome, ou None se nao for uma dimensao vertical."""
+    n = str(nome_dim).lower()
+    if "iso" in n:
+        return "pressao"
+    if "soil" in n:
+        return "solo"
+    if "vert" in n:
+        return "altura"
+    if "lev" in n:
+        return "indice"
+    return None
+
+def _para_float(x):
+    """Array float, com mascara (masked array) virando NaN."""
+    return np.ma.filled(np.ma.asarray(x, dtype=float), np.nan)
+
+def _attr(var, nome):
+    try:
+        if nome in var.ncattrs():
+            return var.getncattr(nome)
+    except Exception:
+        pass
+    return None
+
+def _reduzir_para_eixo(var, dim):
+    """Media de 'var' sobre todas as dimensoes menos 'dim' -> vetor 1-D."""
+    dims = tuple(getattr(var, "dimensions", ()))
+    if dim not in dims:
+        return None
+    arr = _para_float(var[:])
+    eixo = dims.index(dim)
+    outros = tuple(i for i in range(arr.ndim) if i != eixo)
+    if not outros:
+        return arr
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return np.nanmean(arr, axis=outros)
+
+def _valores_pressao(variables, dim, n):
+    """Pressao em hPa dos niveis da dimensao 'dim' (ou None)."""
+    candidatos = [dim]
+    d = str(dim)
+    if d.lower().startswith("niso") and len(d) > 0:
+        candidatos.append(d[-1].lower() + "_iso_levels")
+    candidatos += [v for v in variables if str(v).endswith("_iso_levels")]
+    for nome in candidatos:
+        if nome in variables:
+            v = variables[nome]
+            try:
+                if len(v.shape) == 1 and v.shape[0] == n:
+                    vals = _para_float(v[:])
+                    un = str(_attr(v, "units") or "Pa").strip().lower()
+                    if un not in ("hpa", "mb", "mbar", "millibar"):
+                        vals = vals / 100.
+                    return vals
+            except Exception:
+                continue
+    return None
+
+def _valores_solo(variables, dim, n):
+    """(profundidades em m, fonte) das camadas de solo da dimensao 'dim'."""
+    # 1) 'zs': profundidade do centro das camadas
+    if "zs" in variables:
+        try:
+            v = variables["zs"]
+            vals = None
+            if dim in tuple(getattr(v, "dimensions", ())):
+                vals = _reduzir_para_eixo(v, dim)
+            elif len(v.shape) == 1 and v.shape[0] == n:
+                vals = _para_float(v[:])
+            if vals is not None and vals.shape == (n,) and np.all(np.isfinite(vals)):
+                return np.abs(vals), "zs"
+        except Exception:
+            pass
+    # 2) 'dzs': espessura das camadas -> centros = acumulado - metade
+    if "dzs" in variables:
+        try:
+            dz = _reduzir_para_eixo(variables["dzs"], dim)
+            if dz is not None and dz.shape == (n,) and np.all(np.isfinite(dz)):
+                dz = np.abs(dz)
+                return np.cumsum(dz) - dz / 2.0, "dzs (centros calculados da espessura das camadas)"
+        except Exception:
+            pass
+    return None, "indice"
+
+def _montar_descritor(variables, dim, n):
+    tipo = classificar_dim_vertical(dim) or "indice"
+    desc = {"tipo": tipo, "dim": dim, "n": int(n), "fonte": "indice",
+            "valores": np.arange(n, dtype=float), "rotulo": "Levels",
+            "unidade": "", "invertido": False}
+    if tipo == "pressao":
+        vals = _valores_pressao(variables, dim, n)
+        if vals is not None:
+            desc.update(valores=vals, rotulo="Pressao (hPa)", unidade="hPa",
+                        invertido=True, fonte="t_iso_levels")
+        else:
+            desc["tipo"] = "indice"
+    elif tipo == "solo":
+        vals, fonte = _valores_solo(variables, dim, n)
+        if vals is not None:
+            desc.update(valores=vals, rotulo="Profundidade do solo (m)",
+                        unidade="m", invertido=True, fonte=fonte)
+        else:
+            desc.update(rotulo="Nivel do solo (indice)", invertido=False)
+    elif tipo == "altura":
+        desc["fonte"] = "zgrid" if "zgrid" in variables else "indice"
+    desc["nome_tipo"] = _NOME_TIPO_NIVEL[desc["tipo"]]
+    return desc
+
+def descritor_nivel(setup, var=None, variables=None):
+    """
+    Descritor da coordenada vertical de UMA variavel (dict com: tipo, dim,
+    n, valores, rotulo, unidade, invertido, fonte, nome_tipo), a partir da
+    sua propria dimensao vertical. Retorna None se 'var' nao tiver
+    dimensao vertical (variavel 2D) ou nao trouxer informacao de
+    dimensoes (array puro).
+    """
+    dims = getattr(var, "dimensions", None)
+    shape = getattr(var, "shape", None)
+    if dims is None or shape is None or len(dims) != len(shape):
+        return None
+    if variables is None:
+        variables = setup.get("variables", {}) if isinstance(setup, dict) else {}
+    for eixo, dim in enumerate(dims):
+        if eixo == 0 or classificar_dim_vertical(dim) is None:
+            continue
+        n = shape[eixo]
+        cache = setup.setdefault("_cache_niveis", {}) if isinstance(setup, dict) else {}
+        chave = (id(variables), dim, n)
+        if chave not in cache:
+            cache[chave] = _montar_descritor(variables, dim, n)
+        return cache[chave]
+    return None
+
+def descritores_disponiveis(setup, variables=None):
+    """Lista de descritores de TODAS as dimensoes verticais realmente usadas
+    pelas variaveis (3D) do arquivo - pressao, altura, solo..."""
+    if variables is None:
+        variables = setup.get("variables", {})
+    vistos = []
+    lista = []
+    for nome in variables:
+        v = variables[nome]
+        try:
+            d = descritor_nivel(setup, v, variables)
+        except Exception:
+            d = None
+        if d is not None and (d["dim"], d["n"]) not in vistos:
+            vistos.append((d["dim"], d["n"]))
+            lista.append(d)
+    return lista
+
+def nivel_padrao(setup):
+    """Descritor 'global' (legado) a partir de setup['levels'] /
+    setup['eixo_pressao'], usado quando a variavel nao e conhecida."""
+    levels = np.asarray(setup.get("levels", [0]), dtype=float)
+    if setup.get("eixo_pressao"):
+        return {"tipo": "pressao", "dim": "t_iso_levels", "n": len(levels), "fonte": "t_iso_levels",
+                "valores": levels, "rotulo": "Pressao (hPa)", "unidade": "hPa",
+                "invertido": True, "nome_tipo": _NOME_TIPO_NIVEL["pressao"]}
+    return {"tipo": "altura", "dim": "", "n": len(levels), "fonte": "indice",
+            "valores": levels, "rotulo": "Levels", "unidade": "",
+            "invertido": False, "nome_tipo": _NOME_TIPO_NIVEL["altura"]}
+
+def nivel_do_setup(setup):
+    """Descritor do nivel da variavel em uso agora (registrado pelo
+    exec_func ao resolver a variavel), ou o padrao global."""
+    nv = setup.get("_nivel_atual")
+    return nv if nv is not None else nivel_padrao(setup)
+
+def formatar_nivel(desc, i):
+    """Texto do valor do nivel 'i' ('850.0 hPa', '0.35 m de profundidade'...)."""
+    try:
+        v = float(desc["valores"][i])
+    except Exception:
+        return "indice {0}".format(i)
+    if desc["tipo"] == "pressao":
+        return "{0:.1f} hPa".format(v)
+    if desc["tipo"] == "solo" and desc["unidade"] == "m":
+        return "{0:.3f} m de profundidade".format(v)
+    return "indice {0}".format(i)
+
+def checar_niveis(setup, desc, nome_var):
+    """Confere se o 'set lev' atual cabe nos niveis de 'desc'. Imprime o
+    erro e retorna False se nao couber."""
+    if desc is None:
+        return True
+    lev = setup.get("lev", 0)
+    ultimo = levf_efetivo(lev, setup.get("levf", lev)) - 1
+    n = desc["n"]
+    if lev < 0 or ultimo >= n:
+        print("Erro: '{0}' tem {1} nivel(is) de {2} (indices 0 a {3}), mas o 'set lev' atual vai de {4} a {5}.".format(
+            nome_var, n, desc["nome_tipo"], n - 1, lev, ultimo))
+        print("Use 'set lev <n>' (ou 'set lev <ini> <fim>') dentro dessa faixa; 'show levels' lista os niveis de cada tipo.")
+        return False
+    return True

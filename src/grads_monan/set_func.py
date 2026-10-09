@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from .plot_func import atualizar_titulo_janela, _fonte_existe
+from .utils import descritores_disponiveis, formatar_nivel
 
 _ESTILOS_TEXTO_VALIDOS = ("bold", "italic", "normal")
 _BAR_POSICOES_VALIDAS = ("U", "D", "L", "R")
@@ -170,41 +171,63 @@ def _set_contour(setup, cmd_split, cmd_user):
     print(uso)
     return setup
 
-def _print_level_info(setup, l):
+def _print_level_info(setup, l, lf=None):
     """
-    Imprime a informacao do nivel selecionado em 'set lev N':
-    pressao (t_iso_levels), senao altura geometrica (zgrid),
-    senao apenas o indice do nivel.
+    Imprime a informacao do nivel selecionado em 'set lev N' (ou da faixa
+    N1..N2), em CADA tipo de coordenada vertical do arquivo: pressao
+    (t_iso_levels, hPa), profundidade do solo (zs, m) e nivel do modelo
+    (altura geometrica media, zgrid, se existir, senao so o indice).
     """
     variables = setup.get("variables", {})
+    ultimo = l if lf is None else lf
+    niveis = descritores_disponiveis(setup)
+    partes = []
+    for d in niveis:
+        if ultimo >= d["n"]:
+            continue
+        if d["tipo"] in ("pressao", "solo"):
+            txt = formatar_nivel(d, l) if l == ultimo else "{0} ate {1}".format(formatar_nivel(d, l), formatar_nivel(d, ultimo))
+            partes.append("{0}: {1}".format(d["nome_tipo"], txt))
+        elif d["tipo"] == "altura" and "zgrid" in variables:
+            try:
+                altura = _altura_media_zgrid(variables["zgrid"], d["n"], l)
+                partes.append("{0}: zgrid medio = {1:.1f} m".format(d["nome_tipo"], altura))
+            except Exception:
+                partes.append("{0}: indice {1}".format(d["nome_tipo"], l))
+        else:
+            partes.append("{0}: indice {1}".format(d["nome_tipo"], l))
 
-    if "t_iso_levels" in variables:
-        print("Nivel {0} selecionado: {1:.1f} hPa".format(l, setup["levels"][l]))
-        return
-
-    if "zgrid" in variables:
-        zgrid_var = variables["zgrid"]
-        try:
-            dims = zgrid_var.dimensions
-            shape = zgrid_var.shape
-            n_levels = len(setup["levels"])
-            eixo_nivel = None
-            for i, tamanho in enumerate(shape):
-                if tamanho == n_levels or tamanho == n_levels+1:
-                    eixo_nivel = i
-                    break
-            if eixo_nivel is None:
-                raise ValueError("dimensao de nivel nao identificada em zgrid")
-            slicer = [slice(None)] * len(shape)
-            slicer[eixo_nivel] = l
-            valores = np.asarray(zgrid_var[tuple(slicer)])
-            altura = float(np.nanmean(valores))
-            print("Nivel {0} selecionado: zgrid = {1:.1f} m".format(l, altura))
-        except Exception:
+    if not niveis:
+        # arquivo sem variaveis 3D identificaveis: comportamento antigo
+        if "t_iso_levels" in variables:
+            print("Nivel {0} selecionado: {1:.1f} hPa".format(l, setup["levels"][l]))
+        else:
             print("Nivel {0} selecionado.".format(l))
         return
 
-    print("Nivel {0} selecionado.".format(l))
+    if not partes:
+        print("Nivel {0} selecionado.".format(l))
+        return
+    if l == ultimo:
+        print("Nivel {0} selecionado:".format(l))
+    else:
+        print("Niveis {0} a {1} selecionados:".format(l, ultimo))
+    for p in partes:
+        print("  " + p)
+
+def _altura_media_zgrid(zgrid_var, n_levels, l):
+    """Altura media (m) do nivel 'l' do zgrid (media sobre celulas/tempos)."""
+    shape = zgrid_var.shape
+    eixo_nivel = None
+    for i, tamanho in enumerate(shape):
+        if tamanho == n_levels or tamanho == n_levels + 1:
+            eixo_nivel = i
+            break
+    if eixo_nivel is None:
+        raise ValueError("dimensao de nivel nao identificada em zgrid")
+    slicer = [slice(None)] * len(shape)
+    slicer[eixo_nivel] = l
+    return float(np.nanmean(np.asarray(zgrid_var[tuple(slicer)])))
 
 def _print_arquivo_info(setup, n):
     """
@@ -238,7 +261,12 @@ def cmd_set(cmd_split, setup, cmd_user):
 def _cmd_set_dispatch(cmd_split, setup, cmd_user):
     levels = setup["levels"]
     if cmd_split[1] == "lev":
-        n_levels = len(levels)
+        # Maior numero de niveis entre os tipos de coordenada vertical do
+        # arquivo (pressao, altura do modelo, solo...): o 'set lev' guarda
+        # so o indice; a conferencia contra os niveis da VARIAVEL
+        # plotada (ex: solo tem menos niveis que pressao) e feita ao
+        # plotar - ver checar_niveis em utils.py.
+        n_levels = max([len(levels)] + [d["n"] for d in descritores_disponiveis(setup)])
         if len(cmd_split) == 3:
             l = int(cmd_split[2])
             if l<0 or l>=n_levels:
@@ -272,6 +300,7 @@ def _cmd_set_dispatch(cmd_split, setup, cmd_user):
                 return setup
             setup["lev"] = l1
             setup["levf"] = l2 + 1
+            _print_level_info(setup, l1, l2)
             #print("Level set from {0} to {1} : {2} to {3}".format(lev,levf,levels[lev],levels[levf]))
             atualizar_titulo_janela(setup)
         else:

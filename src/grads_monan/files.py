@@ -129,9 +129,17 @@ def file_open(fileName, setup_toml, gridFile=None, setup_anterior=None):
             # isobáricos interpolados (t_iso_levels) - só níveis nativos do modelo.
             print("Aviso: variavel 't_iso_levels' nao encontrada em ",fileName)
             vert_dim = None
-            for dim_name in dataset.dimensions:
-                if "lev" in dim_name.lower() or "vert" in dim_name.lower():
-                    vert_dim = dim_name
+            # Prefere os niveis do MODELO (nVertLevels...) a niveis de solo
+            # (nSoilLevels) ou outros: cada variavel usa depois a sua
+            # propria dimensao vertical (ver descritor_nivel em utils.py).
+            candidatas = [d for d in dataset.dimensions
+                          if "lev" in d.lower() or "vert" in d.lower()]
+            for criterio in (lambda d: "vert" in d.lower(),
+                             lambda d: "soil" not in d.lower() and "iso" not in d.lower(),
+                             lambda d: True):
+                achadas = [d for d in candidatas if criterio(d)]
+                if achadas:
+                    vert_dim = achadas[0]
                     break
             if vert_dim is not None:
                 n_levels = dataset.dimensions[vert_dim].size

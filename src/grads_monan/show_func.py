@@ -11,6 +11,7 @@ import os
 import matplotlib.pyplot as plt
 
 from .plot_func import _listar_fontes
+from .utils import descritor_nivel, descritores_disponiveis, formatar_nivel, levf_efetivo
 
 def show_legend():
     plt.legend()
@@ -44,7 +45,14 @@ def _mostrar_info_arquivo(setup):
 
     print("Dimensoes:")
     print("  Numero de celulas (nCells): {0}".format(len(setup.get("latitudes", []))))
-    print("  Numero de niveis verticais: {0}".format(len(setup.get("levels", []))))
+    niveis = descritores_disponiveis(setup)
+    if niveis:
+        print("  Niveis verticais:")
+        for d in niveis:
+            print("    {0} - dimensao '{1}': {2} niveis (fonte dos valores: {3})".format(
+                d["nome_tipo"], d["dim"], d["n"], d["fonte"]))
+    else:
+        print("  Numero de niveis verticais: {0}".format(len(setup.get("levels", []))))
     n_tempos = len(setup.get("time", []))
     if n_tempos:
         print("  Numero de tempos: {0}".format(n_tempos))
@@ -55,10 +63,11 @@ def _mostrar_info_arquivo(setup):
         attrs = var.ncattrs()
 
         n_niveis_var = 1
-        for i, d in enumerate(var.dimensions):
-            if "lev" in d.lower() or "vert" in d.lower():
-                n_niveis_var = var.shape[i]
-                break
+        tipo_var = ""
+        desc_var = descritor_nivel(setup, var, variables)
+        if desc_var is not None:
+            n_niveis_var = desc_var["n"]
+            tipo_var = " [{0}]".format(desc_var["tipo"])
 
         descricao = "Sem descricao"
         for chave in ("long_name", "description", "standard_name"):
@@ -69,12 +78,58 @@ def _mostrar_info_arquivo(setup):
         unidade = getattr(var, "units", None) if "units" in attrs else None
         texto = "{0} ({1})".format(descricao, unidade) if unidade else descricao
 
-        print("  {0} - niveis: {1} - {2}".format(vname, n_niveis_var, texto))
+        print("  {0} - niveis: {1}{2} - {3}".format(vname, n_niveis_var, tipo_var, texto))
 
     arquivos = setup.get("files") or []
     if len(arquivos) > 1:
         print("")
         print("Ha {0} arquivos abertos nesta sessao. Use 'show files' para ve-los.".format(len(arquivos)))
+
+def _mostrar_niveis(setup, filtro=None):
+    """
+    Comando 'show levels [pressao|altura|solo]': lista os niveis de CADA
+    tipo de coordenada vertical presente no arquivo (pressao em hPa,
+    niveis do modelo, camadas do solo em m de profundidade), com o indice
+    a usar em 'set lev'.
+    """
+    niveis = descritores_disponiveis(setup)
+    if not niveis:
+        levels = setup["levels"]
+        for i in range(len(levels)):
+            print(i, " - ", levels[i])
+        return
+    if filtro:
+        niveis = [d for d in niveis if d["tipo"].startswith(filtro.lower()) or d["dim"].lower() == filtro.lower()]
+        if not niveis:
+            print("Nenhum nivel do tipo '{0}' neste arquivo (tipos: pressao, altura, solo).".format(filtro))
+            return
+    for d in niveis:
+        print("[{0}] dimensao '{1}', {2} niveis (indices 0 a {3}) - valores de: {4}".format(
+            d["nome_tipo"], d["dim"], d["n"], d["n"] - 1, d["fonte"]))
+        for i in range(d["n"]):
+            print("  {0} - {1}".format(i, formatar_nivel(d, i) if d["tipo"] in ("pressao", "solo") else
+                                       ("indice {0}".format(i) if d["fonte"] != "zgrid" else "indice {0} (altura em m: zgrid, varia por celula)".format(i))))
+
+def _mostrar_lev(setup):
+    """Comando 'show lev': o 'set lev' atual, descrito em cada tipo de nivel."""
+    lev = setup["lev"]
+    levf = setup["levf"]
+    # 'levf' e o limite EXCLUSIVO da faixa (ver 'levf_efetivo' em utils.py)
+    # - o ULTIMO nivel incluido na selecao e 'levf - 1'.
+    ultimo = max(lev, levf - 1)
+    print("Level set from {0} to {1}".format(lev, ultimo))
+    niveis = descritores_disponiveis(setup)
+    if not niveis:
+        levels = setup["levels"]
+        print("  {0} to {1}".format(levels[lev], levels[ultimo]))
+        return
+    for d in niveis:
+        if ultimo >= d["n"]:
+            print("  {0}: fora do intervalo ({1} niveis, 0 a {2})".format(d["nome_tipo"], d["n"], d["n"] - 1))
+        elif lev == ultimo:
+            print("  {0}: {1}".format(d["nome_tipo"], formatar_nivel(d, lev)))
+        else:
+            print("  {0}: {1} ate {2}".format(d["nome_tipo"], formatar_nivel(d, lev), formatar_nivel(d, ultimo)))
 
 def _mostrar_arquivos(setup):
     """
@@ -184,8 +239,7 @@ def cmd_show(setup, cmd_split):
             print(count," - ",l)
         return
     if cmd_split[1] == "levels":
-        for i in range(len(levels)):
-            print(i," - ",levels[i])
+        _mostrar_niveis(setup, cmd_split[2] if len(cmd_split) > 2 else None)
         return
     if cmd_split[1] == "time_variable":
         print(setup["time_variable"])
@@ -205,12 +259,7 @@ def cmd_show(setup, cmd_split):
         print(setup["DataDado"])
         return
     if cmd_split[1] == "lev":
-        # 'levf' e guardado como o limite EXCLUSIVO da faixa (ver
-        # 'levf_efetivo' em utils.py) - o ULTIMO nivel de verdade
-        # incluido na selecao e 'levf - 1', nao 'levf' (que pode valer
-        # ate 'len(levels)', um indice fora da lista 'levels').
-        ultimo = max(lev, levf - 1)
-        print("Level set from {0} to {1} = {2} to {3}".format(lev, ultimo, levels[lev], levels[ultimo]))
+        _mostrar_lev(setup)
         return
     if cmd_split[1] == "title":
         print(setup["title"])

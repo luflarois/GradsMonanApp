@@ -19,7 +19,7 @@ from matplotlib.colors import BoundaryNorm
 import matplotlib.tri as mtri
 from matplotlib.collections import PolyCollection
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 - registra a projecao '3d'
-from .utils import normalize_lon, mag, load_zgrid_centers, construir_poligonos_celulas, levf_efetivo
+from .utils import normalize_lon, mag, load_zgrid_centers, construir_poligonos_celulas, levf_efetivo, nivel_do_setup
 from .map_func import plot_map, plot_map_3d
 from scipy.interpolate import LinearNDInterpolator
 from scipy.spatial import Delaunay, cKDTree
@@ -283,6 +283,21 @@ def _aplicar_estilo_contorno_labels(setup, textos):
             texto.set_fontstyle(fontstyle)
         except Exception:
             pass
+
+def _aplicar_rotulos_eixos(setup, ax):
+    """
+    Aplica por cima do rotulo padrao os textos definidos manualmente por
+    'draw xlabel <texto>' (setup['xlabel']) e 'draw ylabel <texto>'
+    (setup['ylabel']) - secao 7 do manual. Sem texto definido, mantem o
+    rotulo padrao ja escrito pela funcao de plotagem ('Longitude',
+    'Latitude', 'Tempo', 'Altura (m)', etc.). Chamada ao final de toda
+    plotagem com eixos, para o texto manual sobreviver a ax.cla()
+    (animacoes) e a novos 'd'.
+    """
+    if setup.get("xlabel"):
+        ax.set_xlabel(setup["xlabel"])
+    if setup.get("ylabel"):
+        ax.set_ylabel(setup["ylabel"])
 
 def _niveis_cor(setup):
     """
@@ -595,7 +610,8 @@ def _plotar_perfil_dados(setup, vertical_profile, closest_index):
     """
     lev = setup["lev"]
     label = setup["label"]
-    levels = setup["levels"]
+    nv = nivel_do_setup(setup)          # coordenada vertical DESTA variavel
+    levels = nv["valores"]
 
     cut = setup.get("cut")
     vertical_profile = _aplicar_corte(vertical_profile, cut)
@@ -608,16 +624,17 @@ def _plotar_perfil_dados(setup, vertical_profile, closest_index):
     # aqui duplicaria essa logica e poderia dessincronizar os tamanhos.
     levf_dados = lev + len(vertical_profile)
 
-    eixo_pressao = setup.get("eixo_pressao", False)
     variables = setup.get("variables", {})
     zgrid_arr = None
-    if not eixo_pressao:
+    usa_zgrid = nv["tipo"] == "altura"
+    if usa_zgrid:
         zgrid_arr = load_zgrid_centers(variables, len(setup["latitudes"]), len(levels))
 
-    if eixo_pressao:
-        # Pressao (t_iso_levels): maior pressao embaixo, menor em cima
+    if not usa_zgrid:
+        # Pressao (maior embaixo), solo (profundidade, superficie em cima)
+        # ou indice: o proprio valor do nivel desta variavel
         y_vals = np.array(levels[lev:levf_dados])
-        ylabel = 'Pressao (hPa)'
+        ylabel = nv["rotulo"]
     elif zgrid_arr is not None and np.mean(np.isfinite(zgrid_arr[closest_index, lev:levf_dados])) >= 0.5:
         # Sem t_iso_levels, mas com zgrid: altura geometrica, menor embaixo, maior em cima
         y_vals = zgrid_arr[closest_index, lev:levf_dados]
@@ -633,7 +650,8 @@ def _plotar_perfil_dados(setup, vertical_profile, closest_index):
     plt.plot(vertical_profile,y_vals, color='blue', linestyle='-',label=label)
     plt.xlabel(label)
     plt.ylabel(ylabel)
-    if eixo_pressao:
+    _aplicar_rotulos_eixos(setup, plt.gca())
+    if nv["invertido"] and ylabel == nv["rotulo"]:
         plt.gca().invert_yaxis()
     plt.grid()
     return 1
@@ -691,7 +709,8 @@ def _plotar_corte_dados(setup, data, cbar=None):
     cmap = setup["cmap"]
     Title = setup["title"]
     latitudes = np.array(setup["latitudes"])
-    levels = np.array(setup["levels"])
+    nv = nivel_do_setup(setup)          # coordenada vertical DESTA variavel
+    levels = np.array(nv["valores"])
     n_lev = data.shape[1]
 
     if n_lev < 2:
@@ -734,14 +753,14 @@ def _plotar_corte_dados(setup, data, cbar=None):
 
     ax = plt.gca()
 
-    eixo_pressao = setup.get("eixo_pressao", False)
     variables = setup.get("variables", {})
     zgrid_arr = None
-    if not eixo_pressao:
+    usa_zgrid = nv["tipo"] == "altura"
+    if usa_zgrid:
         zgrid_arr = load_zgrid_centers(variables, len(latitudes), len(levels))
 
     altura = None
-    if not eixo_pressao and zgrid_arr is not None:
+    if usa_zgrid and zgrid_arr is not None:
         # Sem t_iso_levels, mas com zgrid: interpola tambem a altura sobre a
         # mesma linha, nivel a nivel, para um corte que acompanha o terreno
         # (a altura de um mesmo nivel de modelo varia espacialmente).
@@ -779,17 +798,17 @@ def _plotar_corte_dados(setup, data, cbar=None):
                         colors='none', hatches=['//'])
         ax.set_xlim(np.min(eixo_x), np.max(eixo_x))
         ax.set_ylim(np.min(y), np.max(y))
-        if eixo_pressao:
-            # Pressao (t_iso_levels): maior pressao embaixo, menor em cima
-            plt.ylabel('Pressao (hPa)')
+        # Rotulo e sentido do eixo seguem o tipo de nivel da variavel:
+        # pressao (maior embaixo), solo (profundidade, superficie em
+        # cima) ou indice do nivel (menor embaixo)
+        plt.ylabel(nv["rotulo"])
+        if nv["invertido"]:
             ax.invert_yaxis()
-        else:
-            # Sem os dois: apenas o indice do nivel, menor embaixo, maior em cima
-            plt.ylabel('Levels')
 
     cbar = plt.colorbar(cs, ax=ax, label=label, **_kwargs_colorbar(setup))
     _aplicar_rotulo_cbar(setup, cbar)
     plt.xlabel(xlabel)
+    _aplicar_rotulos_eixos(setup, ax)
     if Title:
         plt.title(Title)
 
@@ -993,6 +1012,7 @@ def plot_limites(setup):
     ax.set_ylim(setup["lat_min"], setup["lat_max"])
     ax.set_xlabel('Longitude')
     ax.set_ylabel('Latitude')
+    _aplicar_rotulos_eixos(setup, ax)
     ax.legend(loc='best', fontsize=8)
 
     if setup.get("draw_map_on"):
@@ -1080,8 +1100,8 @@ def plot_var_3d(setup, var):
     Title = setup["title"]
     latitudes = np.array(setup["latitudes"])
     longitudes = np.array(setup["longitudes"])
-    levels = np.array(setup["levels"])
-    eixo_pressao = setup.get("eixo_pressao", False)
+    nv = nivel_do_setup(setup)          # coordenada vertical DESTA variavel
+    levels = np.array(nv["valores"])
     variables = setup.get("variables", {})
 
     if lat_min == lat_max or lon_min == lon_max or levf - lev < 2:
@@ -1112,11 +1132,11 @@ def plot_var_3d(setup, var):
     n_cell_sel = data_sel.shape[0]
 
     zgrid_arr = None
-    if not eixo_pressao:
+    if nv["tipo"] == "altura":
         zgrid_arr = load_zgrid_centers(variables, len(latitudes), len(levels))
 
-    if eixo_pressao:
-        zlabel = 'Pressao (hPa)'
+    if nv["tipo"] != "altura":
+        zlabel = nv["rotulo"]
         zs_2d = np.tile(levels[lev:levf], (n_cell_sel, 1))  # (nCellsSel, nLevs)
     elif zgrid_arr is not None:
         zgrid_sel = zgrid_arr[mascara, :][:, lev:levf]
@@ -1193,14 +1213,15 @@ def plot_var_3d(setup, var):
     ax3d.set_xlabel('Longitude')
     ax3d.set_ylabel('Latitude')
     ax3d.set_zlabel(zlabel)
-    if eixo_pressao:
+    _aplicar_rotulos_eixos(setup, ax3d)
+    if nv["invertido"] and zlabel == nv["rotulo"]:
         ax3d.invert_zaxis()
     if Title:
         ax3d.set_title(Title)
 
     # Z "da superficie" (para 'draw map' desenhar o mapa junto ao solo/base
     # da caixa 3D, e nao no meio do ar).
-    setup["z_superficie_3d"] = float(np.max(zs_2d)) if eixo_pressao else float(np.min(zs_2d))
+    setup["z_superficie_3d"] = float(np.max(zs_2d)) if (nv["invertido"] and zlabel == nv["rotulo"]) else float(np.min(zs_2d))
 
     if setup.get("draw_map_on"):
         # 'draw map' ligado (ate um 'draw map off'): redesenha o mapa de
@@ -1334,6 +1355,7 @@ def plot_var(setup, var, cbar=None):
 
     plt.xlabel('Longitude')
     plt.ylabel('Latitude')
+    _aplicar_rotulos_eixos(setup, plt.gca())
 
     return ax,cbar
 
@@ -1372,6 +1394,7 @@ def plot_vector_field(setup, var_u, var_v):
     ax.quiver(longitudes, latitudes, u, v, scale=350, color='k')
     plt.xlabel('Longitude')
     plt.ylabel('Latitude')
+    _aplicar_rotulos_eixos(setup, plt.gca())
 
     return ax
 
@@ -1409,6 +1432,7 @@ def plot_barbs(setup, var1, var2):
     ax.barbs(longitudes, latitudes, u, v, length=6)
     plt.xlabel('Longitude')
     plt.ylabel('Latitude')
+    _aplicar_rotulos_eixos(setup, plt.gca())
 
     return ax
 
@@ -1511,6 +1535,7 @@ def plot_wind(setup, var1, var2, cbar):
 
     plt.xlabel('Longitude')
     plt.ylabel('Latitude')
+    _aplicar_rotulos_eixos(setup, plt.gca())
 
     return ax,cbar
 
@@ -1582,8 +1607,8 @@ def plot_serie_temporal(setup, var_name, dados, cbar=None):
     Title = setup["title"]
     latitudes = np.asarray(setup["latitudes"])
     longitudes = np.asarray(setup["longitudes"])
-    levels = np.asarray(setup["levels"])
-    eixo_pressao = setup.get("eixo_pressao", False)
+    nv = nivel_do_setup(setup)          # coordenada vertical DESTA variavel
+    levels = np.asarray(nv["valores"])
     variables = setup.get("variables", {})
     cut = setup.get("cut")
 
@@ -1615,6 +1640,7 @@ def plot_serie_temporal(setup, var_name, dados, cbar=None):
         _formatar_eixo_x_tempo(ax, fig, x_vals, usa_datetime, rotulos)
         ax.set_xlabel('Tempo')
         ax.set_ylabel(label)
+        _aplicar_rotulos_eixos(setup, ax)
         if Title:
             ax.set_title(Title)
         ax.grid()
@@ -1638,15 +1664,15 @@ def plot_serie_temporal(setup, var_name, dados, cbar=None):
             imagem[:, j] = fatia[cell_idx, lev:levf]
 
         zgrid_arr = None
-        if not eixo_pressao:
+        if nv["tipo"] == "altura":
             zgrid_arr = load_zgrid_centers(variables, len(latitudes), len(levels))
-        if eixo_pressao:
-            ylabel = 'Pressao (hPa)'
+        if nv["tipo"] != "altura":
+            ylabel = nv["rotulo"]
         elif zgrid_arr is not None and np.mean(np.isfinite(zgrid_arr[cell_idx, lev:levf])) >= 0.5:
             y_vals = zgrid_arr[cell_idx, lev:levf]
             ylabel = 'Altura (m)'
         else:
-            ylabel = 'Levels'
+            ylabel = nv["rotulo"]
 
     elif not lat_e_ponto:
         # Faixa de latitude, com longitude e nivel fixos: corte ao longo da
@@ -1694,7 +1720,8 @@ def plot_serie_temporal(setup, var_name, dados, cbar=None):
 
     ax.set_xlabel('Tempo')
     ax.set_ylabel(ylabel)
-    if eixo_pressao and ylabel == 'Pressao (hPa)':
+    _aplicar_rotulos_eixos(setup, ax)
+    if nv["invertido"] and ylabel == nv["rotulo"]:
         ax.invert_yaxis()
     if Title:
         ax.set_title(Title)

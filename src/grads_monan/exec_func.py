@@ -18,9 +18,9 @@ import numpy as np
 from .files import file_open, carregar_limites
 from .show_func import cmd_show, show_legend
 from .plot_func import plot_wind, plot_var, plot_var_3d, clear_plots,save_fig, plot_serie, plot_serie_mapa_3d, plot_limites, plot_estatistica_campo, atualizar_titulo_janela
-from .draw_func import draw_title, draw_mark, draw_map, draw_label
+from .draw_func import draw_title, draw_mark, draw_map, draw_label, draw_axis_label
 from .set_func import cmd_set
-from .utils import mag, sem_mascara
+from .utils import mag, sem_mascara, descritor_nivel, checar_niveis
 from .estatistics import calcular_valor, calcular_campo, NOMES_ESTATISTICA_ESCALAR, NOMES_ESTATISTICA_ESPACIAL
 
 _REF_VAR_RE = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*)(?:\.(\d+))?$')
@@ -32,6 +32,25 @@ def _arquivo_por_indice(setup, indice):
         if info["index"] == indice:
             return info
     return None
+
+def _registrar_nivel(setup, nome, var_nc, variables):
+    """
+    Registra em setup['_nivel_atual'] a coordenada vertical (pressao /
+    altura do modelo / solo) da variavel 'nome' que acaba de ser
+    resolvida - usada pelos eixos Y/Z dos graficos e pelas mensagens de
+    nivel. Retorna False (com o erro ja impresso) se o 'set lev' atual
+    nao couber nos niveis dessa variavel.
+    """
+    try:
+        desc = descritor_nivel(setup, var_nc, variables)
+    except Exception:
+        desc = None
+    if desc is None:
+        return True
+    if not checar_niveis(setup, desc, nome):
+        return False
+    setup["_nivel_atual"] = desc
+    return True
 
 def _resolver_variavel(setup, token):
     """
@@ -74,6 +93,9 @@ def _resolver_variavel(setup, token):
             print("Voce quis dizer: "+", ".join(c+sufixo for c in candidatos)+"?")
         else:
             print("Variaveis disponiveis no arquivo {0}: {1}".format(indice, ", ".join(sorted(variables.keys()))))
+        return nome, indice, None
+
+    if not _registrar_nivel(setup, nome, variables[nome], variables):
         return nome, indice, None
 
     return nome, indice, sem_mascara(variables[nome][:])
@@ -131,6 +153,9 @@ def _resolver_variavel_serie(setup, info, token):
             print("Voce quis dizer: "+", ".join(candidatos)+"?")
         else:
             print("Variaveis disponiveis no arquivo {0}: {1}".format(info["index"], ", ".join(sorted(variables.keys()))))
+        return nome, info["index"], None
+
+    if not _registrar_nivel(setup, nome, variables[nome], variables):
         return nome, info["index"], None
 
     return nome, info["index"], sem_mascara(variables[nome][:])
@@ -223,6 +248,10 @@ def _dados_serie_temporal(setup, nome_var):
     if not ok:
         return None
 
+    for info in selecionados:
+        if not _registrar_nivel(setup, nome_var, info["dataset"].variables[nome_var], info["dataset"].variables):
+            return None
+
     dados = []
     for info in selecionados:
         arr = sem_mascara(info["dataset"].variables[nome_var][:])
@@ -305,6 +334,11 @@ def _dados_estatistica(setup, expr):
     return [var]
 
 def exec_cmd(cmd_user, cmd,cmd_split,setup, dataset, ax, cbar, setup_toml):
+
+    # A coordenada vertical (pressao/altura/solo) e registrada de novo a
+    # cada comando, ao resolver a variavel (ver _registrar_nivel).
+    if isinstance(setup, dict):
+        setup["_nivel_atual"] = None
 
     if cmd == "!" or cmd == "exec":
         os.system(cmd_user[0:])
@@ -411,6 +445,8 @@ def exec_cmd(cmd_user, cmd,cmd_split,setup, dataset, ax, cbar, setup_toml):
             setup["title"] = setup_toml["title"]
             setup["label"] = setup_toml["label"]
             setup["cbar_label"] = None
+            setup["xlabel"] = None
+            setup["ylabel"] = None
             setup["draw_map_on"] = False
             # 'set cut <min> <max>' tambem e uma selecao/filtro (como lat/
             # lon/lev) que deveria voltar a condicao inicial (desligado) no
@@ -499,6 +535,12 @@ def exec_cmd(cmd_user, cmd,cmd_split,setup, dataset, ax, cbar, setup_toml):
                     # plot_var_3d/plot_wind em plot_func.py.
                     setup["draw_map_on"] = True
                     draw_map(setup,ax)
+            if cmd_split[1] in ("xlabel", "ylabel"):
+                texto = cmd_user.split(None, 2)[2] if len(cmd_split) > 2 else ""
+                if not texto:
+                    print("Uso: draw {0} <texto>".format(cmd_split[1]))
+                else:
+                    draw_axis_label(setup, cmd_split[1][0], texto)
             if cmd_split[1] == "label":
                 lbl = cmd_user[11:]
                 # Guarda o texto/estilo no setup para que seja reaplicado
