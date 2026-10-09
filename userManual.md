@@ -811,7 +811,7 @@ globais muito amplos.
 | `show cmap` | Colormap atual. |
 | `show setup` | Imprime o dicionário `setup` inteiro (debug). |
 | `show limits` | Resumo da área de limites carregada por `load limits` (seção 2.2): arquivo, número de pontos do polígono e quantas células da malha caem dentro dela. Avisa se nenhuma área foi carregada ainda. |
-| `show fonts` | Lista, em ordem alfabética, as fontes TrueType/OpenType instaladas no sistema e reconhecidas pelo matplotlib — use um destes nomes em `set label font <nome>`/`set title font <nome>` (seção 6). |
+| `show fonts` | Lista, em ordem alfabética, as fontes TrueType/OpenType instaladas no sistema e reconhecidas pelo matplotlib — use um destes nomes em `set label font <nome>`/`set title font <nome>`/`set xlabel font <nome>`/`set ylabel font <nome>` (seção 6). |
 
 ---
 
@@ -833,15 +833,20 @@ faltando avisa e **mantém a configuração anterior**, sem travar.
 | `set pages <linhas> <colunas>` | Grade de painéis da janela 2D (ex.: `set pages 1 2`). Limpa a janela e seleciona o primeiro painel. |
 | `set page <linha> <coluna>` | Seleciona em qual painel plotar. |
 | `set label <texto>` | Rótulo da barra de cores. |
-| `set label font <nome_da_fonte>` | Fonte usada no rótulo (colorbar/eixos) — verifica se a fonte existe no sistema (mesma lista de `show fonts`); se não existir, avisa e mantém a fonte anterior. |
+| `set label font <nome_da_fonte>` | Fonte usada no rótulo da **barra de cores** (`draw label`; os rótulos dos eixos têm comandos próprios, abaixo) — verifica se a fonte existe no sistema (mesma lista de `show fonts`); se não existir, avisa e mantém a fonte anterior. |
 | `set label color <cor>` | Cor do rótulo — nome de cor do matplotlib (ex.: `red`) ou código `#RRGGBB`. |
 | `set label size <n>` | Tamanho de fonte do rótulo (em pontos). |
 | `set label style <bold\|italic\|normal>` | Estilo do rótulo: negrito, itálico ou normal. |
+| `set xlabel font <nome_da_fonte>` / `set ylabel font <nome_da_fonte>` | Fonte do rótulo do eixo **X** / **Y** (o padrão — `Longitude`, `Latitude`, `Tempo`, `Pressao (hPa)`… — ou o texto de `draw xlabel`/`draw ylabel`). Mesma verificação de `set label font`. |
+| `set xlabel color <cor>` / `set ylabel color <cor>` | Cor do rótulo do eixo X / Y. |
+| `set xlabel size <n>` / `set ylabel size <n>` | Tamanho de fonte (pontos) do rótulo do eixo X / Y. |
+| `set xlabel style <bold\|italic\|normal>` / `set ylabel style <bold\|italic\|normal>` | Estilo do rótulo do eixo X / Y. |
 | `set title font <nome_da_fonte>` | Fonte usada no título do gráfico (`draw title`) — mesma verificação de `set label font`. |
 | `set title color <cor>` | Cor do título do gráfico. |
 | `set title size <n>` | Tamanho de fonte do título do gráfico (em pontos). |
 | `set title style <bold\|italic\|normal>` | Estilo do título do gráfico: negrito, itálico ou normal. |
 | `set bar position <U\|D\|L\|R>` | Posição da barra de cores: `U` (up/cima), `D` (down/baixo), `L` (left/esquerda) ou `R` (right/direita — padrão do matplotlib). `U`/`D` deixam a barra horizontal; `L`/`R`, vertical. |
+| `set background <cor>` | Cor de fundo da **janela** e da área de plotagem (nome de cor do matplotlib, ex. `black`, `lightgray`, ou `#RRGGBB`). Vale na hora para os gráficos abertos e para todos os seguintes (inclusive após `c` e na janela do `d3`), e também no arquivo salvo por `gxprint`. Cor inválida avisa e mantém a anterior. `set background default` volta ao fundo branco padrão. Os textos (título, rótulos, eixos) não mudam de cor sozinhos: num fundo escuro, ajuste com `set title color`, `set xlabel color`, etc. |
 | `set contour line size <n>` | Espessura das linhas de contorno (`set gxout contour`). |
 | `set contour line <bw\|color>` | Linhas de contorno em preto e branco (`bw`) ou coloridas conforme o nível, usando o colormap (`color`, padrão). |
 | `set contour font <nome_da_fonte>` | Fonte dos rótulos inline do contorno (os números escritos sobre as linhas) — verifica se a fonte existe no sistema (mesma lista de `show fonts`). |
@@ -852,7 +857,12 @@ faltando avisa e **mantém a configuração anterior**, sem travar.
 | `set mpdset <arquivo.shp>` | Shapefile a usar como mapa de fundo. |
 | `set mpt <cor> <espessura>` | Cor e espessura da linha do mapa de fundo. |
 | `set plot_line <espessura> <cor>` | Espessura/cor de linha usada em perfis. |
-| `set grid on\|off` | Liga/desliga a grade (gridlines) do gráfico. |
+| `set grid on\|off` | Liga/desliga a grade (gridlines) do gráfico atual, usando o estilo abaixo. |
+| `set grid color <cor>` | Cor das linhas da grade (nome de cor do matplotlib ou `#RRGGBB`). |
+| `set grid size <espessura>` | Espessura das linhas da grade (em pontos; número positivo, ex. `0.5`, `2`). |
+| `set grid type <tipo>` | Tipo de linha da grade: `cheia` (`solid`, `-`), `tracejada` (`dashed`, `--`), `traco-ponto` (`dashdot`, `-.`), `pontilhada` (`dotted`, `:`), `nenhuma`; ou qualquer estilo nomeado do matplotlib (`loosely_dotted`, `densely_dotted`, `loosely_dashed`, `densely_dashed`, `loosely_dashdotted`, `dashdotted`, `densely_dashdotted`, `dashdotdotted`, `loosely_dashdotdotted`, `densely_dashdotdotted`); ou um padrão próprio `dash:<traço>,<espaço>[,...]` em pontos (ex. `dash:6,2,1,2`). Tipo inválido avisa e mantém o anterior. |
+
+Os três comandos `set grid color|size|type` guardam o estilo (vale também para a grade que o programa liga sozinho, como nos perfis verticais e séries de um ponto) e o aplicam na hora se a grade do gráfico atual já estiver ligada; com a grade desligada, só passam a valer no próximo `set grid on`.
 | `set time <n>` (ou `set t <n>`) | Seleciona o arquivo número `<n>` (entre os vários abertos) como o arquivo padrão para as próximas `d`/`d3`/estatísticas sem sufixo `.N` — ver seção 2.1. |
 | `set time <ini> <fim>` (ou `set t <ini> <fim>`) | Com mais de um arquivo aberto: intervalo de arquivos (pelo número de abertura) para a série temporal entre arquivos — ver seção 2.1. |
 | `set tint <segundos>` | Intervalo, em segundos, entre os quadros da animação da série temporal (`d`/`d3` no modo mapa/3D — seção 2.1). Padrão: 1 segundo. |
@@ -967,7 +977,7 @@ Define os valores padrão de sessão (usados sempre que um arquivo é aberto):
 `title`, `label`, `map`, `map_color`, `map_line`, `cmap`, `lw`, `lc`, `clevs`,
 `lat_min`, `lat_max`, `lon_min`, `lon_max`, `time_sel`, `mappath`, `fig_dpi`,
 `fig_inches`, `fig_transparency`, `label_font`, `label_color`, `label_size`,
-`label_style`, `title_color`, `title_font`, `title_size`, `title_style`,
+`label_style`, `background`, `grid_color`, `grid_size`, `grid_type`, `xlabel_font`, `xlabel_color`, `xlabel_size`, `xlabel_style` (e `ylabel_*`, iguais), `title_color`, `title_font`, `title_size`, `title_style`,
 `bar_position`, `contour_line_size`, `contour_line_mode`, `contour_font`,
 `contour_font_color`, `contour_font_size`, `contour_font_style`.
 
@@ -1143,7 +1153,7 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 ### `set_func.py`
 - `cmd_set(...)` / `_cmd_set_dispatch(...)` — comando `set` (tabela da seção 6), com validação numérica segura. `set lev <n1> <n2>` valida `<n1>`/`<n2>` como índices de nível **inclusivos** (0 a `n_niveis-1`, com `<n1> <= <n2>`) e guarda internamente `setup["levf"] = <n2> + 1` — o limite EXCLUSIVO usado por toda fatia de nível do resto do código (`var[..., lev:levf]` — ver `levf_efetivo` em `utils.py`); sem esse `+1`, incluir o último nível pedido exigiria um índice inválido.
 - `_print_level_info(setup, l, lf=None)` — informação do nível (ou faixa) ao usar `set lev`, em cada tipo de nível do arquivo (pressão, solo, altura).
-- `_set_estilo_texto(setup, alvo, cmd_split, cmd_user)` — implementa `set label font/color/size/style` e `set title font/color/size/style` (`alvo` é `"label"` ou `"title"`), guardando o resultado em `setup['<alvo>_font']`/`_color`/`_size`/`_style`. `font` verifica a existência da fonte no sistema (`_fonte_existe`, de `plot_func.py`) antes de aceitar.
+- `_set_estilo_texto(setup, alvo, cmd_split, cmd_user)` — implementa `set label|title|xlabel|ylabel font/color/size/style` (`alvo` é `"label"`, `"title"`, `"xlabel"` ou `"ylabel"`; os dois últimos reaplicam o estilo na hora ao gráfico atual), guardando o resultado em `setup['<alvo>_font']`/`_color`/`_size`/`_style`. `font` verifica a existência da fonte no sistema (`_fonte_existe`, de `plot_func.py`) antes de aceitar.
 - `_set_contour(setup, cmd_split, cmd_user)` — implementa `set contour line size/<bw|color>` e `set contour font/<color|size|style>` (linhas e rótulos inline do `gxout contour`), guardando o resultado em `setup['contour_line_size']`/`_line_mode`/`_font`/`_font_color`/`_font_size`/`_font_style`.
 
 ### `show_func.py`
@@ -1178,6 +1188,8 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 - `_aplicar_titulo(setup, ax)` — desenha/redesenha `setup["title"]` (definido por `draw title`) no eixo, com a fonte/cor/estilo de `set title font`/`set title color`/`set title style` (ver `_kwargs_texto`); chamada em todo plot cujo eixo pode ter sido limpo entre uma chamada e outra (ex.: quadro a quadro na animação de mapa), para o título não se perder.
 - `_aplicar_rotulo_cbar(setup, cbar)` — reaplica `setup["cbar_label"]` (definido por `draw label`) numa colorbar recém-criada, com a fonte/cor/estilo de `set label font`/`set label color`/`set label style` (ver `_kwargs_texto`); chamada em toda criação de colorbar (2D e 3D), para o rótulo customizado não se perder quando a colorbar é recriada (ex.: a cada quadro da animação).
 - `_kwargs_texto(setup, prefixo)` — monta os argumentos de estilo (`color`/`fontfamily`/`fontsize`/`fontweight`/`fontstyle`) para desenhar texto (título ou rótulo da colorbar) a partir de `setup['<prefixo>_color']`/`_font`/`_size`/`_style` (`prefixo` é `"title"` ou `"label"`).
+- `aplicar_grade(setup, ax=None)` / `reaplicar_estilo_grade(setup)` / `_kwargs_grade(setup)` / `resolver_tipo_linha(texto)` — estilo da grade (`set grid color|size|type`): cor, espessura e `linestyle` do matplotlib; `resolver_tipo_linha` traduz os nomes em português, os do matplotlib e `dash:a,b,...`.
+- `aplicar_fundo(setup, cor=None, figuras=None)` / `restaurar_fundo(setup)` — `set background <cor>` / `set background default`: gravam a cor nos `rcParams` do matplotlib (`figure.facecolor`, `axes.facecolor`, `savefig.facecolor`) e aplicam nas figuras/eixos já abertos; `_ativar_figura_2d`/`_ativar_figura_3d` reaplicam ao criar uma figura nova.
 - `_estilo_para_kwargs(estilo)` — traduz `"bold"`/`"italic"`/`"normal"` (`set label style`/`set title style`) para os argumentos independentes do matplotlib `fontweight`/`fontstyle`.
 - `_listar_fontes()` / `_fonte_existe(nome)` — lista as fontes do sistema reconhecidas pelo matplotlib (`show fonts`) e confere se uma fonte existe, antes de aceitar `set label font`/`set title font`.
 - `_kwargs_colorbar(setup)` — monta o argumento `location` para `plt.colorbar`/`fig.colorbar` a partir de `setup['bar_position']` (`set bar position <U/D/L/R>`).

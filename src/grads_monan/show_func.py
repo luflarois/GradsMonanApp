@@ -251,6 +251,9 @@ def cmd_show(setup, cmd_split):
             var = variables[vname]
             long_name = var.long_name if 'long_name' in var.ncattrs() else "Sem descrição"
             print(count,"-",vname," : ",long_name)
+        for nome, v in (setup.get("vars_usuario") or {}).items():
+            count = count+1
+            print("{0} - {1} : let {2}".format(count, nome, v["expr"]))
         return
     if cmd_split[1] == "time_units":
         print(setup["time_units"])

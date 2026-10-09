@@ -34,6 +34,114 @@ _LAST_GRID_INFO_PATH = os.path.join(_CONFIG_DIR, "last_grid.info")
 def set_ion():
     plt.ion()
 
+# Tipos de linha da grade ('set grid type <tipo>'): nomes em portugues e os
+# nomes/simbolos do matplotlib. Palavras compostas do matplotlib aceitam
+# '_' no lugar do espaco (ex: 'loosely_dashed'). Tambem vale um padrao
+# proprio 'dash:<traco>,<espaco>[,<traco>,<espaco>...]' (em pontos).
+_TIPOS_LINHA = {
+    "cheia": "solid", "solida": "solid", "continua": "solid",
+    "tracejada": "dashed",
+    "traco-ponto": "dashdot", "tracoponto": "dashdot", "traco_ponto": "dashdot",
+    "pontilhada": "dotted",
+    "nenhuma": "None",
+    "loosely_dotted": (0, (1, 10)), "densely_dotted": (0, (1, 1)),
+    "loosely_dashed": (0, (5, 10)), "densely_dashed": (0, (5, 1)),
+    "loosely_dashdotted": (0, (3, 10, 1, 10)), "dashdotted": (0, (3, 5, 1, 5)),
+    "densely_dashdotted": (0, (3, 1, 1, 1)),
+    "dashdotdotted": (0, (3, 5, 1, 5, 1, 5)),
+    "loosely_dashdotdotted": (0, (3, 10, 1, 10, 1, 10)),
+    "densely_dashdotdotted": (0, (3, 1, 1, 1, 1, 1)),
+}
+_TIPOS_MATPLOTLIB = ("solid", "dashed", "dashdot", "dotted", "-", "--", "-.", ":", "None", "none")
+
+def resolver_tipo_linha(texto):
+    """Converte o texto de 'set grid type' no 'linestyle' do matplotlib;
+    retorna None se o tipo nao existir."""
+    t = texto.strip().lower().replace("ç", "c").replace("ã", "a").replace(" ", "_")
+    if t in _TIPOS_LINHA:
+        return _TIPOS_LINHA[t]
+    if t in _TIPOS_MATPLOTLIB:
+        return t if t != "none" else "None"
+    if t.startswith("dash:"):
+        try:
+            nums = tuple(float(x) for x in t[5:].split(","))
+        except ValueError:
+            return None
+        if len(nums) >= 2 and len(nums) % 2 == 0 and all(n > 0 for n in nums):
+            return (0, nums)
+    return None
+
+def _kwargs_grade(setup):
+    """Estilo da grade (cor/espessura/tipo de linha) de 'set grid color|
+    size|type' - so inclui o que foi definido."""
+    kw = {}
+    if setup.get("grid_color"):
+        kw["color"] = setup["grid_color"]
+    if setup.get("grid_size"):
+        kw["linewidth"] = setup["grid_size"]
+    if setup.get("grid_type") not in (None, ""):
+        kw["linestyle"] = setup["grid_type"]
+    return kw
+
+def aplicar_grade(setup, ax=None):
+    """Liga a grade do eixo (padrao: o atual) com o estilo de 'set grid'."""
+    (ax or plt.gca()).grid(True, **_kwargs_grade(setup))
+
+def reaplicar_estilo_grade(setup):
+    """Se o eixo atual ja mostra a grade, redesenha com o estilo novo."""
+    try:
+        if not plt.get_fignums():
+            return
+        ax = plt.gca()
+        linhas = ax.xaxis.get_gridlines()
+        if linhas and linhas[0].get_visible():
+            aplicar_grade(setup, ax)
+        ax.figure.canvas.draw_idle()
+    except Exception:
+        pass
+
+def aplicar_fundo(setup, cor=None, figuras=None):
+    """
+    'set background <cor>' (secao 6 do manual): cor de fundo da janela
+    (figura) e da area de plotagem (eixos). Guarda a cor nos rcParams do
+    matplotlib ('figure.facecolor'/'axes.facecolor'/'savefig.facecolor'),
+    para valer tambem em figuras/eixos criados depois (apos 'c', 'd3'
+    em nova janela, etc.), e aplica na hora nas figuras ja abertas.
+    Sem cor definida (setup['background'] vazio) nao mexe em nada.
+    """
+    cor = setup.get("background") if cor is None else cor
+    if not cor:
+        return
+    plt.rcParams["figure.facecolor"] = cor
+    plt.rcParams["axes.facecolor"] = cor
+    plt.rcParams["savefig.facecolor"] = cor
+    for num in (plt.get_fignums() if figuras is None else figuras):
+        fig = plt.figure(num)
+        fig.set_facecolor(cor)
+        for a in fig.axes:
+            a.set_facecolor(cor)
+        try:
+            fig.canvas.draw_idle()
+        except Exception:
+            pass
+
+def restaurar_fundo(setup):
+    """'set background default': volta ao fundo padrao do matplotlib."""
+    setup["background"] = ""
+    cor = plt.matplotlib.rcParamsDefault["figure.facecolor"]
+    plt.rcParams["figure.facecolor"] = cor
+    plt.rcParams["axes.facecolor"] = plt.matplotlib.rcParamsDefault["axes.facecolor"]
+    plt.rcParams["savefig.facecolor"] = plt.matplotlib.rcParamsDefault["savefig.facecolor"]
+    for num in plt.get_fignums():
+        fig = plt.figure(num)
+        fig.set_facecolor(plt.rcParams["figure.facecolor"])
+        for a in fig.axes:
+            a.set_facecolor(plt.rcParams["axes.facecolor"])
+        try:
+            fig.canvas.draw_idle()
+        except Exception:
+            pass
+
 def _ativar_figura_2d(setup):
     """
     Garante que a figura 2D (usada por 'd'/'display') esteja ativa (current
@@ -42,8 +150,10 @@ def _ativar_figura_2d(setup):
     """
     fig = setup.get("fig2d")
     if fig is None or not plt.fignum_exists(fig.number):
+        aplicar_fundo(setup, figuras=[])   # rcParams antes de criar a figura
         fig = plt.gcf()  # reaproveita a figura corrente, ou cria uma se nao houver nenhuma
         setup["fig2d"] = fig
+        aplicar_fundo(setup, figuras=[fig.number])
     else:
         plt.figure(fig.number)
     return fig
@@ -56,6 +166,7 @@ def _ativar_figura_3d(setup):
     """
     fig = setup.get("fig3d")
     if fig is None or not plt.fignum_exists(fig.number):
+        aplicar_fundo(setup, figuras=[])
         fig = plt.figure()
         ax3d = fig.add_subplot(111, projection='3d')
         setup["fig3d"] = fig
@@ -288,16 +399,22 @@ def _aplicar_rotulos_eixos(setup, ax):
     """
     Aplica por cima do rotulo padrao os textos definidos manualmente por
     'draw xlabel <texto>' (setup['xlabel']) e 'draw ylabel <texto>'
-    (setup['ylabel']) - secao 7 do manual. Sem texto definido, mantem o
+    (setup['ylabel']) - secao 7 do manual - e o estilo (fonte/cor/tamanho/
+    negrito-italico) de 'set xlabel|ylabel font/color/size/style' (secao
+    6), tambem sobre os rotulos padrao. Sem texto definido, mantem o
     rotulo padrao ja escrito pela funcao de plotagem ('Longitude',
     'Latitude', 'Tempo', 'Altura (m)', etc.). Chamada ao final de toda
     plotagem com eixos, para o texto manual sobreviver a ax.cla()
     (animacoes) e a novos 'd'.
     """
-    if setup.get("xlabel"):
-        ax.set_xlabel(setup["xlabel"])
-    if setup.get("ylabel"):
-        ax.set_ylabel(setup["ylabel"])
+    for eixo in ("x", "y"):
+        prefixo = eixo + "label"
+        kw = _kwargs_texto(setup, prefixo)   # 'set xlabel/ylabel font|color|size|style'
+        setter = getattr(ax, "set_" + prefixo)
+        atual = getattr(ax, "get_" + prefixo)()
+        texto = setup.get(prefixo) or atual
+        if texto:
+            setter(texto, **kw)
 
 def _niveis_cor(setup):
     """
@@ -653,7 +770,7 @@ def _plotar_perfil_dados(setup, vertical_profile, closest_index):
     _aplicar_rotulos_eixos(setup, plt.gca())
     if nv["invertido"] and ylabel == nv["rotulo"]:
         plt.gca().invert_yaxis()
-    plt.grid()
+    aplicar_grade(setup)
     return 1
 
 def save_fig(fig_name, setup):
@@ -1643,7 +1760,7 @@ def plot_serie_temporal(setup, var_name, dados, cbar=None):
         _aplicar_rotulos_eixos(setup, ax)
         if Title:
             ax.set_title(Title)
-        ax.grid()
+        aplicar_grade(setup, ax)
         return ax, cbar
 
     # Exatamente uma faixa (lat, lon ou nivel): diagrama tempo x faixa,

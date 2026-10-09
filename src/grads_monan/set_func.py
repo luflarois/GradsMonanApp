@@ -10,7 +10,8 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .plot_func import atualizar_titulo_janela, _fonte_existe
+from .plot_func import atualizar_titulo_janela, _fonte_existe, _aplicar_rotulos_eixos, aplicar_fundo, restaurar_fundo, aplicar_grade, reaplicar_estilo_grade, resolver_tipo_linha
+from matplotlib.colors import is_color_like
 from .utils import descritores_disponiveis, formatar_nivel
 
 _ESTILOS_TEXTO_VALIDOS = ("bold", "italic", "normal")
@@ -72,6 +73,17 @@ def _set_estilo_texto(setup, alvo, cmd_split, cmd_user):
     setup["{0}_style".format(alvo)] = cmd_split[3]
     print("Estilo de '{0}' definido para '{1}'.".format(alvo, cmd_split[3]))
     return setup
+
+def _reaplicar_rotulos_eixos_atuais(setup):
+    """Aplica na hora, no grafico atual (se houver), o estilo dos rotulos
+    dos eixos X/Y recem-alterado."""
+    try:
+        if plt.get_fignums():
+            ax = plt.gca()
+            _aplicar_rotulos_eixos(setup, ax)
+            ax.figure.canvas.draw_idle()
+    except Exception:
+        pass
 
 _MODOS_LINHA_CONTORNO = ("bw", "color")
 
@@ -376,6 +388,35 @@ def _cmd_set_dispatch(cmd_split, setup, cmd_user):
             print("Uso: set title font <nome_da_fonte>  |  set title color <cor>  |  set title size <n>  |  set title style <bold/italic/normal>")
             return setup
         return _set_estilo_texto(setup, "title", cmd_split, cmd_user)
+    elif cmd_split[1] == "background":
+        # 'set background <cor>' (secao 6 do manual): cor de fundo da
+        # janela e da area de plotagem; 'set background default' volta ao
+        # padrao do matplotlib.
+        if len(cmd_split) != 3:
+            print("Uso: set background <cor>  |  set background default")
+            return setup
+        cor = cmd_split[2]
+        if cor.lower() == "default":
+            restaurar_fundo(setup)
+            print("Cor de fundo restaurada para o padrao.")
+            return setup
+        if not is_color_like(cor):
+            print("Erro: cor invalida: '{0}'. Use um nome de cor do matplotlib (ex: black, lightgray) ou #RRGGBB.".format(cor))
+            return setup
+        setup["background"] = cor
+        aplicar_fundo(setup)
+        print("Cor de fundo definida para '{0}'.".format(cor))
+        return setup
+    elif cmd_split[1] in ("xlabel", "ylabel"):
+        # 'set xlabel|ylabel font <nome> / color <cor> / size <n> / style
+        # <bold/italic/normal>' (secao 6 do manual): estilo do rotulo do
+        # eixo X ou Y (o texto e definido por 'draw xlabel|ylabel <texto>').
+        if len(cmd_split) < 3 or cmd_split[2] not in ("font", "color", "size", "style"):
+            print("Uso: set {0} font <nome_da_fonte>  |  set {0} color <cor>  |  set {0} size <n>  |  set {0} style <bold/italic/normal>".format(cmd_split[1]))
+            return setup
+        setup = _set_estilo_texto(setup, cmd_split[1], cmd_split, cmd_user)
+        _reaplicar_rotulos_eixos_atuais(setup)
+        return setup
     elif cmd_split[1] == "contour":
         return _set_contour(setup, cmd_split, cmd_user)
     elif cmd_split[1] == "bar":
@@ -435,12 +476,50 @@ def _cmd_set_dispatch(cmd_split, setup, cmd_user):
         setup["lc"] = cmd_split[3]  
         return setup
     elif cmd_split[1] == "grid":
-        if cmd_split[2] == "on":
-            plt.grid()
+        uso_grid = "Uso: set grid on|off  |  set grid color <cor>  |  set grid size <espessura>  |  set grid type <tipo>"
+        sub = cmd_split[2]
+        if sub == "on":
+            aplicar_grade(setup)
             return setup
-        else:
+        if sub == "off":
             plt.grid(False)
             return setup
+        if sub == "color":
+            if len(cmd_split) != 4:
+                print("Uso: set grid color <cor>")
+                return setup
+            if not is_color_like(cmd_split[3]):
+                print("Erro: cor invalida: '{0}'.".format(cmd_split[3]))
+                return setup
+            setup["grid_color"] = cmd_split[3]
+            print("Cor da grade definida para '{0}'.".format(cmd_split[3]))
+        elif sub == "size":
+            try:
+                esp = float(cmd_split[3])
+            except (ValueError, IndexError):
+                print("Uso: set grid size <espessura da linha>  (numero positivo)")
+                return setup
+            if esp <= 0:
+                print("Erro: a espessura da grade deve ser um numero positivo.")
+                return setup
+            setup["grid_size"] = esp
+            print("Espessura da grade definida para {0}.".format(esp))
+        elif sub == "type":
+            if len(cmd_split) < 4:
+                print("Uso: set grid type <cheia|tracejada|traco-ponto|pontilhada|...>")
+                return setup
+            texto = cmd_user.split(None, 3)[3]
+            estilo = resolver_tipo_linha(texto)
+            if estilo is None:
+                print("Erro: tipo de linha invalido: '{0}'. Use cheia, tracejada, traco-ponto, pontilhada, nenhuma, nomes do matplotlib (solid, dashed, dashdot, dotted, loosely_dashed...) ou dash:<traco>,<espaco>.".format(texto))
+                return setup
+            setup["grid_type"] = estilo
+            print("Tipo de linha da grade definido para '{0}'.".format(texto))
+        else:
+            print(uso_grid)
+            return setup
+        reaplicar_estilo_grade(setup)
+        return setup
     elif cmd_split[1] == "clevs":
         levs_in = cmd_user[9:]
         levs_in = levs_in.split()
