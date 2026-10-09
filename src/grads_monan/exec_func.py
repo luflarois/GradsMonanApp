@@ -72,6 +72,10 @@ def _resolver_variavel(setup, token):
         return token, None, None
 
     nome, indice_str = m.group(1), m.group(2)
+    eh_usuario, arr_usuario = _usar_variavel_usuario(setup, nome, indice_str)
+    if eh_usuario:
+        return nome, None, arr_usuario
+
     indice = int(indice_str) if indice_str else setup.get("arquivo_sel", 1)
 
     info = _arquivo_por_indice(setup, indice)
@@ -100,7 +104,127 @@ def _resolver_variavel(setup, token):
 
     return nome, indice, sem_mascara(variables[nome][:])
 
-_TOKEN_REF_RE = re.compile(r'[A-Za-z_][A-Za-z0-9_]*(?:\.\d+)?')
+_TOKEN_REF_RE = re.compile(r'(?<![A-Za-z0-9_.])[A-Za-z_][A-Za-z0-9_]*(?:\.\d+)?')
+
+# Funcoes permitidas nas expressoes ('let tg = sqrt(u**2+v**2)', 'd log10(q)'...)
+_FUNCOES_EXPR = {
+    "sqrt": np.sqrt, "abs": np.abs, "log": np.log, "log10": np.log10,
+    "exp": np.exp, "sin": np.sin, "cos": np.cos, "tan": np.tan,
+    "mag": mag,
+}
+
+def _tokens_variaveis(expr):
+    """Tokens de variavel de uma expressao (sem os nomes de funcao, ou seja,
+    os seguidos de '(' que estao em _FUNCOES_EXPR)."""
+    tokens = set()
+    for m in _TOKEN_REF_RE.finditer(expr):
+        tok = m.group(0)
+        resto = expr[m.end():].lstrip()
+        if tok in _FUNCOES_EXPR and resto.startswith("("):
+            continue
+        tokens.add(tok)
+    return tokens
+
+def _eval_expr(expr_substituida, namespace):
+    ns = dict(_FUNCOES_EXPR)
+    ns.update(namespace)
+    with np.errstate(all="ignore"):
+        return eval(expr_substituida, {"__builtins__": {}}, ns)
+
+# ---------------------------------------------------------------------------
+# Variaveis do usuario: 'let <nome> = <expressao>' / '<nome> = <expressao>'
+# ---------------------------------------------------------------------------
+_ATRIB_RE = re.compile(r'^\s*(?:let\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(?!=)\s*(.*?)\s*$')
+
+def eh_atribuicao(cmd_user):
+    """True se a linha tem a forma '[let] nome = expressao'."""
+    return bool(_ATRIB_RE.match(cmd_user))
+
+def _nomes_reservados():
+    return set(_FUNCOES_EXPR) | {
+        "!", "exec", "q", "exit", "quit", "run", "open", "reinit", "gxprint",
+        "show", "c", "reset", "load", "set", "draw", "d3", "display", "d",
+        "let", "undef"} | set(NOMES_ESTATISTICA_ESCALAR)
+
+def _vars_usuario(setup):
+    if not isinstance(setup, dict):
+        return {}
+    return setup.setdefault("vars_usuario", {})
+
+def _definir_variavel(setup, cmd_user):
+    """
+    'let <nome> = <expressao>' (ou so '<nome> = <expressao>'): avalia a
+    expressao agora (variaveis de arquivo com sufixo '.N' opcional, outras
+    variaveis do usuario, + - * / ** parenteses e funcoes sqrt/abs/log/
+    log10/exp/sin/cos/tan/mag) e guarda o resultado como uma nova
+    variavel, usada depois em 'd <nome>', em expressoes, nas estatisticas.
+    """
+    if not setup.get("openFile"):
+        print("Erro: nenhum arquivo aberto. Use 'open <arquivo>' antes de 'let'.")
+        return
+    m = _ATRIB_RE.match(cmd_user)
+    nome, expr = m.group(1), m.group(2)
+    if not expr:
+        print("Uso: let <nome> = <expressao>   (ex: let tg = temp.2/geo.2)")
+        return
+    if nome in _nomes_reservados():
+        print("Erro: '{0}' e um nome reservado (comando ou funcao); escolha outro nome.".format(nome))
+        return
+    setup["_nivel_atual"] = None
+    try:
+        resultado = _avaliar_expressao(setup, expr)
+    except Exception as e:
+        print("Erro ao avaliar a expressao '{0}': {1}".format(expr, e))
+        return
+    if resultado is None:
+        return
+    resultado = np.asarray(resultado, dtype=float)
+    n_malha = len(setup.get("longitudes", []))
+    if resultado.ndim < 2 or resultado.shape[1] != n_malha:
+        print("Erro: o resultado de '{0}' (formato {1}) nao e uma variavel da malha (Time, nCells[, niveis]).".format(
+            expr, resultado.shape))
+        return
+    vars_u = _vars_usuario(setup)
+    variaveis_arquivo = setup.get("variables", {})
+    if nome in variaveis_arquivo:
+        print("Aviso: '{0}' passa a ocultar a variavel de mesmo nome do arquivo.".format(nome))
+    vars_u[nome] = {"array": resultado, "expr": expr, "nivel": setup.get("_nivel_atual")}
+    dims = "x".join(str(x) for x in resultado.shape)
+    tipo = vars_u[nome]["nivel"]["nome_tipo"] if vars_u[nome]["nivel"] else "2D"
+    print("Variavel '{0}' definida = {1}  (formato {2}; niveis: {3})".format(nome, expr, dims, tipo))
+
+def _listar_variaveis_usuario(setup):
+    vars_u = _vars_usuario(setup)
+    if not vars_u:
+        print("Nenhuma variavel definida com 'let'.")
+        return
+    for nome, v in vars_u.items():
+        print("  {0} = {1}  (formato {2})".format(nome, v["expr"], "x".join(str(x) for x in v["array"].shape)))
+
+def _remover_variavel(setup, nome):
+    vars_u = _vars_usuario(setup)
+    if nome in vars_u:
+        del vars_u[nome]
+        print("Variavel '{0}' removida.".format(nome))
+    else:
+        print("Erro: variavel '{0}' nao esta definida (use 'let' para ver as definidas).".format(nome))
+
+def _usar_variavel_usuario(setup, nome, indice_str):
+    """Se 'nome' e variavel do usuario, devolve o array (registrando o
+    nivel); (True, array|None). Senao (False, None)."""
+    vars_u = _vars_usuario(setup)
+    if nome not in vars_u:
+        return False, None
+    if indice_str:
+        print("Erro: '{0}' e uma variavel definida por 'let' - nao aceita o sufixo '.N' de arquivo.".format(nome))
+        return True, None
+    v = vars_u[nome]
+    desc = v["nivel"]
+    if desc is not None:
+        if not checar_niveis(setup, desc, nome):
+            return True, None
+        setup["_nivel_atual"] = desc
+    return True, v["array"]
 
 def _avaliar_expressao(setup, expr):
     """
@@ -111,7 +235,7 @@ def _avaliar_expressao(setup, expr):
     None se alguma variavel/arquivo referenciado nao foi encontrado (a
     mensagem de erro ja foi impressa por _resolver_variavel).
     """
-    tokens = set(_TOKEN_REF_RE.findall(expr))
+    tokens = _tokens_variaveis(expr)
     namespace = {}
     expr_substituida = expr
     ok = True
@@ -122,10 +246,10 @@ def _avaliar_expressao(setup, expr):
             continue
         nome_seguro = "_v_{0}_{1}".format(indice if indice is not None else 0, nome)
         namespace[nome_seguro] = arr
-        expr_substituida = re.sub(r'\b' + re.escape(tok) + r'\b', nome_seguro, expr_substituida)
+        expr_substituida = re.sub(r'(?<![A-Za-z0-9_.])' + re.escape(tok) + r'(?![A-Za-z0-9_])', nome_seguro, expr_substituida)
     if not ok:
         return None
-    return eval(expr_substituida, {"__builtins__": {}}, namespace)
+    return _eval_expr(expr_substituida, namespace)
 
 def _resolver_variavel_serie(setup, info, token):
     """
@@ -142,6 +266,17 @@ def _resolver_variavel_serie(setup, info, token):
         return token, None, None
 
     nome, indice_str = m.group(1), m.group(2)
+    if nome in _vars_usuario(setup) and not indice_str:
+        # variavel do usuario: reavalia a expressao guardada neste arquivo
+        # (frame) da serie, em vez de usar o instantaneo do 'let'
+        try:
+            arr = _avaliar_expressao_serie(setup, info, _vars_usuario(setup)[nome]["expr"])
+        except Exception as e:
+            print("Erro ao avaliar '{0}': {1}".format(nome, e))
+            return nome, info["index"], None
+        if arr is not None and _vars_usuario(setup)[nome]["nivel"] is not None:
+            setup["_nivel_atual"] = _vars_usuario(setup)[nome]["nivel"]
+        return nome, info["index"], arr
     if indice_str:
         return _resolver_variavel(setup, token)
 
@@ -165,7 +300,7 @@ def _avaliar_expressao_serie(setup, info, expr):
     Como _avaliar_expressao, mas resolvendo os tokens sem sufixo pelo
     arquivo do frame atual ('info') - ver _resolver_variavel_serie.
     """
-    tokens = set(_TOKEN_REF_RE.findall(expr))
+    tokens = _tokens_variaveis(expr)
     namespace = {}
     expr_substituida = expr
     ok = True
@@ -176,10 +311,10 @@ def _avaliar_expressao_serie(setup, info, expr):
             continue
         nome_seguro = "_v_{0}_{1}".format(indice if indice is not None else 0, nome)
         namespace[nome_seguro] = arr
-        expr_substituida = re.sub(r'\b' + re.escape(tok) + r'\b', nome_seguro, expr_substituida)
+        expr_substituida = re.sub(r'(?<![A-Za-z0-9_.])' + re.escape(tok) + r'(?![A-Za-z0-9_])', nome_seguro, expr_substituida)
     if not ok:
         return None
-    return eval(expr_substituida, {"__builtins__": {}}, namespace)
+    return _eval_expr(expr_substituida, namespace)
 
 def _dados_serie_temporal_expr(setup, expr):
     """
@@ -223,6 +358,9 @@ def _dados_serie_temporal(setup, nome_var):
     arquivo aberto, ou se a variavel nao existir em algum dos arquivos
     selecionados (mensagens de erro, com sugestoes, ja impressas).
     """
+    if nome_var in _vars_usuario(setup):
+        # variavel do 'let': reavaliada arquivo a arquivo
+        return _dados_serie_temporal_expr(setup, nome_var)
     time_ini = setup.get("time_ini")
     time_fim = setup.get("time_fim")
     arquivos = setup.get("files") or []
@@ -339,6 +477,20 @@ def exec_cmd(cmd_user, cmd,cmd_split,setup, dataset, ax, cbar, setup_toml):
     # cada comando, ao resolver a variavel (ver _registrar_nivel).
     if isinstance(setup, dict):
         setup["_nivel_atual"] = None
+
+    # '[let] nome = expressao' - variavel do usuario
+    if isinstance(setup, dict) and eh_atribuicao(cmd_user):
+        _definir_variavel(setup, cmd_user)
+        return setup, dataset, ax, cbar
+    if cmd == "let":
+        _listar_variaveis_usuario(setup)
+        return setup, dataset, ax, cbar
+    if cmd == "undef":
+        if len(cmd_split) < 2:
+            print("Uso: undef <nome>")
+        else:
+            _remover_variavel(setup, cmd_split[1])
+        return setup, dataset, ax, cbar
 
     if cmd == "!" or cmd == "exec":
         os.system(cmd_user[0:])

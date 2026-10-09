@@ -13,7 +13,7 @@ import toml
 import matplotlib.pyplot as plt
 
 from .utils import custom_input, load_history, save_command_to_history
-from .exec_func import exec_cmd
+from .exec_func import exec_cmd, eh_atribuicao
 from .setup_config import ensure_config
 from .estatistics import NOMES_ESTATISTICA_ESCALAR
 
@@ -26,6 +26,7 @@ from .estatistics import NOMES_ESTATISTICA_ESCALAR
 _COMANDOS_CONHECIDOS = {
     "!", "exec", "q", "exit", "quit", "run", "open", "reinit",
     "gxprint", "show", "c", "reset", "load", "set", "draw", "d3", "display", "d",
+    "let", "undef",
 } | set(NOMES_ESTATISTICA_ESCALAR)
 
 # Marcadores de texto (secao 1 do manual) usados para reconhecer, na saida
@@ -118,7 +119,7 @@ def main():
     print("|                  GRADS-MONAN APP                   |")
     print("|        (a Grads/Cola clone for MONAN Model)        |")
     print("| Author: Luiz Flávio Rodrigues : luflarois@pm.me    |")
-    print("| Revision: 0.4.0                                    |")
+    print("| Revision: 0.5.0                                    |")
     print("| Licence: \U0001F12F GPLv3 \U0001F12F                                 |")
     print("+----------------------------------------------------+\n")
 
@@ -152,7 +153,7 @@ def main():
         except IndexError:
             continue
 
-        if cmd not in _COMANDOS_CONHECIDOS:
+        if cmd not in _COMANDOS_CONHECIDOS and not eh_atribuicao(cmd_user):
             print("Comando nao reconhecido: '{0}'.".format(cmd))
             prompt_atual = "?> "
             save_command_to_history(cmd_user, history_file)

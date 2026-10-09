@@ -28,7 +28,7 @@ conda init bash      # adiciona ao ~/.bashrc
 Faça logout e login de novo, ou rode 
 
 ```bash
-source ~/.bashrc.
+source ~/.bashrc
 ```
 
 ## 1. Instalação do pacote GradsMonanApp e como rodar
@@ -109,6 +109,8 @@ começam com `Aviso:` são avisos informativos (ex.: ao abrir um arquivo sem
 | `show <opção>` | Consulta informações da sessão/arquivo atual — ver tabela na seção 5. |
 | `set <opção> <valores>` | Ajusta uma configuração de plotagem/sessão — ver tabela na seção 6. |
 | `draw <opção>` | Desenha um elemento adicional sobre o gráfico atual — ver tabela na seção 7. |
+| `let <nome> = <expressão>` / `<nome> = <expressão>` | Cria uma **variável nova** a partir de uma expressão sobre variáveis do arquivo (ex.: `let tg = temp.2/geo.2`) — ver seção 2.4. `let` sozinho lista as definidas. |
+| `undef <nome>` | Remove uma variável criada com `let`. |
 | `d <variavel>` / `display <variavel>` | Plota uma variável em **2D**, na janela principal — ver sintaxes na seção 3. |
 | `d3 <variavel>` | Plota uma variável em **3D**, numa janela separada — ver seção 4. |
 | `! <comando>` / `exec <comando>` | Executa um comando de shell do sistema operacional. |
@@ -688,6 +690,40 @@ sem fixar latitude e/ou longitude (perfil ou corte) - use a forma escalar
 
 ---
 
+## 2.4 Variáveis do usuário (`let`)
+
+Guardam o resultado de uma expressão para uso posterior, como se fossem
+variáveis do arquivo:
+
+```
+> let tg = temp.2/geo.2          # as duas variáveis do arquivo 2
+> tg = (temp/geo)-273.15         # o 'let' é opcional
+> let vel = sqrt(u**2 + v**2)
+> d tg                           # plota como qualquer variável
+> let                            # lista as definidas
+> undef tg                       # remove
+```
+
+- **Expressão**: variáveis do arquivo (com sufixo `.N` opcional, como em
+  `d t2m.2 - t2m.1`), outras variáveis criadas com `let`, números, `+ - * / **`,
+  parênteses e as funções `sqrt`, `abs`, `log`, `log10`, `exp`, `sin`, `cos`,
+  `tan` e `mag(u,v)`.
+- **Instantâneo**: o valor é calculado no momento do `let`, com os arquivos
+  indicados pelos sufixos `.N` (sem sufixo, o arquivo de `set t <n>`). Mudar
+  `set t` depois não altera a variável; para recalcular, repita o `let`.
+  No modo de série (`set t <ini> <fim>`), porém, a expressão guardada é
+  reavaliada em cada arquivo do intervalo.
+- **Níveis**: a variável herda o tipo de nível (pressão, solo, altura — seção
+  8.2) das variáveis usadas e o `set lev` é conferido contra ele ao plotar.
+- Usável em `d`, `d3`, `d` com expressões (`d tg*2`), estatísticas (`mean all tg`)
+  e em outros `let`. Não aceita sufixo `.N` (`d tg.2` dá erro).
+- Erros (nada é definido): variável inexistente, nome reservado (comandos e
+  funções, ex. `let d = 1`), expressão vazia, ou resultado que não seja um
+  campo da malha (ex. `let w = 5`). Se o nome coincidir com uma variável do
+  arquivo, avisa que ela passa a ficar oculta.
+- `show variables` lista também as variáveis do `let`. `reset` as mantém;
+  `reinit` as apaga.
+
 ## 3. Sintaxe do comando `d` / `display` (2D)
 
 | Forma | Efeito |
@@ -766,7 +802,7 @@ globais muito amplos.
 | `show latitudes` / `show longitudes` | Lista de coordenadas da malha, ordenada. |
 | `show levels [pressao\|altura\|solo]` | Lista os níveis de **cada tipo** de coordenada vertical do arquivo, com o índice a usar em `set lev`: pressão em hPa (`t_iso_levels`), níveis do modelo (`nVertLevels`; a altura em m vem do `zgrid`, por célula) e camadas do solo (`nSoilLevels`, profundidade em m — ver seção 8.2). Com o filtro, mostra só um tipo. |
 | `show lev` | `set lev` atual (índice inicial e final), descrito **em cada tipo de nível** (ex.: `500.0 hPa` e `0.150 m de profundidade`); um tipo que não tem esse índice aparece como `fora do intervalo`. |
-| `show variables` | Lista de variáveis do arquivo com sua descrição (`long_name`). |
+| `show variables` | Lista de variáveis do arquivo com sua descrição (`long_name`), seguidas das criadas com `let` (seção 2.4). |
 | `show time_variable` / `show time_units` / `show Date` | Informações de tempo do arquivo (com valores de reserva se ausentes). |
 | `show title` / `show label` | Título do gráfico / rótulo da barra de cores atuais. |
 | `show map` | Lista os shapefiles disponíveis em `mappath`, marcando o selecionado. |
@@ -1077,6 +1113,7 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 - `_resolver_variavel(setup, token)` — resolve um token de variável com sufixo opcional `.N` (seção 2.1): localiza o arquivo aberto correspondente e a variável nele, com mensagens de erro/sugestões (`difflib`) quando o arquivo não está aberto ou a variável não existe. Sem sufixo `.N`, usa `setup['arquivo_sel']` (padrão `1`, alterado por `set t <n>`) em vez de sempre o arquivo 1.
 - `_arquivo_por_indice(setup, indice)` — retorna o registro do arquivo aberto com aquele índice, ou `None`.
 - `_avaliar_expressao(setup, expr)` — avaliador seguro de expressões aritméticas (`d (expr)`), agora resolvendo cada variável via `_resolver_variavel` — aceita sufixos `.N` e expressões cruzando arquivos, ex. `t2m.2 - t2m.1`.
+- `eh_atribuicao(cmd_user)` / `_definir_variavel` / `_listar_variaveis_usuario` / `_remover_variavel` / `_usar_variavel_usuario` — variáveis do usuário (`let`/`undef`, seção 2.4), guardadas em `setup['vars_usuario']` (`{nome: {array, expr, nivel}}`); `_resolver_variavel` dá prioridade a elas. `_FUNCOES_EXPR`/`_tokens_variaveis`/`_eval_expr` — funções permitidas nas expressões.
 - `_modo_serie_ativo(setup)` — `True` quando `set t <ini> <fim>` está definido e há mais de um arquivo aberto (seção 2.1).
 - `_dados_serie_temporal(setup, nome_var)` — reúne o array de `nome_var` de cada arquivo do intervalo `time_ini`/`time_fim`, com mensagens de erro/sugestões se a variável faltar em algum.
 - `_resolver_variavel_serie(setup, info, token)` — como `_resolver_variavel`, mas para uso dentro do modo de série: um token sem sufixo `.N` resolve para o arquivo do quadro atual (`info`), não sempre o arquivo 1; com sufixo, continua fixo naquele arquivo.
