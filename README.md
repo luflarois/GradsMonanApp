@@ -68,6 +68,18 @@ Variáveis em pontos U/V/PSI são levadas para os pontos RHO, `u_east`/
 `v_north` trazem a corrente rotacionada para leste/norte, e o nível 0 é a
 superfície. Detalhes na seção 14 do `userManual.md`.
 
+### Saídas do WRF (wrfout, grade Arakawa C)
+
+```
+open wrfout_d01_2021-07-01_12:00:00
+d T2-273.15
+d U10_east;V10_north
+```
+
+`U`/`V` defasados são levados para os pontos de massa, `U_east`/`V_north`
+trazem o vento rotacionado para leste/norte, e há derivadas prontas
+(`pressure`, `theta`, `tk`). Detalhes na seção 15 do `userManual.md`.
+
 ### Shapefiles do mapa de fundo (`draw map`)
 
 Os shapefiles `Continents.*`, usados pelo comando `draw map`, precisam estar

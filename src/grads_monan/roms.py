@@ -114,8 +114,29 @@ def _destagger_eta(arr):
     return out
 
 
+def _media_interna_xi(arr):
+    """(..., E, X+1) [U do WRF, faces dos dois lados] -> (..., E, X)."""
+    return _nanmedia2(arr[..., :-1], arr[..., 1:])
+
+
+def _media_interna_eta(arr):
+    """(..., E+1, X) [V do WRF] -> (..., E, X)."""
+    return _nanmedia2(arr[..., :-1, :], arr[..., 1:, :])
+
+
 def para_rho(arr, ponto):
-    """Leva um campo do ponto 'ponto' (rho/u/v/psi) da grade C para RHO."""
+    """
+    Leva um campo do ponto 'ponto' da grade C para o ponto de massa (RHO):
+      - 'u'/'v'/'psi': convencao do ROMS - U/V tem uma coluna/linha A MENOS
+        que RHO (as faces da borda externa nao existem); nas bordas o valor
+        da face mais proxima e repetido;
+      - 'u+'/'v+': convencao do WRF - U/V tem uma coluna/linha A MAIS (as
+        duas faces de toda celula existem); media simples das duas faces.
+    """
+    if ponto == "u+":
+        return _media_interna_xi(arr)
+    if ponto == "v+":
+        return _media_interna_eta(arr)
     if ponto == "u":
         return _destagger_xi(arr)
     if ponto == "v":
@@ -145,9 +166,12 @@ class _Dim(object):
 
 
 class _Variaveis(dict):
-    """dict de variaveis com o atributo 'modelo' (usado por utils.py para
-    rotular os niveis como profundidade)."""
-    modelo = "ROMS"
+    """dict de variaveis com o atributo 'modelo' ('ROMS', 'WRF'...) - usado
+    por utils.py para rotular os niveis (ex: profundidade no ROMS)."""
+
+    def __init__(self, modelo="ROMS"):
+        dict.__init__(self)
+        self.modelo = modelo
 
 
 class GradeRoms(object):
@@ -157,6 +181,16 @@ class GradeRoms(object):
     complementado pelo arquivo de dados (lon/lat/mask/h/angle ausentes num
     sao procurados no outro; parametros verticais vem do arquivo de dados).
     """
+
+    # Especificacao da grade C usada por VariavelRoms (o WRF - wrf.py - usa
+    # a mesma classe de variavel com outra especificacao):
+    #   pontos         : par de dimensoes horizontais -> tipo de ponto
+    #   dims_verticais : dimensao vertical do modelo -> nome MONAN-like
+    #   inverter_niveis: True -> nivel 0 passa a ser o ULTIMO indice do
+    #                    modelo (no ROMS, k=0 e o fundo; aqui 0 = superficie)
+    pontos = _PONTOS
+    dims_verticais = _DIMS_VERTICAIS
+    inverter_niveis = True
 
     def __init__(self, dados, grade=None):
         fontes = [ds for ds in (grade, dados) if ds is not None]
@@ -274,19 +308,19 @@ class VariavelRoms(object):
 
     def _preparar_dims(self, var):
         dims = tuple(var.dimensions)
-        self._ponto = _PONTOS[dims[-2:]]
+        self._ponto = self._grade.pontos[dims[-2:]]
         self._eixo_tempo = 0 if (len(dims) > 2 and "time" in dims[0].lower()) else None
         self._eixo_vert = None
         dim_vert = None
         for i, d in enumerate(dims[:-2]):
-            if d in _DIMS_VERTICAIS:
+            if d in self._grade.dims_verticais:
                 self._eixo_vert = i
                 dim_vert = d
         n_t = var.shape[0] if self._eixo_tempo is not None else 1
         novas_dims = ["Time", "nCells"]
         nova_forma = [n_t, self._grade.n_cells]
         if dim_vert is not None:
-            novas_dims.append(_DIMS_VERTICAIS[dim_vert])
+            novas_dims.append(self._grade.dims_verticais[dim_vert])
             nova_forma.append(var.shape[self._eixo_vert])
         self.dimensions = tuple(novas_dims)
         self.shape = tuple(nova_forma)
@@ -332,9 +366,11 @@ class VariavelRoms(object):
             arr[..., ~self._grade.mask_rho] = np.nan
         n_t = arr.shape[0]
         if arr.ndim == 4:
-            # (T, N, E, X) -> (T, E*X, N), nivel 0 = superficie
+            # (T, N, E, X) -> (T, E*X, N); no ROMS, nivel 0 = superficie
             arr = arr.reshape(n_t, arr.shape[1], -1)
-            arr = np.transpose(arr, (0, 2, 1))[:, :, ::-1]
+            arr = np.transpose(arr, (0, 2, 1))
+            if self._grade.inverter_niveis:
+                arr = arr[:, :, ::-1]
         else:
             arr = arr.reshape(n_t, -1)
         return np.ascontiguousarray(arr)
@@ -370,7 +406,7 @@ class DatasetRoms(object):
         self.grade = grade
         self.arquivo_grade = arquivo_grade
         self.parametros = {}
-        self.variables = _Variaveis()
+        self.variables = _Variaveis("ROMS")
 
         for nome, var in dados.variables.items():
             dims = tuple(var.dimensions)
@@ -565,3 +601,7 @@ def abrir_roms(dataset, nome_arquivo, arquivo_grade=None):
         if ds_grade is not None:
             ds_grade.close()
     return DatasetRoms(dataset, grade, arquivo_grade), arquivo_grade
+
+
+# Nome generico (usado tambem pelo WRF - wrf.py)
+VariavelGradeC = VariavelRoms

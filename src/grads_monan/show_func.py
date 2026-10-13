@@ -46,9 +46,14 @@ def _mostrar_info_arquivo(setup):
     print("Dimensoes:")
     g = setup.get("_grade_estruturada")
     if g:
-        print("  Grade {0} (Arakawa C, curvilinea): {1} x {2} pontos RHO (eta_rho x xi_rho) = {3} pontos".format(
-            g.get("modelo", ""), g["shape"][0], g["shape"][1], len(setup.get("latitudes", []))))
-        print("  (variaveis em pontos U/V/PSI sao levadas para RHO; 'u_east'/'v_north' = correntes rotacionadas para leste/norte)")
+        if g.get("modelo") == "WRF":
+            print("  Grade WRF (Arakawa C): {0} x {1} pontos de massa (south_north x west_east) = {2} pontos".format(
+                g["shape"][0], g["shape"][1], len(setup.get("latitudes", []))))
+            print("  (U/V defasados sao levados para os pontos de massa; 'U_east'/'V_north' e 'U10_east'/'V10_north' = vento rotacionado para leste/norte)")
+        else:
+            print("  Grade {0} (Arakawa C, curvilinea): {1} x {2} pontos RHO (eta_rho x xi_rho) = {3} pontos".format(
+                g.get("modelo", ""), g["shape"][0], g["shape"][1], len(setup.get("latitudes", []))))
+            print("  (variaveis em pontos U/V/PSI sao levadas para RHO; 'u_east'/'v_north' = correntes rotacionadas para leste/norte)")
     else:
         print("  Numero de celulas (nCells): {0}".format(len(setup.get("latitudes", []))))
     niveis = descritores_disponiveis(setup)

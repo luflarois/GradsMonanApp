@@ -801,7 +801,7 @@ def _plotar_perfil_dados(setup, vertical_profile, closest_index):
     elif zgrid_arr is not None and np.mean(np.isfinite(zgrid_arr[closest_index, lev:levf_dados])) >= 0.5:
         # Sem t_iso_levels, mas com zgrid: altura geometrica, menor embaixo, maior em cima
         y_vals = zgrid_arr[closest_index, lev:levf_dados]
-        ylabel = 'Profundidade z (m)' if _grade_estruturada(setup) is not None else 'Altura (m)'
+        ylabel = 'Profundidade z (m)' if _eh_roms(setup) else 'Altura (m)'
     else:
         if zgrid_arr is not None:
             print("Aviso: zgrid majoritariamente invalido para o ponto selecionado (shape={0}); usando indice de nivel no eixo Y.".format(zgrid_arr.shape))
@@ -964,7 +964,7 @@ def _plotar_corte_dados(setup, data, cbar=None):
                         colors='none', hatches=['//'])
         ax.set_xlim(np.nanmin(eixo_x_mesh), np.nanmax(eixo_x_mesh))
         ax.set_ylim(np.nanmin(altura), np.nanmax(altura))
-        plt.ylabel('Profundidade z (m)' if _grade_estruturada(setup) is not None else 'Altura (m)')
+        plt.ylabel('Profundidade z (m)' if _eh_roms(setup) else 'Altura (m)')
     else:
         y = levels[lev:levf]
         cs = ax.contourf(eixo_x, y, corte, levels=_niveis_cor(setup), cmap=cmap)
@@ -1002,6 +1002,11 @@ def _grade_estruturada(setup):
     """
     g = setup.get("_grade_estruturada") if isinstance(setup, dict) else None
     return g if g else None
+
+def _eh_roms(setup):
+    """True se o arquivo aberto e do ROMS (eixo vertical = profundidade)."""
+    g = _grade_estruturada(setup)
+    return g is not None and g.get("modelo") == "ROMS"
 
 def _campo_2d(setup, data):
     """(nCells,) -> (eta, xi), com NaN mascarado, na grade estruturada."""
@@ -1666,8 +1671,9 @@ def plot_vector_field(setup, var_u, var_v):
         ax.set_ylim(lat_min, lat_max)
 
     if _grade_estruturada(setup) is not None:
-        # ROMS: setas amostradas e escala automatica (correntes ~ 1 m/s,
-        # bem menores que vento - a escala fixa do MONAN as sumiria).
+        # Grade estruturada (ROMS/WRF): setas amostradas e escala
+        # automatica (correntes do ROMS ~ 1 m/s, bem menores que vento - a
+        # escala fixa do MONAN as sumiria).
         lo, la, uu, vv = _amostrar_vetores(setup, u, v)
         q = ax.quiver(lo, la, uu, vv, color='k')
         try:

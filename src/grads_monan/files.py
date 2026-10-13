@@ -15,6 +15,7 @@ from matplotlib.path import Path as _MplPath
 from .plot_func import set_ion, atualizar_titulo_janela
 from .utils import normalize_lon, sem_mascara, assinatura_malha
 from .roms import eh_roms, abrir_roms, tempos_roms
+from .wrf import eh_wrf, abrir_wrf, tempos_wrf
 
 def file_open(fileName, setup_toml, gridFile=None, setup_anterior=None):
 
@@ -27,15 +28,18 @@ def file_open(fileName, setup_toml, gridFile=None, setup_anterior=None):
             print("Please, check it!")
             return None, None
         grade_estruturada = None
-        if eh_roms(dataset):
-            # Saida do modelo oceanico ROMS (grade curvilinea Arakawa C) -
-            # ver roms.py: a grade e apresentada ao resto do programa como
-            # uma "malha" de pontos RHO, com U/V/PSI ja levados para RHO.
+        modelo_c = "ROMS" if eh_roms(dataset) else ("WRF" if eh_wrf(dataset) else None)
+        if modelo_c is not None:
+            # Saida de modelo em grade Arakawa C estruturada - ROMS (oceano,
+            # roms.py) ou WRF (atmosfera, wrf.py): a grade e apresentada ao
+            # resto do programa como uma "malha" de pontos de massa (RHO),
+            # com as variaveis defasadas (U/V/PSI) ja levadas para eles.
+            abrir_c, tempos_c = (abrir_roms, tempos_roms) if modelo_c == "ROMS" else (abrir_wrf, tempos_wrf)
             dataset_bruto = dataset
             try:
-                dataset, grade_usada = abrir_roms(dataset_bruto, fileName, gridFile)
+                dataset, grade_usada = abrir_c(dataset_bruto, fileName, gridFile)
             except Exception as e:
-                print("Erro ao abrir o arquivo ROMS '{0}': {1}".format(fileName, e))
+                print("Erro ao abrir o arquivo {0} '{1}': {2}".format(modelo_c, fileName, e))
                 try:
                     dataset_bruto.close()
                 except Exception:
@@ -47,7 +51,7 @@ def file_open(fileName, setup_toml, gridFile=None, setup_anterior=None):
             latitudes = grade.latitudes()
             longitudes = normalize_lon(grade.longitudes())
             grade_estruturada = {
-                "modelo"  : "ROMS",
+                "modelo"  : modelo_c,
                 "shape"   : grade.shape,
                 "lon2d"   : longitudes.reshape(grade.shape),
                 "lat2d"   : grade.lat_rho,
@@ -56,13 +60,14 @@ def file_open(fileName, setup_toml, gridFile=None, setup_anterior=None):
             }
             variables = dataset.variables
 
-            datas, time_variable, time_units = tempos_roms(dataset)
+            datas, time_variable, time_units = tempos_c(dataset)
             if datas:
                 time = datas
                 time_str = datas[0].strftime("%Y-%m-%d_%H:%M:%S")
                 DataDado = datas[0].strftime("%Y-%m-%dT%H")
             else:
-                print("Aviso: variavel 'ocean_time' ausente ou sem unidade de tempo reconhecida em ", fileName)
+                print("Aviso: tempo ({0}) ausente ou nao reconhecido em ".format(
+                    "ocean_time" if modelo_c == "ROMS" else "Times/XTIME"), fileName)
                 time = [0]
                 time_str = ""
                 DataDado = "desconhecida"
@@ -72,11 +77,15 @@ def file_open(fileName, setup_toml, gridFile=None, setup_anterior=None):
             else:
                 levels = [0]
             eixo_pressao = False
-            print("Arquivo ROMS (grade Arakawa C): {0} x {1} pontos RHO (eta x xi), {2} nivel(is) s, {3} tempo(s).".format(
-                grade.shape[0], grade.shape[1], len(levels), len(time)))
+            if modelo_c == "ROMS":
+                print("Arquivo ROMS (grade Arakawa C): {0} x {1} pontos RHO (eta x xi), {2} nivel(is) s, {3} tempo(s).".format(
+                    grade.shape[0], grade.shape[1], len(levels), len(time)))
+            else:
+                print("Arquivo WRF (grade Arakawa C): {0} x {1} pontos de massa (south_north x west_east), {2} nivel(is) eta, {3} tempo(s).".format(
+                    grade.shape[0], grade.shape[1], len(levels), len(time)))
             if grade_usada:
                 print("Grade lida de: {0}".format(grade_usada))
-            if grade.vertical is None and len(levels) > 1:
+            if modelo_c == "ROMS" and grade.vertical is None and len(levels) > 1:
                 print("Aviso: parametros da coordenada s (s_rho, Cs_r, hc) ou batimetria 'h' ausentes - niveis so por indice.")
         else:
             nCells_size = None

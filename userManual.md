@@ -1145,6 +1145,12 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 - `GradeRoms` — lon/lat de RHO e PSI, máscara, ângulo (radianos), `h` e parâmetros da coordenada s; `profundidade_z(zeta)` calcula *z* com `Vtransform` 1 ou 2.
 - `tempos_roms(dataset)` — datas de `ocean_time`.
 
+### `wrf.py`
+- `eh_wrf(dataset)` — `True` se o arquivo tem as dimensões `south_north`/`west_east`.
+- `abrir_wrf(dataset, nome_arquivo, arquivo_grade=None)` — monta o `DatasetWrf` (seção 15) a partir de `XLAT`/`XLONG` do wrfout ou de um geo_em/wrfinput.
+- `DatasetWrf` — mesmas convenções do `DatasetRoms` (usa a mesma `VariavelGradeC`), sem inversão dos níveis e sem máscara; cria `U_east`/`V_north`, `U10_east`/`V10_north`, `pressure`, `theta`, `tk`, `zgrid` e `zs`.
+- `tempos_wrf(dataset)` — datas de `Times` (ou `XTIME`).
+
 ### `estatistics.py`
 - `calcular_valor(setup, nome_funcao, arrays, mask, rotulo, modo_point=False)` — forma **escalar** de todas as estatísticas (`sum`/`mean`/`min`/`max`/`p10`..`p90`, seção 2.3): empilha `arrays` (ver `_empilhar`) e reduz a **um único número**, sobre todos os tempos selecionados e, conforme o modo espacial atual (mapa/ponto/corte/mapa_niveis — ver `_modo_espacial`/`_fatia`): todas as células (ou só as de `mask`) no nível único (modo mapa) ou na faixa de níveis (modo corte, ou mapa com `modo_point=True` e faixa genuína — modo `mapa_niveis`), ou toda a faixa de níveis na célula mais próxima (modo ponto — `mask` aí só confere se esse ponto está dentro da área). Imprime o resultado e o retorna (`float`), ou `None` em caso de erro/aviso (variável com formato inesperado, máscara não batendo com a malha atual, nenhuma célula disponível, ou ponto fora da área de limites).
 - `calcular_campo(setup, nome_funcao, arrays, mask, rotulo, modo_point=False)` — forma **espacial**: como `calcular_valor`, mas reduz **só sobre os tempos**, mantendo a forma do modo atual — `(nCells,)` no mapa, `(nCells, nLevels)` no corte, `(nLevels,)` no ponto (perfil) — pronta para plotar via `plot_estatistica_campo` (`plot_func.py`). Com `mask`, as células de fora ficam com `NaN` (mapa/corte) ou o cálculo é recusado (ponto fora da área). Retorna `(campo, modo)`, ou `None` em caso de erro/aviso — inclusive no modo `mapa_niveis` (nem lat nem lon fixada, com `modo_point=True` e faixa genuína de níveis), onde a função sempre recusa a plotar (não há mapa nem corte bem definido) e retorna `None` com um aviso.
@@ -1258,6 +1264,7 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 - Sem nenhum deles, usa índice de nível do modelo.
 - **Altura real** (opcional, corte/perfil/`d3` por altura): `zgrid`.
 - **`voronoi`/`shaded`/`contour`/corte/`streamlines`**: só precisam de `latCell`/`lonCell` — não é necessária a conectividade completa (`verticesOnCell` etc.).
+- **WRF** (seção 15): dimensões `south_north`/`west_east` e `XLAT`/`XLONG`; `Times`; para altura, `PH`/`PHB`; para solo, `ZS`.
 - **ROMS** (seção 14): dimensões `eta_rho`/`xi_rho` e `lon_rho`/`lat_rho` (no arquivo ou numa grade separada); `ocean_time`; para profundidade, `Vtransform`, `s_rho`, `Cs_r`, `hc` e `h`.
 - **`hex`** (seção 8.1): precisa da conectividade completa da malha — `verticesOnCell`, `nEdgesOnCell`, `latVertex`, `lonVertex` — presente no arquivo de grade padrão do MPAS/MONAN (`x1.<nCells>.grid.nc`), mas tipicamente ausente em saídas de diagnóstico/pós-processadas. Sem essa conectividade, o programa avisa e sugere `voronoi` em vez de travar.
 
@@ -1360,3 +1367,76 @@ Os cortes verticais triangulam apenas os pontos em volta da linha do corte
 - Grades que cruzam a linha de data (±180°) não são tratadas.
 - Arquivos ROMS e MONAN não podem ser abertos na mesma sessão (malhas
   diferentes — use `reinit`).
+
+## 15. Saídas do modelo atmosférico WRF (grade Arakawa C)
+
+Arquivos `wrfout_*` do WRF são reconhecidos pelas dimensões
+`south_north`/`west_east` e tratados com a mesma maquinaria do ROMS
+(seção 14): os pontos de **massa** viram as "células" e as variáveis
+defasadas são levadas para eles.
+
+| Ponto | Dimensões | Variáveis típicas |
+| --- | --- | --- |
+| Massa | `south_north`, `west_east` | `T`, `P`, `PB`, `QVAPOR`, `T2`, `U10`, `V10`, `HGT`, `RAINNC`... |
+| U | `south_north`, `west_east_stag` | `U`, `MAPFAC_U` |
+| V | `south_north_stag`, `west_east` | `V`, `MAPFAC_V` |
+
+Diferente do ROMS, no WRF a grade defasada tem uma coluna/linha **a mais**
+que a de massa (`west_east_stag` = `west_east` + 1): cada ponto de massa
+recebe a média exata das suas duas faces, sem repetição de borda.
+
+### 15.1 Abrindo
+
+```
+open wrfout_d01_2021-07-01_12:00:00               # grade do próprio wrfout (XLAT/XLONG)
+open wrfout_d01_*                                  # vários arquivos (série no tempo)
+open wrfout_d01_... geo_em.d01.nc                  # grade separada (só se o wrfout não tiver XLAT/XLONG)
+```
+
+O tempo vem de `Times` (ou de `XTIME`, na falta dele). Um wrfout com vários
+horários usa `set t` normalmente para escolher o registro.
+
+### 15.2 Níveis
+
+- `bottom_top` → `nVertLevels` (níveis de massa); `bottom_top_stag` →
+  `nVertLevelsP1` (interfaces: `W`, `PH`, `PHB`...); `soil_layers_stag` →
+  `nSoilLevels` (solo).
+- A ordem do WRF é mantida: **nível 0 = o mais baixo**, junto à superfície
+  (a mesma convenção do MONAN).
+- `zgrid` (virtual) = altura geopotencial `(PH+PHB)/g` nas interfaces, do
+  primeiro tempo. É usada por `set lev` (altura média do nível), cortes
+  verticais e perfis, que acompanham o terreno.
+- `zs` (virtual) = profundidade das camadas de solo (de `ZS`), usada por
+  `show levels solo` e `set lev` em variáveis como `TSLB` e `SMOIS`.
+
+### 15.3 Variáveis derivadas (virtuais)
+
+| Variável | Conteúdo |
+| --- | --- |
+| `U_east`, `V_north` | `U`/`V` em pontos de massa, rotacionados para leste/norte com `SINALPHA`/`COSALPHA` |
+| `U10_east`, `V10_north` | o mesmo para `U10`/`V10` |
+| `pressure` | pressão total `P+PB`, em hPa |
+| `theta` | temperatura potencial `T+300`, em K |
+| `tk` | temperatura do ar, em K |
+
+Em projeção Mercator a rotação é nula, mas em Lambert ou estereográfica
+polar ela é necessária, por isso use sempre `U_east;V_north` para vetores:
+
+```
+set lev 0
+set gxout shaded
+d T2-273.15
+set gxout barb
+d U10_east;V10_north
+```
+
+Os comandos de `gxout` (`shaded`, `contour`, `grfill`, `vect`, `barb`,
+`stream`) funcionam como descrito na seção 14.4.
+
+### 15.4 Limitações conhecidas
+
+- Não há interpolação para níveis de pressão (`set lev 850` em hPa): os
+  níveis são os níveis eta do modelo. Para um campo numa superfície de
+  pressão, interpole antes (ex.: com `wrf-python`/`p_interp`).
+- `zgrid` usa o primeiro tempo do arquivo.
+- WRF e MONAN/ROMS não podem ser abertos na mesma sessão (use `reinit`).

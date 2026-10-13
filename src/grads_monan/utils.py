@@ -370,6 +370,8 @@ def _montar_descritor(variables, dim, n):
     elif tipo == "altura":
         desc["fonte"] = "zgrid" if "zgrid" in variables else "indice"
     desc["nome_tipo"] = _NOME_TIPO_NIVEL[desc["tipo"]]
+    if desc["tipo"] == "altura" and str(dim).endswith("P1"):
+        desc["nome_tipo"] += " (interfaces)"
     if getattr(variables, "modelo", None) == "ROMS" and desc["tipo"] == "altura":
         # ROMS (roms.py): niveis s, com o indice 0 = SUPERFICIE; 'zgrid' traz
         # a profundidade z (m, negativa) de cada nivel em cada ponto.

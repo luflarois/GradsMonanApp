@@ -220,6 +220,7 @@ def _print_level_info(setup, l, lf=None):
             print("Nivel {0} selecionado.".format(l))
         return
 
+    partes = [p for i, p in enumerate(partes) if p not in partes[:i]]
     if not partes:
         print("Nivel {0} selecionado.".format(l))
         return
@@ -242,7 +243,12 @@ def _altura_media_zgrid(zgrid_var, n_levels, l):
         raise ValueError("dimensao de nivel nao identificada em zgrid")
     slicer = [slice(None)] * len(shape)
     slicer[eixo_nivel] = l
-    return float(np.nanmean(np.asarray(zgrid_var[tuple(slicer)])))
+    valor = np.asarray(zgrid_var[tuple(slicer)], dtype=float)
+    if shape[eixo_nivel] == n_levels + 1:
+        # zgrid nas interfaces e niveis no meio das camadas: centro da camada
+        slicer[eixo_nivel] = l + 1
+        valor = 0.5 * (valor + np.asarray(zgrid_var[tuple(slicer)], dtype=float))
+    return float(np.nanmean(valor))
 
 def _print_arquivo_info(setup, n):
     """
