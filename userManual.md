@@ -1137,6 +1137,14 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 - `file_open(fileName, setup_toml, gridFile=None, setup_anterior=None)` — abre o arquivo (e a grade, se necessária). Se `setup_anterior` for passado (já há um arquivo aberto na sessão), valida a malha do novo arquivo contra a assinatura já registrada (seção 2.1): rejeita com `(None, None)` se forem diferentes (preservando `setup_anterior` intacto), ou adiciona o novo arquivo a `setup["files"]` com o próximo índice sequencial, se forem iguais. Sem `setup_anterior` (primeiro `open`), monta o `setup` do zero, como antes — inclusive guardando a referência ao `dataset` da malha (`setup["_malha_dataset"]`), usada sob demanda por `gxout hex` (seção 8.1) para ler a conectividade completa. Resiliente à ausência de `nCells`, malha, `xtime`/`initial_time`, `t_iso_levels`.
 - `carregar_limites(setup, caminho_csv)` — comando `load limits <arquivo.csv>` (seção 2.2): lê o arquivo de pontos (lat/lon, um por linha), calcula a máscara de células da malha dentro do polígono formado por eles e guarda tudo em `setup["limits_*"]`, pronto para as futuras funções estatísticas dentro da área. Retorna `True`/`False`; em caso de falha, preserva os limites já carregados anteriormente (se houver).
 
+### `roms.py`
+- `eh_roms(dataset)` — `True` se o arquivo tem as dimensões `eta_rho`/`xi_rho` (grade C do ROMS).
+- `abrir_roms(dataset, nome_arquivo, arquivo_grade=None)` — monta o `DatasetRoms` (seção 14): lê a geometria da grade (arquivo separado ou o próprio arquivo de saída; na falta de `lon_rho`, o `grd_file` do atributo global) e devolve `(DatasetRoms, grade_usada)`.
+- `DatasetRoms` — expõe `.variables` (só as variáveis de grade, no formato `(Time, nCells[, nVertLevels])`, mais as virtuais `zgrid`, `u_east`/`v_north`, `ubar_east`/`vbar_north`) e `.dimensions` (`Time`, `nCells`, `nVertLevels`, `nVertLevelsP1`); parâmetros escalares ficam em `.parametros`.
+- `VariavelRoms` — leitura preguiçosa (com cache) de uma variável: leva U/V/PSI para RHO (`para_rho`), aplica `mask_rho`, achata eta×xi e põe o nível 0 na superfície.
+- `GradeRoms` — lon/lat de RHO e PSI, máscara, ângulo (radianos), `h` e parâmetros da coordenada s; `profundidade_z(zeta)` calcula *z* com `Vtransform` 1 ou 2.
+- `tempos_roms(dataset)` — datas de `ocean_time`.
+
 ### `estatistics.py`
 - `calcular_valor(setup, nome_funcao, arrays, mask, rotulo, modo_point=False)` — forma **escalar** de todas as estatísticas (`sum`/`mean`/`min`/`max`/`p10`..`p90`, seção 2.3): empilha `arrays` (ver `_empilhar`) e reduz a **um único número**, sobre todos os tempos selecionados e, conforme o modo espacial atual (mapa/ponto/corte/mapa_niveis — ver `_modo_espacial`/`_fatia`): todas as células (ou só as de `mask`) no nível único (modo mapa) ou na faixa de níveis (modo corte, ou mapa com `modo_point=True` e faixa genuína — modo `mapa_niveis`), ou toda a faixa de níveis na célula mais próxima (modo ponto — `mask` aí só confere se esse ponto está dentro da área). Imprime o resultado e o retorna (`float`), ou `None` em caso de erro/aviso (variável com formato inesperado, máscara não batendo com a malha atual, nenhuma célula disponível, ou ponto fora da área de limites).
 - `calcular_campo(setup, nome_funcao, arrays, mask, rotulo, modo_point=False)` — forma **espacial**: como `calcular_valor`, mas reduz **só sobre os tempos**, mantendo a forma do modo atual — `(nCells,)` no mapa, `(nCells, nLevels)` no corte, `(nLevels,)` no ponto (perfil) — pronta para plotar via `plot_estatistica_campo` (`plot_func.py`). Com `mask`, as células de fora ficam com `NaN` (mapa/corte) ou o cálculo é recusado (ponto fora da área). Retorna `(campo, modo)`, ou `None` em caso de erro/aviso — inclusive no modo `mapa_niveis` (nem lat nem lon fixada, com `modo_point=True` e faixa genuína de níveis), onde a função sempre recusa a plotar (não há mapa nem corte bem definido) e retorna `None` com um aviso.
@@ -1250,4 +1258,105 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 - Sem nenhum deles, usa índice de nível do modelo.
 - **Altura real** (opcional, corte/perfil/`d3` por altura): `zgrid`.
 - **`voronoi`/`shaded`/`contour`/corte/`streamlines`**: só precisam de `latCell`/`lonCell` — não é necessária a conectividade completa (`verticesOnCell` etc.).
+- **ROMS** (seção 14): dimensões `eta_rho`/`xi_rho` e `lon_rho`/`lat_rho` (no arquivo ou numa grade separada); `ocean_time`; para profundidade, `Vtransform`, `s_rho`, `Cs_r`, `hc` e `h`.
 - **`hex`** (seção 8.1): precisa da conectividade completa da malha — `verticesOnCell`, `nEdgesOnCell`, `latVertex`, `lonVertex` — presente no arquivo de grade padrão do MPAS/MONAN (`x1.<nCells>.grid.nc`), mas tipicamente ausente em saídas de diagnóstico/pós-processadas. Sem essa conectividade, o programa avisa e sugere `voronoi` em vez de travar.
+
+## 14. Saídas do modelo oceânico ROMS (grade Arakawa C)
+
+Além da malha de Voronoi do MONAN/MPAS, o programa abre saídas do **ROMS**
+(ex.: `ocean_avg.nc`, `ocean_his.nc` do COAWST), cuja grade é **curvilínea e
+estruturada**, com as variáveis **defasadas** na grade C de Arakawa:
+
+| Ponto | Dimensões | Variáveis típicas |
+| --- | --- | --- |
+| RHO (centro da célula) | `eta_rho`, `xi_rho` | `temp`, `salt`, `rho`, `zeta`, `h`, `omega` |
+| U (face oeste/leste) | `eta_u`, `xi_u` | `u`, `ubar`, `Huon`, `u_temp`... |
+| V (face sul/norte) | `eta_v`, `xi_v` | `v`, `vbar`, `Hvom`, `v_temp`... |
+| PSI (canto da célula) | `eta_psi`, `xi_psi` | (vorticidade, se houver) |
+
+O arquivo é reconhecido automaticamente pelas dimensões `eta_rho`/`xi_rho`.
+
+### 14.1 Abrindo
+
+```
+open ocean_avg.nc                      # grade lida do próprio arquivo de saída
+open ocean_avg.nc swa6_grd.nc          # grade num arquivo separado
+open ocean_avg_*.nc swa6_grd.nc        # vários arquivos (série no tempo)
+```
+
+- Se o arquivo de saída já traz `lon_rho`/`lat_rho`/`mask_rho`/`angle`/`h`
+  (o padrão do ROMS), o arquivo de grade é opcional. Quando informado, a
+  geometria (lon/lat, máscara, ângulo, batimetria) vem dele; os parâmetros
+  da coordenada vertical (`Vtransform`, `s_rho`, `Cs_r`, `hc`) vêm sempre do
+  arquivo de dados.
+- Se o arquivo de saída **não** tiver `lon_rho`/`lat_rho` e nenhuma grade for
+  informada, o programa procura o arquivo do atributo global `grd_file` no
+  mesmo diretório.
+- O ângulo `angle` é sempre usado em radianos. Arquivos de grade costumam
+  rotulá-lo como `degree` mesmo guardando radianos (o ROMS lê radianos); o
+  programa decide pelos valores (|angle| > 2π só pode ser grau).
+- O tempo vem de `ocean_time` (ex.: `seconds since 1970-01-01 00:00:00`).
+
+### 14.2 Como a grade C é tratada
+
+Internamente, cada ponto **RHO** vira uma "célula" (o resto do programa vê
+`nCells = eta_rho × xi_rho`), e:
+
+- variáveis em **U**, **V** ou **PSI** são levadas para os pontos RHO pela
+  média dos dois (ou quatro) vizinhos — nas bordas do domínio, onde só há um
+  vizinho, o valor da borda é repetido;
+- pontos de **terra** (`mask_rho = 0`) e o `_FillValue` viram "sem dado";
+- **`u_east`/`v_north`** (e `ubar_east`/`vbar_north`) são criadas
+  automaticamente: são `u`/`v` (já em RHO) **rotacionadas** da direção da
+  grade (ξ, η) para leste/norte com o `angle` da grade. **Use estas para
+  vetores, barbelas e linhas de corrente** — `u`/`v` puros estão na direção
+  da grade, que pode ser bem diferente de leste/norte numa grade rotacionada:
+
+```
+set lev 0
+set gxout shaded
+d sqrt(u_east**2+v_north**2)
+set gxout vect
+d u_east;v_north
+```
+
+- variáveis de parâmetros escalares (`dt`, `rdrg`, `Cs_r`...) e as
+  coordenadas dos pontos defasados (`lon_u`, `mask_v`...) não aparecem em
+  `show info`.
+
+### 14.3 Níveis verticais (coordenada s)
+
+- `set lev 0` é a **superfície**; o último índice (ex.: `set lev 29` com 30
+  níveis) é o **fundo** — a ordem é invertida em relação ao ROMS (onde
+  k = 1 é o fundo), para ficar natural num oceano.
+- Variáveis em `s_rho` usam a dimensão `nVertLevels`; em `s_w` (ex.:
+  `omega`), `nVertLevelsP1`.
+- A variável virtual **`zgrid`** traz a profundidade *z* (m, negativa) de cada
+  nível *s* em cada ponto, calculada com `Vtransform` 1 ou 2, `Cs_r`, `s_rho`,
+  `hc`, `h` e `zeta` do primeiro tempo. Ela é usada em:
+  - `show levels` / `set lev`: mostram a profundidade **média** de cada nível
+    (o nível *s* acompanha o fundo, então a profundidade real varia de ponto
+    a ponto);
+  - cortes verticais (`set lat <valor>` ou `set lon <valor>` + `set lev 0 29`)
+    e perfis (`set lat`/`set lon` num ponto): o eixo Y é a profundidade real.
+    Colunas em terra aparecem hachuradas.
+
+### 14.4 `gxout` na grade estruturada
+
+| `gxout` | No ROMS |
+| --- | --- |
+| `shaded` / `contour` | `contourf`/`contour` direto nas coordenadas 2D dos pontos RHO, sem triangulação — rápido mesmo na grade cheia. |
+| `grfill` (também `voronoi`/`hex`) | Pinta cada célula com o seu valor, usando os **cantos reais** da célula (pontos PSI): a grade curvilínea exata do modelo, sem interpolação. |
+| `vect` / `barb` | Setas/barbelas amostradas (~45 por lado da área visível), com escala automática e seta de referência em m/s. |
+| `stream` | Linhas de corrente sobre uma grade regular amostrada do ponto RHO mais próximo. |
+
+Os cortes verticais triangulam apenas os pontos em volta da linha do corte
+(em vez da grade inteira), então também ficam rápidos na grade completa.
+
+### 14.5 Limitações conhecidas
+
+- O `zgrid` usa a `zeta` do primeiro tempo do arquivo (diferença de
+  centímetros na profundidade dos níveis).
+- Grades que cruzam a linha de data (±180°) não são tratadas.
+- Arquivos ROMS e MONAN não podem ser abertos na mesma sessão (malhas
+  diferentes — use `reinit`).

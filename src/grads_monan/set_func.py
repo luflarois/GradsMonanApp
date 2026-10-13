@@ -197,13 +197,16 @@ def _print_level_info(setup, l, lf=None):
     for d in niveis:
         if ultimo >= d["n"]:
             continue
-        if d["tipo"] in ("pressao", "solo"):
+        if d["tipo"] in ("pressao", "solo") or d.get("unidade") == "m":
             txt = formatar_nivel(d, l) if l == ultimo else "{0} ate {1}".format(formatar_nivel(d, l), formatar_nivel(d, ultimo))
             partes.append("{0}: {1}".format(d["nome_tipo"], txt))
         elif d["tipo"] == "altura" and "zgrid" in variables:
             try:
                 altura = _altura_media_zgrid(variables["zgrid"], d["n"], l)
-                partes.append("{0}: zgrid medio = {1:.1f} m".format(d["nome_tipo"], altura))
+                if getattr(variables, "modelo", None) == "ROMS":
+                    partes.append("{0}: profundidade media = {1:.1f} m".format(d["nome_tipo"], altura))
+                else:
+                    partes.append("{0}: zgrid medio = {1:.1f} m".format(d["nome_tipo"], altura))
             except Exception:
                 partes.append("{0}: indice {1}".format(d["nome_tipo"], l))
         else:

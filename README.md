@@ -51,6 +51,23 @@ Para recriar a configuração do zero (ex.: depois de uma atualização):
 grads-monan-setup
 ```
 
+### Saídas do ROMS (grade Arakawa C)
+
+Além do MONAN/MPAS, o programa abre saídas do modelo oceânico ROMS
+(`ocean_avg.nc`, `ocean_his.nc`...), com a grade no próprio arquivo ou num
+arquivo separado:
+
+```
+open ocean_avg.nc swa6_grd.nc
+set lev 0
+d temp
+d u_east;v_north
+```
+
+Variáveis em pontos U/V/PSI são levadas para os pontos RHO, `u_east`/
+`v_north` trazem a corrente rotacionada para leste/norte, e o nível 0 é a
+superfície. Detalhes na seção 14 do `userManual.md`.
+
 ### Shapefiles do mapa de fundo (`draw map`)
 
 Os shapefiles `Continents.*`, usados pelo comando `draw map`, precisam estar

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "GradsMonanApp"
 version = "0.1.0"
-description = "Um clone do GrADS para abrir e plotar saidas do modelo MONAN/MPAS (grade de Voronoi)"
+description = "Um clone do GrADS para abrir e plotar saidas do modelo MONAN/MPAS (grade de Voronoi) e do ROMS (grade Arakawa C)"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "GPL-3.0-or-later" }
