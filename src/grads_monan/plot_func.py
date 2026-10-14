@@ -565,9 +565,55 @@ def _interpolar(setup, valores, pontos_destino):
     reaproveitando a triangulacao ja calculada (ver _obter_triangulacao) em
     vez de reconstrui-la a cada chamada.
     """
+    if setup.get("_grade_estruturada"):
+        tri, indices = _triangulacao_local(setup, pontos_destino)
+        if tri is None:
+            return np.full(len(pontos_destino), np.nan)
+        interpolador = LinearNDInterpolator(tri, np.asarray(valores)[indices])
+        return interpolador(pontos_destino)
     tri = _obter_triangulacao(setup)
     interpolador = LinearNDInterpolator(tri, valores)
     return interpolador(pontos_destino)
+
+def _triangulacao_local(setup, pontos_destino):
+    """
+    Grade estruturada (ROMS): em vez de triangular a grade INTEIRA (centenas
+    de milhares de pontos - lento, e o cache em disco do MONAN nao ajuda
+    quando o mapa e pequeno), triangula so os pontos RHO dentro da caixa
+    que envolve os pontos de destino (um corte, uma grade de streamlines),
+    com uma margem de algumas celulas. Guardada em cache por caixa - um
+    corte vertical reaproveita a mesma triangulacao em todos os niveis.
+    Retorna (Delaunay, indices_dos_pontos_usados) ou (None, None).
+    """
+    g = setup["_grade_estruturada"]
+    passo = g.get("_passo")
+    if passo is None:
+        with np.errstate(all="ignore"):
+            dx = np.nanmedian(np.hypot(np.diff(g["lon2d"], axis=1), np.diff(g["lat2d"], axis=1)))
+            dy = np.nanmedian(np.hypot(np.diff(g["lon2d"], axis=0), np.diff(g["lat2d"], axis=0)))
+        passo = float(np.nanmax([dx, dy, 1e-6]))
+        g["_passo"] = passo
+    margem = 3.0 * passo
+    pd = np.asarray(pontos_destino, dtype=float)
+    caixa = (round(float(np.nanmin(pd[:, 0])) - margem, 6), round(float(np.nanmax(pd[:, 0])) + margem, 6),
+             round(float(np.nanmin(pd[:, 1])) - margem, 6), round(float(np.nanmax(pd[:, 1])) + margem, 6))
+    cache = setup.setdefault("_tri_local", {})
+    if caixa in cache:
+        return cache[caixa]
+    lon = np.asarray(setup["longitudes"])
+    lat = np.asarray(setup["latitudes"])
+    dentro = (lon >= caixa[0]) & (lon <= caixa[1]) & (lat >= caixa[2]) & (lat <= caixa[3])
+    indices = np.nonzero(dentro)[0]
+    resultado = (None, None)
+    if indices.size >= 3:
+        try:
+            resultado = (Delaunay(np.column_stack((lon[indices], lat[indices]))), indices)
+        except Exception:
+            resultado = (None, None)
+    if len(cache) >= 6:
+        cache.pop(next(iter(cache)))
+    cache[caixa] = resultado
+    return resultado
 
 def _grade_regular_interpolada(setup, ax, data):
     """
@@ -755,7 +801,7 @@ def _plotar_perfil_dados(setup, vertical_profile, closest_index):
     elif zgrid_arr is not None and np.mean(np.isfinite(zgrid_arr[closest_index, lev:levf_dados])) >= 0.5:
         # Sem t_iso_levels, mas com zgrid: altura geometrica, menor embaixo, maior em cima
         y_vals = zgrid_arr[closest_index, lev:levf_dados]
-        ylabel = 'Altura (m)'
+        ylabel = 'Profundidade z (m)' if _eh_roms(setup) else 'Altura (m)'
     else:
         if zgrid_arr is not None:
             print("Aviso: zgrid majoritariamente invalido para o ponto selecionado (shape={0}); usando indice de nivel no eixo Y.".format(zgrid_arr.shape))
@@ -884,7 +930,22 @@ def _plotar_corte_dados(setup, data, cbar=None):
         altura = np.full((n_lev, len(eixo_x)), np.nan)
         for k in range(n_lev):
             altura[k, :] = _interpolar(setup, zgrid_arr[:, lev+k], pontos_destino)
-        frac_valida = np.mean(np.isfinite(altura))
+        if _grade_estruturada(setup) is not None:
+            # ROMS: colunas em terra (sem profundidade) ficam na superficie
+            # (z = 0), so para o contourf aceitar a grade 2D - o dado ali
+            # e NaN e aparece hachurado. Pontos isolados sem z (borda da
+            # interpolacao junto a costa) recebem o z do nivel vizinho.
+            colunas_validas = np.isfinite(altura).any(axis=0)
+            for k in range(n_lev):
+                validos = np.isfinite(altura[k, :])
+                faltando = ~validos & colunas_validas
+                if np.any(faltando):
+                    altura[k, faltando] = (np.interp(eixo_x[faltando], eixo_x[validos], altura[k, validos])
+                                           if validos.any() else 0.0)
+            altura[:, ~colunas_validas] = 0.0
+            frac_valida = 1.0 if colunas_validas.any() else 0.0
+        else:
+            frac_valida = np.mean(np.isfinite(altura))
         if frac_valida < 0.5:
             print("Aviso: interpolacao do zgrid majoritariamente invalida ({0:.0f}% dos pontos); usando indice de nivel no eixo Y.".format(frac_valida*100))
             altura = None
@@ -903,7 +964,7 @@ def _plotar_corte_dados(setup, data, cbar=None):
                         colors='none', hatches=['//'])
         ax.set_xlim(np.nanmin(eixo_x_mesh), np.nanmax(eixo_x_mesh))
         ax.set_ylim(np.nanmin(altura), np.nanmax(altura))
-        plt.ylabel('Altura (m)')
+        plt.ylabel('Profundidade z (m)' if _eh_roms(setup) else 'Altura (m)')
     else:
         y = levels[lev:levf]
         cs = ax.contourf(eixo_x, y, corte, levels=_niveis_cor(setup), cmap=cmap)
@@ -930,6 +991,118 @@ def _plotar_corte_dados(setup, data, cbar=None):
         plt.title(Title)
 
     return ax, cbar
+
+def _grade_estruturada(setup):
+    """
+    Geometria da grade ESTRUTURADA (curvilinea), quando o arquivo aberto
+    tem uma - hoje, saidas do ROMS (ver roms.py/files.py): dict com
+    'shape' (eta, xi) dos pontos RHO, 'lon2d'/'lat2d' (centros) e
+    'lon_psi'/'lat_psi' (cantos das celulas). None para a malha nao
+    estruturada do MONAN/MPAS.
+    """
+    g = setup.get("_grade_estruturada") if isinstance(setup, dict) else None
+    return g if g else None
+
+def _eh_roms(setup):
+    """True se o arquivo aberto e de um modelo OCEANICO (ROMS, MOM6) - eixo
+    vertical = profundidade."""
+    g = _grade_estruturada(setup)
+    return g is not None and g.get("modelo") in ("ROMS", "MOM6")
+
+def _mascara_costura(g):
+    """
+    Pontos (eta, xi) vizinhos de um "salto" de longitude maior que 180
+    graus - a linha de data (+-180) numa grade global, e o emaranhado de
+    longitudes da regiao tripolar no Artico (MOM6). Um contourf/pcolormesh
+    ligando esses vizinhos desenharia uma faixa atravessando o mapa
+    inteiro; mascarando um dos dois pontos, o quadrilatero some. Calculada
+    uma vez por grade; None se nao houver salto (ROMS/WRF regionais).
+    """
+    if "_costura" not in g:
+        lon = g["lon2d"]
+        m = np.zeros(lon.shape, dtype=bool)
+        with np.errstate(invalid="ignore"):
+            m[:, :-1] |= np.abs(np.diff(lon, axis=1)) > 180.0
+            m[:-1, :] |= np.abs(np.diff(lon, axis=0)) > 180.0
+            m[:-1, :-1] |= np.abs(lon[1:, 1:] - lon[:-1, :-1]) > 180.0
+            m[:-1, 1:] |= np.abs(lon[1:, :-1] - lon[:-1, 1:]) > 180.0
+        g["_costura"] = m if m.any() else None
+        # o mesmo para as celulas do 'grfill' (cantos lon_psi)
+        lp = g["lon_psi"]
+        cantos = np.stack([lp[:-1, :-1], lp[1:, :-1], lp[:-1, 1:], lp[1:, 1:]])
+        with np.errstate(invalid="ignore"):
+            mc = (np.nanmax(cantos, axis=0) - np.nanmin(cantos, axis=0)) > 180.0
+        g["_costura_celulas"] = mc if mc.any() else None
+    return g["_costura"]
+
+def _campo_2d(setup, data):
+    """(nCells,) -> (eta, xi), com NaN e a costura de longitude mascarados,
+    na grade estruturada."""
+    g = _grade_estruturada(setup)
+    campo = np.ma.masked_invalid(np.asarray(data, dtype=float).reshape(g["shape"]))
+    costura = _mascara_costura(g)
+    if costura is not None:
+        campo = np.ma.masked_where(costura, campo)
+    return campo
+
+def plot_celulas_estruturadas(setup, data):
+    """
+    'gxout grfill' (e 'voronoi'/'hex', que numa grade estruturada dao o
+    mesmo resultado): pinta cada celula RHO com o seu valor, usando os
+    cantos REAIS da celula (pontos PSI) - a grade curvilinea exata do
+    modelo, sem interpolacao. So entram as celulas com os quatro cantos
+    conhecidos ('recorte' da grade): no ROMS/WRF, sem a primeira/ultima
+    linha e coluna; no MOM6 simetrico, todas.
+    """
+    g = _grade_estruturada(setup)
+    campo = np.ma.masked_invalid(np.asarray(data, dtype=float).reshape(g["shape"]))
+    campo = campo[g.get("recorte", (slice(1, -1), slice(1, -1)))]
+    _mascara_costura(g)
+    if g.get("_costura_celulas") is not None and g["_costura_celulas"].shape == campo.shape:
+        campo = np.ma.masked_where(g["_costura_celulas"], campo)
+    if np.all(np.ma.getmaskarray(campo)):
+        print("Aviso: nenhum valor valido (ou dentro do corte - set cut) nesta selecao.")
+        return None
+    ax = plt.gca()
+    niveis = _niveis_cor(setup)
+    norm = None
+    if isinstance(niveis, (list, tuple, np.ndarray)) and len(niveis) > 1:
+        norm = BoundaryNorm(niveis, ncolors=plt.get_cmap(setup["cmap"]).N)
+    im = ax.pcolormesh(g["lon_psi"], g["lat_psi"], campo, cmap=setup["cmap"],
+                       norm=norm, shading="flat")
+    ax.set_xlim(setup["lon_min"], setup["lon_max"])
+    ax.set_ylim(setup["lat_min"], setup["lat_max"])
+    return im
+
+def _amostrar_vetores(setup, u, v, n_setas=45):
+    """
+    Na grade estruturada, desenhar uma seta por ponto (centenas de milhares)
+    e ilegivel e lento: escolhe um passo (stride) em eta/xi para que caibam
+    ~'n_setas' setas na maior direcao da AREA VISIVEL (set lat/lon) e
+    descarta pontos sem dado (terra). Na malha do MONAN, devolve tudo como
+    antes. Retorna (lon, lat, u, v) 1-D.
+    """
+    lon = np.asarray(setup["longitudes"])
+    lat = np.asarray(setup["latitudes"])
+    u = np.asarray(u, dtype=float)
+    v = np.asarray(v, dtype=float)
+    g = _grade_estruturada(setup)
+    if g is None:
+        return lon, lat, u, v
+    forma = g["shape"]
+    lon2, lat2 = g["lon2d"], g["lat2d"]
+    u2, v2 = u.reshape(forma), v.reshape(forma)
+    dentro = ((lon2 >= min(setup["lon_min"], setup["lon_max"])) & (lon2 <= max(setup["lon_min"], setup["lon_max"])) &
+              (lat2 >= min(setup["lat_min"], setup["lat_max"])) & (lat2 <= max(setup["lat_min"], setup["lat_max"])))
+    linhas = np.nonzero(dentro.any(axis=1))[0]
+    colunas = np.nonzero(dentro.any(axis=0))[0]
+    if linhas.size == 0 or colunas.size == 0:
+        return lon[:0], lat[:0], u[:0], v[:0]
+    passo = max(1, int(np.ceil(max(linhas.size, colunas.size) / float(n_setas))))
+    sl = (slice(linhas[0], linhas[-1] + 1, passo), slice(colunas[0], colunas[-1] + 1, passo))
+    lo, la, uu, vv = lon2[sl].ravel(), lat2[sl].ravel(), u2[sl].ravel(), v2[sl].ravel()
+    ok = np.isfinite(uu) & np.isfinite(vv) & dentro[sl].ravel()
+    return lo[ok], la[ok], uu[ok], vv[ok]
 
 def _obter_arvore_celulas(setup):
     """
@@ -1414,7 +1587,33 @@ def plot_var(setup, var, cbar=None):
     plt.xlim(lon_min, lon_max)  # Limitar o eixo X (longitude)
     plt.ylim(lat_min, lat_max)  # Limitar o eixo Y (latitude)
 
-    if gxout == "shaded":
+    estruturada = _grade_estruturada(setup) is not None
+
+    if estruturada and gxout in ("shaded", "contour"):
+        # Grade estruturada (ROMS): contourf/contour direto sobre as
+        # coordenadas 2D dos pontos RHO - sem triangulacao/interpolacao.
+        if np.all(np.isnan(data)):
+            print("Aviso: nenhum valor valido (ou dentro do corte - set cut) nesta selecao.")
+        else:
+            g = _grade_estruturada(setup)
+            campo = _campo_2d(setup, data)
+            if gxout == "shaded":
+                cs = ax.contourf(g["lon2d"], g["lat2d"], campo, levels=_niveis_cor(setup), cmap=cmap)
+                cbar = plt.colorbar(cs, ax=ax, label=label, **_kwargs_colorbar(setup))
+                _aplicar_rotulo_cbar(setup, cbar)
+            else:
+                cs = ax.contour(g["lon2d"], g["lat2d"], campo, levels=_niveis_cor(setup),
+                                **_kwargs_contour_linhas(setup, cmap))
+                textos = plt.clabel(cs, inline=True, fontsize=setup.get("contour_font_size", 10))
+                _aplicar_estilo_contorno_labels(setup, textos)
+            ax.set_xlim(lon_min, lon_max)
+            ax.set_ylim(lat_min, lat_max)
+    elif estruturada and gxout in ("grfill", "voronoi", "hex"):
+        coll = plot_celulas_estruturadas(setup, data)
+        if coll is not None:
+            cbar = plt.colorbar(coll, ax=ax, label=label, **_kwargs_colorbar(setup))
+            _aplicar_rotulo_cbar(setup, cbar)
+    elif gxout == "shaded":
         # Preenchido, interpolando para uma grade regular (reaproveitando a
         # triangulacao em cache) e usando o contourf de GRADE REGULAR do
         # matplotlib, bem mais rapido que o tricontourf para malhas grandes.
@@ -1440,7 +1639,7 @@ def plot_var(setup, var, cbar=None):
                                  **_kwargs_contour_linhas(setup, cmap))
                 textos = plt.clabel(cs, inline=True, fontsize=setup.get("contour_font_size", 10))
                 _aplicar_estilo_contorno_labels(setup, textos)
-    elif gxout == "voronoi":
+    elif gxout in ("voronoi", "grfill"):
         # Rasteriza por nearest-neighbor (celula mais proxima de cada
         # pixel) - rapido mesmo em malhas grandes, mas sai como "pixels"
         # quadrados, nao os hexagonos/pentagonos reais da malha.
@@ -1508,7 +1707,21 @@ def plot_vector_field(setup, var_u, var_v):
     if lat_min != lat_max:
         ax.set_ylim(lat_min, lat_max)
 
-    ax.quiver(longitudes, latitudes, u, v, scale=350, color='k')
+    if _grade_estruturada(setup) is not None:
+        # Grade estruturada (ROMS/WRF): setas amostradas e escala
+        # automatica (correntes do ROMS ~ 1 m/s, bem menores que vento - a
+        # escala fixa do MONAN as sumiria).
+        lo, la, uu, vv = _amostrar_vetores(setup, u, v)
+        q = ax.quiver(lo, la, uu, vv, color='k')
+        try:
+            ref = float(np.nanpercentile(np.hypot(uu, vv), 90)) if uu.size else 0.0
+            if ref > 0:
+                ref = float("{0:.1g}".format(ref))
+                ax.quiverkey(q, 0.06, 0.04, ref, "{0:g} m/s".format(ref), labelpos='E', coordinates='axes')
+        except Exception:
+            pass
+    else:
+        ax.quiver(longitudes, latitudes, u, v, scale=350, color='k')
     plt.xlabel('Longitude')
     plt.ylabel('Latitude')
     _aplicar_rotulos_eixos(setup, plt.gca())
@@ -1546,7 +1759,8 @@ def plot_barbs(setup, var1, var2):
     if lat_min != lat_max:
         ax.set_ylim(lat_min, lat_max)
 
-    ax.barbs(longitudes, latitudes, u, v, length=6)
+    lo, la, uu, vv = _amostrar_vetores(setup, u, v, n_setas=30)
+    ax.barbs(lo, la, uu, vv, length=6)
     plt.xlabel('Longitude')
     plt.ylabel('Latitude')
     _aplicar_rotulos_eixos(setup, plt.gca())
@@ -1567,8 +1781,12 @@ def plot_streams(setup, u, v):
     lat = setup["latitudes"]
     lon = setup["longitudes"]
     
-    u_data = u[time_sel, :]
-    v_data = v[time_sel, :]
+    if len(u.shape) == 2:
+        u_data = u[time_sel, :]
+        v_data = v[time_sel, :]
+    else:
+        u_data = u[time_sel, :, lev]
+        v_data = v[time_sel, :, lev]
 
     if not _tamanho_malha_ok("u;v", len(u_data), len(lon)):
         return None
@@ -1581,8 +1799,21 @@ def plot_streams(setup, u, v):
     # Interpola u e v para a grade regular (reaproveitando a triangulacao
     # da malha, em cache - ver _obter_triangulacao)
     pontos_destino = np.column_stack((lon_mesh.ravel(), lat_mesh.ravel()))
-    u_interp = _interpolar(setup, u_data, pontos_destino).reshape(lon_mesh.shape)
-    v_interp = _interpolar(setup, v_data, pontos_destino).reshape(lon_mesh.shape)
+    if _grade_estruturada(setup) is not None:
+        # ROMS: a grade alvo (100x50) e bem mais grossa que a do modelo -
+        # o ponto RHO mais proximo basta, e evita triangular a grade toda.
+        # Fora da grade (mais longe que ~2 celulas) ou em terra: NaN.
+        arvore = _obter_arvore_celulas(setup)
+        dist, idx = arvore.query(pontos_destino)
+        g = _grade_estruturada(setup)
+        if g.get("_passo") is None:
+            _triangulacao_local(setup, pontos_destino[:1])
+        longe = dist > 2.0 * g["_passo"]
+        u_interp = np.where(longe, np.nan, np.asarray(u_data, dtype=float)[idx]).reshape(lon_mesh.shape)
+        v_interp = np.where(longe, np.nan, np.asarray(v_data, dtype=float)[idx]).reshape(lon_mesh.shape)
+    else:
+        u_interp = _interpolar(setup, u_data, pontos_destino).reshape(lon_mesh.shape)
+        v_interp = _interpolar(setup, v_data, pontos_destino).reshape(lon_mesh.shape)
     
     # Configuração do plot
     ax = plt.gca()

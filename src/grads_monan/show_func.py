@@ -44,7 +44,22 @@ def _mostrar_info_arquivo(setup):
     variables = setup["variables"]
 
     print("Dimensoes:")
-    print("  Numero de celulas (nCells): {0}".format(len(setup.get("latitudes", []))))
+    g = setup.get("_grade_estruturada")
+    if g:
+        if g.get("modelo") == "MOM6":
+            print("  Grade MOM6 (Arakawa C): {0} x {1} pontos h (yh x xh) = {2} pontos".format(
+                g["shape"][0], g["shape"][1], len(setup.get("latitudes", []))))
+            print("  (u/v/q defasados sao levados para os pontos h; 'uo_east'/'vo_north' = correntes rotacionadas para leste/norte)")
+        elif g.get("modelo") == "WRF":
+            print("  Grade WRF (Arakawa C): {0} x {1} pontos de massa (south_north x west_east) = {2} pontos".format(
+                g["shape"][0], g["shape"][1], len(setup.get("latitudes", []))))
+            print("  (U/V defasados sao levados para os pontos de massa; 'U_east'/'V_north' e 'U10_east'/'V10_north' = vento rotacionado para leste/norte)")
+        else:
+            print("  Grade {0} (Arakawa C, curvilinea): {1} x {2} pontos RHO (eta_rho x xi_rho) = {3} pontos".format(
+                g.get("modelo", ""), g["shape"][0], g["shape"][1], len(setup.get("latitudes", []))))
+            print("  (variaveis em pontos U/V/PSI sao levadas para RHO; 'u_east'/'v_north' = correntes rotacionadas para leste/norte)")
+    else:
+        print("  Numero de celulas (nCells): {0}".format(len(setup.get("latitudes", []))))
     niveis = descritores_disponiveis(setup)
     if niveis:
         print("  Niveis verticais:")
@@ -107,7 +122,7 @@ def _mostrar_niveis(setup, filtro=None):
         print("[{0}] dimensao '{1}', {2} niveis (indices 0 a {3}) - valores de: {4}".format(
             d["nome_tipo"], d["dim"], d["n"], d["n"] - 1, d["fonte"]))
         for i in range(d["n"]):
-            print("  {0} - {1}".format(i, formatar_nivel(d, i) if d["tipo"] in ("pressao", "solo") else
+            print("  {0} - {1}".format(i, formatar_nivel(d, i) if (d["tipo"] in ("pressao", "solo") or d.get("unidade") == "m") else
                                        ("indice {0}".format(i) if d["fonte"] != "zgrid" else "indice {0} (altura em m: zgrid, varia por celula)".format(i))))
 
 def _mostrar_lev(setup):

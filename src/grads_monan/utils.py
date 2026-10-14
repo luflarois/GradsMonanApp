@@ -370,6 +370,34 @@ def _montar_descritor(variables, dim, n):
     elif tipo == "altura":
         desc["fonte"] = "zgrid" if "zgrid" in variables else "indice"
     desc["nome_tipo"] = _NOME_TIPO_NIVEL[desc["tipo"]]
+    if desc["tipo"] == "altura" and str(dim).endswith("P1"):
+        desc["nome_tipo"] += " (interfaces)"
+    modelo = getattr(variables, "modelo", None)
+    if modelo in ("ROMS", "MOM6") and desc["tipo"] == "altura":
+        # Modelos oceanicos (roms.py, mom6.py): indice 0 = SUPERFICIE; 'zgrid'
+        # traz a profundidade z (m, negativa) de cada nivel em cada ponto.
+        desc["rotulo"] = "Profundidade z (m)"
+        if dim == "nVertLevelsP1":
+            desc["nome_tipo"] = ("nivel s_w do ROMS (interfaces, 0 = superficie)" if modelo == "ROMS"
+                                 else "interfaces z_i do MOM6 (0 = superficie)")
+            desc["fonte"] = "indice"
+        else:
+            desc["nome_tipo"] = ("nivel s do ROMS (0 = superficie)" if modelo == "ROMS"
+                                 else "camada z_l do MOM6 (0 = superficie)")
+            # Profundidade MEDIA (sobre os pontos de oceano) de cada nivel -
+            # no ROMS o nivel s acompanha o fundo, entao a profundidade real
+            # varia de ponto a ponto (cortes/perfis usam o 'zgrid' completo).
+            try:
+                import warnings
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    zm = np.nanmean(np.asarray(variables["zgrid"][:], dtype=float), axis=0)
+                if zm.shape == (n,):
+                    desc.update(valores=zm, unidade="m",
+                                fonte="zgrid (profundidade {0})".format(
+                                    "calculada da coordenada s" if modelo == "ROMS" else "de z_l"))
+            except Exception:
+                pass
     return desc
 
 def descritor_nivel(setup, var=None, variables=None):
@@ -443,6 +471,8 @@ def formatar_nivel(desc, i):
         return "{0:.1f} hPa".format(v)
     if desc["tipo"] == "solo" and desc["unidade"] == "m":
         return "{0:.3f} m de profundidade".format(v)
+    if desc["tipo"] == "altura" and desc.get("unidade") == "m":
+        return "z medio = {0:.1f} m".format(v)
     return "indice {0}".format(i)
 
 def checar_niveis(setup, desc, nome_var):

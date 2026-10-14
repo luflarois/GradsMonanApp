@@ -51,6 +51,47 @@ Para recriar a configuração do zero (ex.: depois de uma atualização):
 grads-monan-setup
 ```
 
+### Saídas do ROMS (grade Arakawa C)
+
+Além do MONAN/MPAS, o programa abre saídas do modelo oceânico ROMS
+(`ocean_avg.nc`, `ocean_his.nc`...), com a grade no próprio arquivo ou num
+arquivo separado:
+
+```
+open ocean_avg.nc swa6_grd.nc
+set lev 0
+d temp
+d u_east;v_north
+```
+
+Variáveis em pontos U/V/PSI são levadas para os pontos RHO, `u_east`/
+`v_north` trazem a corrente rotacionada para leste/norte, e o nível 0 é a
+superfície. Detalhes na seção 14 do `userManual.md`.
+
+### Saídas do WRF (wrfout, grade Arakawa C)
+
+```
+open wrfout_d01_2021-07-01_12:00:00
+d T2-273.15
+d U10_east;V10_north
+```
+
+`U`/`V` defasados são levados para os pontos de massa, `U_east`/`V_north`
+trazem o vento rotacionado para leste/norte, e há derivadas prontas
+(`pressure`, `theta`, `tk`). Detalhes na seção 15 do `userManual.md`.
+
+### Saídas do MOM6 (grade tripolar)
+
+```
+open tempsalt.nc ocean_static.nc
+set t 300
+d temp
+```
+
+A posição real da grade tripolar vem do `ocean_static.nc`; cada tempo do
+arquivo vira uma entrada de `show files` (`set t <n>` escolhe o tempo), lida
+sob demanda. Detalhes nas seções 16 e 17 do `userManual.md`.
+
 ### Shapefiles do mapa de fundo (`draw map`)
 
 Os shapefiles `Continents.*`, usados pelo comando `draw map`, precisam estar
