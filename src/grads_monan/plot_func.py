@@ -1004,26 +1004,63 @@ def _grade_estruturada(setup):
     return g if g else None
 
 def _eh_roms(setup):
-    """True se o arquivo aberto e do ROMS (eixo vertical = profundidade)."""
+    """True se o arquivo aberto e de um modelo OCEANICO (ROMS, MOM6) - eixo
+    vertical = profundidade."""
     g = _grade_estruturada(setup)
-    return g is not None and g.get("modelo") == "ROMS"
+    return g is not None and g.get("modelo") in ("ROMS", "MOM6")
+
+def _mascara_costura(g):
+    """
+    Pontos (eta, xi) vizinhos de um "salto" de longitude maior que 180
+    graus - a linha de data (+-180) numa grade global, e o emaranhado de
+    longitudes da regiao tripolar no Artico (MOM6). Um contourf/pcolormesh
+    ligando esses vizinhos desenharia uma faixa atravessando o mapa
+    inteiro; mascarando um dos dois pontos, o quadrilatero some. Calculada
+    uma vez por grade; None se nao houver salto (ROMS/WRF regionais).
+    """
+    if "_costura" not in g:
+        lon = g["lon2d"]
+        m = np.zeros(lon.shape, dtype=bool)
+        with np.errstate(invalid="ignore"):
+            m[:, :-1] |= np.abs(np.diff(lon, axis=1)) > 180.0
+            m[:-1, :] |= np.abs(np.diff(lon, axis=0)) > 180.0
+            m[:-1, :-1] |= np.abs(lon[1:, 1:] - lon[:-1, :-1]) > 180.0
+            m[:-1, 1:] |= np.abs(lon[1:, :-1] - lon[:-1, 1:]) > 180.0
+        g["_costura"] = m if m.any() else None
+        # o mesmo para as celulas do 'grfill' (cantos lon_psi)
+        lp = g["lon_psi"]
+        cantos = np.stack([lp[:-1, :-1], lp[1:, :-1], lp[:-1, 1:], lp[1:, 1:]])
+        with np.errstate(invalid="ignore"):
+            mc = (np.nanmax(cantos, axis=0) - np.nanmin(cantos, axis=0)) > 180.0
+        g["_costura_celulas"] = mc if mc.any() else None
+    return g["_costura"]
 
 def _campo_2d(setup, data):
-    """(nCells,) -> (eta, xi), com NaN mascarado, na grade estruturada."""
+    """(nCells,) -> (eta, xi), com NaN e a costura de longitude mascarados,
+    na grade estruturada."""
     g = _grade_estruturada(setup)
-    return np.ma.masked_invalid(np.asarray(data, dtype=float).reshape(g["shape"]))
+    campo = np.ma.masked_invalid(np.asarray(data, dtype=float).reshape(g["shape"]))
+    costura = _mascara_costura(g)
+    if costura is not None:
+        campo = np.ma.masked_where(costura, campo)
+    return campo
 
 def plot_celulas_estruturadas(setup, data):
     """
     'gxout grfill' (e 'voronoi'/'hex', que numa grade estruturada dao o
     mesmo resultado): pinta cada celula RHO com o seu valor, usando os
     cantos REAIS da celula (pontos PSI) - a grade curvilinea exata do
-    modelo, sem interpolacao. As celulas da primeira/ultima linha e coluna
-    (fora dos pontos PSI, so usadas como contorno pelo ROMS) nao entram.
+    modelo, sem interpolacao. So entram as celulas com os quatro cantos
+    conhecidos ('recorte' da grade): no ROMS/WRF, sem a primeira/ultima
+    linha e coluna; no MOM6 simetrico, todas.
     """
     g = _grade_estruturada(setup)
-    campo = _campo_2d(setup, data)[1:-1, 1:-1]
-    if np.all(campo.mask):
+    campo = np.ma.masked_invalid(np.asarray(data, dtype=float).reshape(g["shape"]))
+    campo = campo[g.get("recorte", (slice(1, -1), slice(1, -1)))]
+    _mascara_costura(g)
+    if g.get("_costura_celulas") is not None and g["_costura_celulas"].shape == campo.shape:
+        campo = np.ma.masked_where(g["_costura_celulas"], campo)
+    if np.all(np.ma.getmaskarray(campo)):
         print("Aviso: nenhum valor valido (ou dentro do corte - set cut) nesta selecao.")
         return None
     ax = plt.gca()

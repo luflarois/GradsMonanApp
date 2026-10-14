@@ -16,6 +16,8 @@ from .plot_func import set_ion, atualizar_titulo_janela
 from .utils import normalize_lon, sem_mascara, assinatura_malha
 from .roms import eh_roms, abrir_roms, tempos_roms
 from .wrf import eh_wrf, abrir_wrf, tempos_wrf
+from .mom6 import eh_mom6, abrir_mom6, tempos_mom6
+from .roms import VisaoTempo
 
 def file_open(fileName, setup_toml, gridFile=None, setup_anterior=None):
 
@@ -28,13 +30,24 @@ def file_open(fileName, setup_toml, gridFile=None, setup_anterior=None):
             print("Please, check it!")
             return None, None
         grade_estruturada = None
-        modelo_c = "ROMS" if eh_roms(dataset) else ("WRF" if eh_wrf(dataset) else None)
+        entradas = None
+        if eh_roms(dataset):
+            modelo_c = "ROMS"
+        elif eh_wrf(dataset):
+            modelo_c = "WRF"
+        elif eh_mom6(dataset):
+            modelo_c = "MOM6"
+        else:
+            modelo_c = None
         if modelo_c is not None:
             # Saida de modelo em grade Arakawa C estruturada - ROMS (oceano,
-            # roms.py) ou WRF (atmosfera, wrf.py): a grade e apresentada ao
-            # resto do programa como uma "malha" de pontos de massa (RHO),
-            # com as variaveis defasadas (U/V/PSI) ja levadas para eles.
-            abrir_c, tempos_c = (abrir_roms, tempos_roms) if modelo_c == "ROMS" else (abrir_wrf, tempos_wrf)
+            # roms.py), WRF (atmosfera, wrf.py) ou MOM6 (oceano, grade
+            # tripolar, mom6.py): a grade e apresentada ao resto do programa
+            # como uma "malha" de pontos de massa (RHO/h), com as variaveis
+            # defasadas (U/V/PSI/q) ja levadas para eles.
+            abrir_c, tempos_c = {"ROMS": (abrir_roms, tempos_roms),
+                                 "WRF": (abrir_wrf, tempos_wrf),
+                                 "MOM6": (abrir_mom6, tempos_mom6)}[modelo_c]
             dataset_bruto = dataset
             try:
                 dataset, grade_usada = abrir_c(dataset_bruto, fileName, gridFile)
@@ -57,8 +70,10 @@ def file_open(fileName, setup_toml, gridFile=None, setup_anterior=None):
                 "lat2d"   : grade.lat_rho,
                 "lon_psi" : normalize_lon(grade.lon_psi),
                 "lat_psi" : grade.lat_psi,
+                # fatia do campo (eta, xi) cujas celulas tem os 4 cantos em
+                # lon_psi/lat_psi (para o 'gxout grfill')
+                "recorte" : getattr(grade, "recorte_celulas", (slice(1, -1), slice(1, -1))),
             }
-            variables = dataset.variables
 
             datas, time_variable, time_units = tempos_c(dataset)
             if datas:
@@ -67,10 +82,28 @@ def file_open(fileName, setup_toml, gridFile=None, setup_anterior=None):
                 DataDado = datas[0].strftime("%Y-%m-%dT%H")
             else:
                 print("Aviso: tempo ({0}) ausente ou nao reconhecido em ".format(
-                    "ocean_time" if modelo_c == "ROMS" else "Times/XTIME"), fileName)
+                    {"ROMS": "ocean_time", "WRF": "Times/XTIME", "MOM6": "time"}[modelo_c]), fileName)
                 time = [0]
                 time_str = ""
                 DataDado = "desconhecida"
+
+            # Cada TEMPO do arquivo vira uma entrada propria em 'files'
+            # (VisaoTempo, roms.py), lida sob demanda: 'set t <n>' escolhe o
+            # tempo e 'set t <ini> <fim>' faz serie/animacao - igual a varios
+            # arquivos de um tempo so do MONAN. Arquivos com centenas de
+            # tempos (MOM6) nao sao carregados inteiros na memoria.
+            n_t = max(int(dataset.n_tempos), 1)
+            entradas = []
+            for k in range(n_t):
+                dk = time[k] if (datas and k < len(time)) else None
+                entradas.append({
+                    "dataset"  : VisaoTempo(dataset, k),
+                    "time"     : [dk] if dk is not None else [k],
+                    "time_str" : dk.strftime("%Y-%m-%d_%H:%M:%S") if dk is not None else "",
+                    "DataDado" : dk.strftime("%Y-%m-%dT%H") if dk is not None else
+                                 ("tempo {0}".format(k + 1) if n_t > 1 else "desconhecida"),
+                })
+            variables = entradas[0]["dataset"].variables
 
             if "nVertLevels" in dataset.dimensions:
                 levels = list(range(dataset.dimensions["nVertLevels"].size))
@@ -80,6 +113,13 @@ def file_open(fileName, setup_toml, gridFile=None, setup_anterior=None):
             if modelo_c == "ROMS":
                 print("Arquivo ROMS (grade Arakawa C): {0} x {1} pontos RHO (eta x xi), {2} nivel(is) s, {3} tempo(s).".format(
                     grade.shape[0], grade.shape[1], len(levels), len(time)))
+            elif modelo_c == "MOM6":
+                print("Arquivo MOM6 (grade Arakawa C{0}): {1} x {2} pontos h (yh x xh), {3} nivel(is), {4} tempo(s).".format(
+                    ", global" if grade.periodico_x else "", grade.shape[0], grade.shape[1], len(levels), len(time)))
+                if grade.nominal:
+                    print("Aviso: sem o arquivo estatico (ocean_static.nc, com geolon/geolat) - usando as coordenadas")
+                    print("NOMINAIS xh/yh. Numa grade tripolar elas estao erradas ao norte de ~65N; informe o estatico:")
+                    print("  open {0} <ocean_static.nc>".format(fileName))
             else:
                 print("Arquivo WRF (grade Arakawa C): {0} x {1} pontos de massa (south_north x west_east), {2} nivel(is) eta, {3} tempo(s).".format(
                     grade.shape[0], grade.shape[1], len(levels), len(time)))
@@ -237,25 +277,15 @@ def file_open(fileName, setup_toml, gridFile=None, setup_anterior=None):
 
             set_ion()
 
-            file_info = {
-                "index"        : novo_indice,
-                "fileName"     : fileName,
-                "gridFileName" : (None if new_file == fileName else new_file),
-                "dataset"      : dataset,
-                "time"         : time,
-                "time_variable": time_variable,
-                "time_units"   : time_units,
-                "time_str"     : time_str,
-                "DataDado"     : DataDado,
-            }
-            setup["files"].append(file_info)
+            _registrar_entradas(setup, novo_indice, fileName, new_file, dataset, time,
+                                time_variable, time_units, time_str, DataDado, entradas)
             # Titulo da janela ja reflete o(s) arquivo(s) recem-aberto(s)
             # (secao 2.1 do manual - mesmo formato usado por 'set t'/'set
             # lat'/'set lon'/'set lev'), sem precisar de nenhum 'set'
             # antes.
             atualizar_titulo_janela(setup)
 
-            return dataset, setup
+            return (entradas[0]["dataset"] if entradas else dataset), setup
 
         novo_indice = 1
 
@@ -340,18 +370,11 @@ def file_open(fileName, setup_toml, gridFile=None, setup_anterior=None):
 
         set_ion()
 
-        file_info = {
-            "index"        : novo_indice,
-            "fileName"     : fileName,
-            "gridFileName" : (None if new_file == fileName else new_file),
-            "dataset"      : dataset,
-            "time"         : time,
-            "time_variable": time_variable,
-            "time_units"   : time_units,
-            "time_str"     : time_str,
-            "DataDado"     : DataDado,
-        }
-        setup["files"].append(file_info)
+        if entradas:
+            # grade C: o tempo dentro de cada entrada e sempre o indice 0
+            setup["time_sel"] = 0
+        _registrar_entradas(setup, novo_indice, fileName, new_file, dataset, time,
+                            time_variable, time_units, time_str, DataDado, entradas)
         # Titulo da janela ja reflete o arquivo recem-aberto (secao 2.1 do
         # manual - mesmo formato usado por 'set t'/'set lat'/'set lon'/
         # 'set lev'), sem precisar de nenhum 'set' antes.
@@ -362,7 +385,35 @@ def file_open(fileName, setup_toml, gridFile=None, setup_anterior=None):
         print("Verifique o caminho ou o arquivo!")
         return None, None
 
-    return dataset,setup
+    return (entradas[0]["dataset"] if entradas else dataset), setup
+
+def _registrar_entradas(setup, novo_indice, fileName, new_file, dataset, time,
+                        time_variable, time_units, time_str, DataDado, entradas):
+    """
+    Acrescenta o arquivo recem-aberto a setup['files']. Arquivos de grade C
+    ('entradas' != None) ganham uma entrada por TEMPO (indices consecutivos
+    a partir de 'novo_indice'); os demais (MONAN), uma unica entrada.
+    """
+    grade_file = None if new_file == fileName else new_file
+    if not entradas:
+        entradas = [{"dataset": dataset, "time": time, "time_str": time_str, "DataDado": DataDado}]
+    for k, e in enumerate(entradas):
+        setup["files"].append({
+            "index"        : novo_indice + k,
+            "fileName"     : fileName,
+            "gridFileName" : grade_file,
+            "dataset"      : e["dataset"],
+            "time"         : e["time"],
+            "time_variable": time_variable,
+            "time_units"   : time_units,
+            "time_str"     : e["time_str"],
+            "DataDado"     : e["DataDado"],
+            "tempo_no_arquivo": (k + 1) if len(entradas) > 1 else None,
+        })
+    if len(entradas) > 1:
+        print("Os {0} tempos deste arquivo viraram as entradas {1} a {2} ('show files'): 'set t <n>' escolhe o tempo,".format(
+            len(entradas), novo_indice, novo_indice + len(entradas) - 1))
+        print("'set t <ini> <fim>' faz serie/animacao.")
 
 _SEP_LIMITES_RE = re.compile(r'[,;\s]+')
 

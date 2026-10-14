@@ -80,6 +80,18 @@ d U10_east;V10_north
 trazem o vento rotacionado para leste/norte, e há derivadas prontas
 (`pressure`, `theta`, `tk`). Detalhes na seção 15 do `userManual.md`.
 
+### Saídas do MOM6 (grade tripolar)
+
+```
+open tempsalt.nc ocean_static.nc
+set t 300
+d temp
+```
+
+A posição real da grade tripolar vem do `ocean_static.nc`; cada tempo do
+arquivo vira uma entrada de `show files` (`set t <n>` escolhe o tempo), lida
+sob demanda. Detalhes nas seções 16 e 17 do `userManual.md`.
+
 ### Shapefiles do mapa de fundo (`draw map`)
 
 Os shapefiles `Continents.*`, usados pelo comando `draw map`, precisam estar

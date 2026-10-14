@@ -71,6 +71,8 @@ class GradeWrf(object):
     pontos = _PONTOS_WRF
     dims_verticais = _DIMS_VERTICAIS_WRF
     inverter_niveis = False
+    periodico_x = False
+    rolagem_x = 0
 
     def __init__(self, dados, grade=None):
         fontes = [ds for ds in (grade, dados) if ds is not None]
@@ -179,6 +181,10 @@ class DatasetWrf(object):
             if dim_wrf in dados.dimensions:
                 self.dimensions[dim_nova] = _Dim(dim_nova, dados.dimensions[dim_wrf].size)
 
+    @property
+    def n_tempos(self):
+        return self._n_tempos()
+
     def _n_tempos(self):
         if "Time" in self._ds.dimensions:
             return int(self._ds.dimensions["Time"].size)
@@ -198,20 +204,20 @@ class DatasetWrf(object):
             if vu.shape != vv.shape:
                 continue
 
-            def rot(vu=vu, vv=vv, leste=True):
-                u = vu.valores()
-                v = vv.valores()
-                c = cos_a.reshape((1, -1) + (1,) * (u.ndim - 2))
-                s = sin_a.reshape((1, -1) + (1,) * (u.ndim - 2))
+            def rot(k, vu=vu, vv=vv, leste=True):
+                u = vu.tempo(k)
+                v = vv.tempo(k)
+                c = cos_a.reshape((-1,) + (1,) * (u.ndim - 1))
+                s = sin_a.reshape((-1,) + (1,) * (u.ndim - 1))
                 return u * c - v * s if leste else v * c + u * s
 
             unid = vu.units if "units" in vu.ncattrs() else "m s-1"
             self.variables[nome_e] = self._virtual(
-                nome_e, lambda f=rot: f(leste=True), vu,
+                nome_e, lambda k, f=rot: f(k, leste=True), vu,
                 {"description": "earth-relative eastward wind (from {0}, rotated with SINALPHA/COSALPHA)".format(nu),
                  "units": unid})
             self.variables[nome_n] = self._virtual(
-                nome_n, lambda f=rot: f(leste=False), vv,
+                nome_n, lambda k, f=rot: f(k, leste=False), vv,
                 {"description": "earth-relative northward wind (from {0}, rotated with SINALPHA/COSALPHA)".format(nv),
                  "units": unid})
 
@@ -220,17 +226,17 @@ class DatasetWrf(object):
         if "P" in v and "PB" in v and "pressure" not in v:
             p, pb = v["P"], v["PB"]
             v["pressure"] = self._virtual(
-                "pressure", lambda: (p.valores() + pb.valores()) / 100.0, p,
+                "pressure", lambda k: (p.tempo(k) + pb.tempo(k)) / 100.0, p,
                 {"description": "full pressure (P+PB)", "units": "hPa"})
         if "T" in v and "theta" not in v:
             t = v["T"]
             v["theta"] = self._virtual(
-                "theta", lambda: t.valores() + 300.0, t,
+                "theta", lambda k: t.tempo(k) + 300.0, t,
                 {"description": "potential temperature (T+300)", "units": "K"})
             if "pressure" in v and "tk" not in v:
                 pr = v["pressure"]
                 v["tk"] = self._virtual(
-                    "tk", lambda: (t.valores() + 300.0) * (pr.valores() / 1000.0) ** (287.0 / 1004.5), t,
+                    "tk", lambda k: (t.tempo(k) + 300.0) * (pr.tempo(k) / 1000.0) ** (287.0 / 1004.5), t,
                     {"description": "air temperature", "units": "K"})
 
     def _criar_zgrid(self):
@@ -240,10 +246,11 @@ class DatasetWrf(object):
         grade = self.grade
         n = ds.dimensions["bottom_top_stag"].size if "bottom_top_stag" in ds.dimensions else ds.variables["PH"].shape[1]
 
-        def calc():
-            ph = _float_nan(ds.variables["PH"][:])
-            phb = _float_nan(ds.variables["PHB"][:])
-            z = (ph[0] + phb[0]) / _G if ph.ndim == 4 else (ph + phb) / _G   # (N+1, Y, X)
+        def calc(k=0):
+            vph, vphb = ds.variables["PH"], ds.variables["PHB"]
+            ph = _float_nan(vph[0] if len(vph.shape) == 4 else vph[:])      # so o 1o tempo
+            phb = _float_nan(vphb[0] if len(vphb.shape) == 4 else vphb[:])
+            z = (ph + phb) / _G                                             # (N+1, Y, X)
             return np.ascontiguousarray(z.reshape(z.shape[0], -1).T)        # (nCells, N+1)
 
         self.variables["zgrid"] = VariavelGradeC(

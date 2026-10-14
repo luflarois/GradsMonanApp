@@ -203,7 +203,7 @@ def _print_level_info(setup, l, lf=None):
         elif d["tipo"] == "altura" and "zgrid" in variables:
             try:
                 altura = _altura_media_zgrid(variables["zgrid"], d["n"], l)
-                if getattr(variables, "modelo", None) == "ROMS":
+                if getattr(variables, "modelo", None) in ("ROMS", "MOM6"):
                     partes.append("{0}: profundidade media = {1:.1f} m".format(d["nome_tipo"], altura))
                 else:
                     partes.append("{0}: zgrid medio = {1:.1f} m".format(d["nome_tipo"], altura))

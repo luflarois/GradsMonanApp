@@ -372,18 +372,21 @@ def _montar_descritor(variables, dim, n):
     desc["nome_tipo"] = _NOME_TIPO_NIVEL[desc["tipo"]]
     if desc["tipo"] == "altura" and str(dim).endswith("P1"):
         desc["nome_tipo"] += " (interfaces)"
-    if getattr(variables, "modelo", None) == "ROMS" and desc["tipo"] == "altura":
-        # ROMS (roms.py): niveis s, com o indice 0 = SUPERFICIE; 'zgrid' traz
-        # a profundidade z (m, negativa) de cada nivel em cada ponto.
+    modelo = getattr(variables, "modelo", None)
+    if modelo in ("ROMS", "MOM6") and desc["tipo"] == "altura":
+        # Modelos oceanicos (roms.py, mom6.py): indice 0 = SUPERFICIE; 'zgrid'
+        # traz a profundidade z (m, negativa) de cada nivel em cada ponto.
         desc["rotulo"] = "Profundidade z (m)"
         if dim == "nVertLevelsP1":
-            desc["nome_tipo"] = "nivel s_w do ROMS (interfaces, 0 = superficie)"
+            desc["nome_tipo"] = ("nivel s_w do ROMS (interfaces, 0 = superficie)" if modelo == "ROMS"
+                                 else "interfaces z_i do MOM6 (0 = superficie)")
             desc["fonte"] = "indice"
         else:
-            desc["nome_tipo"] = "nivel s do ROMS (0 = superficie)"
-            # Profundidade MEDIA (sobre os pontos de oceano) de cada nivel s -
-            # o nivel s acompanha o fundo, entao a profundidade real varia de
-            # ponto a ponto (cortes/perfis usam o 'zgrid' completo).
+            desc["nome_tipo"] = ("nivel s do ROMS (0 = superficie)" if modelo == "ROMS"
+                                 else "camada z_l do MOM6 (0 = superficie)")
+            # Profundidade MEDIA (sobre os pontos de oceano) de cada nivel -
+            # no ROMS o nivel s acompanha o fundo, entao a profundidade real
+            # varia de ponto a ponto (cortes/perfis usam o 'zgrid' completo).
             try:
                 import warnings
                 with warnings.catch_warnings():
@@ -391,7 +394,8 @@ def _montar_descritor(variables, dim, n):
                     zm = np.nanmean(np.asarray(variables["zgrid"][:], dtype=float), axis=0)
                 if zm.shape == (n,):
                     desc.update(valores=zm, unidade="m",
-                                fonte="zgrid (profundidade calculada da coordenada s)")
+                                fonte="zgrid (profundidade {0})".format(
+                                    "calculada da coordenada s" if modelo == "ROMS" else "de z_l"))
             except Exception:
                 pass
     return desc

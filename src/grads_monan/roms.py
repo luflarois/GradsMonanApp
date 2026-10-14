@@ -77,13 +77,14 @@ def eh_roms(dataset):
         return False
 
 
-def _float_nan(arr):
+def _float_nan(arr, dtype=float):
     """Array float com mascara/_FillValue (e valores absurdos, >1e36) -> NaN."""
     if np.ma.isMaskedArray(arr):
-        arr = np.ma.filled(arr.astype(float), np.nan)
+        arr = np.ma.filled(arr.astype(dtype), np.nan)
     else:
-        arr = np.asarray(arr, dtype=float)
-    arr = np.where(np.abs(arr) > 1e36, np.nan, arr)
+        arr = np.asarray(arr, dtype=dtype)
+    with np.errstate(invalid="ignore"):
+        arr = np.where(np.abs(arr) > 1e36, np.nan, arr)
     return arr
 
 
@@ -124,15 +125,45 @@ def _media_interna_eta(arr):
     return _nanmedia2(arr[..., :-1, :], arr[..., 1:, :])
 
 
-def para_rho(arr, ponto):
+def _face_leste(arr, periodico=False):
+    """(..., E, X) [U na face LESTE de cada celula, grade nao simetrica do
+    MOM6] -> (..., E, X): media das faces oeste (i-1) e leste (i). Na
+    primeira coluna, a face oeste e a ultima coluna se o dominio for
+    periodico em x (global); senao, repete a face leste."""
+    out = np.empty(arr.shape, dtype=float)
+    out[..., 1:] = _nanmedia2(arr[..., :-1], arr[..., 1:])
+    out[..., 0] = _nanmedia2(arr[..., -1], arr[..., 0]) if periodico else arr[..., 0]
+    return out
+
+
+def _face_norte(arr):
+    """(..., E, X) [V na face NORTE de cada celula] -> (..., E, X)."""
+    out = np.empty(arr.shape, dtype=float)
+    out[..., 1:, :] = _nanmedia2(arr[..., :-1, :], arr[..., 1:, :])
+    out[..., 0, :] = arr[..., 0, :]
+    return out
+
+
+def para_rho(arr, ponto, periodico=False):
     """
     Leva um campo do ponto 'ponto' da grade C para o ponto de massa (RHO):
       - 'u'/'v'/'psi': convencao do ROMS - U/V tem uma coluna/linha A MENOS
         que RHO (as faces da borda externa nao existem); nas bordas o valor
         da face mais proxima e repetido;
-      - 'u+'/'v+': convencao do WRF - U/V tem uma coluna/linha A MAIS (as
-        duas faces de toda celula existem); media simples das duas faces.
+      - 'u+'/'v+'/'q+': convencao do WRF e do MOM6 simetrico - uma
+        coluna/linha A MAIS (as duas faces de toda celula existem); media
+        simples das duas faces (dos quatro cantos, para 'q+');
+      - 'ue'/'vn'/'qne': MOM6 nao simetrico - o MESMO numero de pontos, U na
+        face leste, V na face norte, Q no canto nordeste de cada celula.
     """
+    if ponto == "ue":
+        return _face_leste(arr, periodico)
+    if ponto == "vn":
+        return _face_norte(arr)
+    if ponto == "qne":
+        return _face_norte(_face_leste(arr, periodico))
+    if ponto == "q+":
+        return _media_interna_eta(_media_interna_xi(arr))
     if ponto == "u+":
         return _media_interna_xi(arr)
     if ponto == "v+":
@@ -191,6 +222,8 @@ class GradeRoms(object):
     pontos = _PONTOS
     dims_verticais = _DIMS_VERTICAIS
     inverter_niveis = True
+    periodico_x = False   # dominio global periodico em x (MOM6)
+    rolagem_x = 0         # colunas a "rolar" para a costura de longitude ficar na borda (MOM6)
 
     def __init__(self, dados, grade=None):
         fontes = [ds for ds in (grade, dados) if ds is not None]
@@ -285,11 +318,22 @@ class GradeRoms(object):
 
 class VariavelRoms(object):
     """
-    Uma variavel do ROMS vista no formato do resto do programa:
-    shape (Time, nCells[, nVertLevels]) e dimensions ('Time', 'nCells'[,
-    'nVertLevels']). Os dados so sao lidos/convertidos no primeiro acesso
-    (e guardados em cache - o resto do codigo le 'var[:]' varias vezes).
+    Uma variavel de grade C (ROMS, WRF, MOM6) vista no formato do resto do
+    programa: shape (Time, nCells[, niveis]) e dimensions ('Time',
+    'nCells'[, 'nVertLevels'...]).
+
+    Os dados sao lidos UM TEMPO DE CADA VEZ ('tempo(k)'), sob demanda, com
+    um cache pequeno - arquivos com centenas de tempos (ex: MOM6) nao cabem
+    inteiros na memoria. 'var[k, ...]' le so o tempo k; 'var[:]' (todos os
+    tempos) ainda funciona, mas carrega tudo.
+
+    'calcular' (variaveis virtuais): funcao f(k) que devolve o campo do
+    tempo k, ja no formato de saida sem o eixo do tempo - (nCells[,
+    niveis]); para variaveis sem eixo de tempo (ex: 'zgrid'), f(k) ignora k
+    e devolve o array inteiro.
     """
+
+    _N_CACHE = 2
 
     def __init__(self, nome, grade, var_nc=None, calcular=None, attrs=None,
                  dims=None, shape=None, mascarar=True):
@@ -299,12 +343,14 @@ class VariavelRoms(object):
         self._calcular = calcular
         self._attrs = dict(attrs or {})
         self._mascarar = mascarar
+        self._cache_tempos = {}
         self._cache = None
         if var_nc is not None:
             self._preparar_dims(var_nc)
         else:
             self.dimensions = tuple(dims)
             self.shape = tuple(shape)
+        self._tem_tempo = len(self.dimensions) > 0 and self.dimensions[0] == "Time"
 
     def _preparar_dims(self, var):
         dims = tuple(var.dimensions)
@@ -326,11 +372,21 @@ class VariavelRoms(object):
         self.shape = tuple(nova_forma)
         self.ponto_original = self._ponto
         self.dims_originais = dims
+        # float32 no arquivo -> float32 na memoria (metade do espaco)
+        try:
+            dt = np.dtype(getattr(var, "dtype", None))
+            self._dtype = np.float32 if (dt.kind == "f" and dt.itemsize == 4) else float
+        except Exception:
+            self._dtype = float
+
+    @property
+    def n_tempos(self):
+        return self.shape[0] if self._tem_tempo else 1
 
     # --- atributos NetCDF (long_name, units...) ---------------------------
     def ncattrs(self):
         if self._var is not None:
-            return [a for a in self._var.ncattrs() if a != "_FillValue"]
+            return [a for a in self._var.ncattrs() if a not in ("_FillValue", "missing_value")]
         return list(self._attrs.keys())
 
     def getncattr(self, nome):
@@ -355,33 +411,101 @@ class VariavelRoms(object):
         return self.shape[0]
 
     # --- dados -------------------------------------------------------------
-    def _ler(self):
-        var = self._var
-        arr = _float_nan(var[:])
-        if self._eixo_tempo is None:
-            arr = arr[np.newaxis, ...]
-        # Agora: (T[, N], E', X') - leva para RHO
-        arr = para_rho(arr, self._ponto)
+    def _converter(self, arr):
+        """Campo de UM tempo, nos pontos do arquivo - ([N,] E', X') - ->
+        formato de saida (nCells[, N])."""
+        grade = self._grade
+        arr = para_rho(arr, self._ponto, grade.periodico_x)
+        if grade.rolagem_x:
+            arr = np.roll(arr, -grade.rolagem_x, axis=-1)
         if self._mascarar:
-            arr[..., ~self._grade.mask_rho] = np.nan
-        n_t = arr.shape[0]
-        if arr.ndim == 4:
-            # (T, N, E, X) -> (T, E*X, N); no ROMS, nivel 0 = superficie
-            arr = arr.reshape(n_t, arr.shape[1], -1)
-            arr = np.transpose(arr, (0, 2, 1))
-            if self._grade.inverter_niveis:
-                arr = arr[:, :, ::-1]
+            arr[..., ~grade.mask_rho] = np.nan
+        if arr.ndim == 3:
+            # (N, E, X) -> (E*X, N)
+            arr = arr.reshape(arr.shape[0], -1).T
+            if grade.inverter_niveis:
+                arr = arr[:, ::-1]
         else:
-            arr = arr.reshape(n_t, -1)
-        return np.ascontiguousarray(arr)
+            arr = arr.reshape(-1)
+        return np.ascontiguousarray(arr, dtype=self._dtype)
+
+    def _ler_tempo(self, k):
+        var = self._var
+        if self._eixo_tempo is not None:
+            bruto = var[min(k, var.shape[0] - 1)]
+        else:
+            bruto = var[:]
+        return self._converter(_float_nan(bruto))
+
+    def tempo(self, k):
+        """Campo do tempo k: (nCells[, niveis]) - ou o array inteiro, para
+        variaveis sem eixo de tempo."""
+        k = int(k)
+        if self._tem_tempo:
+            k = min(max(k, 0), self.n_tempos - 1)
+        else:
+            k = 0
+        if k not in self._cache_tempos:
+            if len(self._cache_tempos) >= self._N_CACHE:
+                self._cache_tempos.pop(next(iter(self._cache_tempos)))
+            if self._calcular is not None:
+                self._cache_tempos[k] = self._calcular(k)
+            else:
+                self._cache_tempos[k] = self._ler_tempo(k)
+        return self._cache_tempos[k]
 
     def valores(self):
+        """Todos os tempos (carrega o arquivo inteiro - evite em arquivos
+        com muitos tempos; o programa usa 'tempo(k)' via VisaoTempo)."""
+        if not self._tem_tempo:
+            return self.tempo(0)
         if self._cache is None:
-            if self._calcular is not None:
-                self._cache = self._calcular()
-            else:
-                self._cache = self._ler()
+            self._cache = np.stack([self.tempo(k) for k in range(self.n_tempos)])
         return self._cache
+
+    def __getitem__(self, chave):
+        if self._tem_tempo:
+            primeiro = chave[0] if isinstance(chave, tuple) else chave
+            if isinstance(primeiro, (int, np.integer)):
+                resto = chave[1:] if isinstance(chave, tuple) else ()
+                return self.tempo(primeiro)[resto] if resto else self.tempo(primeiro)
+        return self.valores()[chave]
+
+    def __array__(self, dtype=None, copy=None):
+        arr = self.valores()
+        return arr.astype(dtype) if dtype is not None else arr
+
+
+class VariavelTempo(object):
+    """Um unico tempo (k) de uma VariavelRoms: shape (1, nCells[, niveis])."""
+
+    def __init__(self, var, k):
+        self._v = var
+        self._k = k
+        self.name = var.name
+        self.dimensions = var.dimensions
+        self.shape = (1,) + tuple(var.shape[1:])
+
+    def ncattrs(self):
+        return self._v.ncattrs()
+
+    def getncattr(self, nome):
+        return self._v.getncattr(nome)
+
+    def __getattr__(self, nome):
+        if nome.startswith("_"):
+            raise AttributeError(nome)
+        return getattr(self._v, nome)
+
+    @property
+    def ndim(self):
+        return len(self.shape)
+
+    def __len__(self):
+        return 1
+
+    def valores(self):
+        return self._v.tempo(self._k)[np.newaxis]
 
     def __getitem__(self, chave):
         return self.valores()[chave]
@@ -389,6 +513,44 @@ class VariavelRoms(object):
     def __array__(self, dtype=None, copy=None):
         arr = self.valores()
         return arr.astype(dtype) if dtype is not None else arr
+
+
+class VisaoTempo(object):
+    """
+    Um registro de tempo (k) de um arquivo de grade C, apresentado como se
+    fosse um arquivo de UM tempo so. Cada tempo de um arquivo com varios
+    (ex: 767 medias diarias do MOM6, varios horarios de um wrfout) vira uma
+    entrada propria em 'show files' - 'set t <n>' escolhe o tempo e 'set t
+    <ini> <fim>' faz serie/animacao, como entre arquivos do MONAN.
+    """
+
+    def __init__(self, base, k):
+        self._base = base
+        self.indice_tempo = k
+        self.grade = base.grade
+        self.modelo = base.modelo
+        self.variables = _Variaveis(base.modelo)
+        for nome, var in base.variables.items():
+            if isinstance(var, VariavelRoms) and var._tem_tempo:
+                self.variables[nome] = VariavelTempo(var, min(k, var.n_tempos - 1))
+            else:
+                self.variables[nome] = var
+        self.dimensions = dict(base.dimensions)
+        self.dimensions["Time"] = _Dim("Time", 1)
+
+    def ncattrs(self):
+        return self._base.ncattrs()
+
+    def getncattr(self, nome):
+        return self._base.getncattr(nome)
+
+    def close(self):
+        self._base.close()
+
+    def __getattr__(self, nome):
+        if nome.startswith("_"):
+            raise AttributeError(nome)
+        return getattr(self._base, nome)
 
 
 class DatasetRoms(object):
@@ -441,6 +603,10 @@ class DatasetRoms(object):
             self.dimensions["nVertLevels"] = _Dim("nVertLevels", n_niveis)
             self.dimensions["nVertLevelsP1"] = _Dim("nVertLevelsP1", n_niveis + 1)
 
+    @property
+    def n_tempos(self):
+        return self._n_tempos()
+
     def _n_tempos(self):
         if "ocean_time" in self._ds.variables:
             return int(self._ds.variables["ocean_time"].shape[0])
@@ -449,11 +615,11 @@ class DatasetRoms(object):
     def _estatica(self, nome, campo2d, mascarar, attrs):
         grade = self.grade
 
-        def calc():
+        def calc(k=0):
             arr = np.asarray(campo2d, dtype=float).copy()
             if mascarar:
                 arr[~grade.mask_rho] = np.nan
-            return arr.reshape(1, -1)
+            return arr.reshape(-1)
         return VariavelRoms(nome, grade, calcular=calc, attrs=attrs,
                             dims=("Time", "nCells"), shape=(1, grade.n_cells))
 
@@ -467,20 +633,20 @@ class DatasetRoms(object):
             if vu.shape != vv.shape:
                 continue
 
-            def rot(vu=vu, vv=vv, leste=True):
-                u = vu.valores()
-                v = vv.valores()
-                c = cos_a.reshape((1, -1) + (1,) * (u.ndim - 2))
-                s = sin_a.reshape((1, -1) + (1,) * (u.ndim - 2))
+            def rot(k, vu=vu, vv=vv, leste=True):
+                u = vu.tempo(k)
+                v = vv.tempo(k)
+                c = cos_a.reshape((-1,) + (1,) * (u.ndim - 1))
+                s = sin_a.reshape((-1,) + (1,) * (u.ndim - 1))
                 return u * c - v * s if leste else u * s + v * c
 
             unid = getattr(vu, "units", "") if "units" in vu.ncattrs() else ""
             self.variables[nome_e] = VariavelRoms(
-                nome_e, self.grade, calcular=lambda f=rot: f(leste=True),
+                nome_e, self.grade, calcular=lambda k, f=rot: f(k, leste=True),
                 attrs={"long_name": "eastward component of {0} (rotated from grid)".format(nu), "units": unid},
                 dims=vu.dimensions, shape=vu.shape)
             self.variables[nome_n] = VariavelRoms(
-                nome_n, self.grade, calcular=lambda f=rot: f(leste=False),
+                nome_n, self.grade, calcular=lambda k, f=rot: f(k, leste=False),
                 attrs={"long_name": "northward component of {0} (rotated from grid)".format(nv), "units": unid},
                 dims=vv.dimensions, shape=vv.shape)
 
@@ -490,11 +656,11 @@ class DatasetRoms(object):
             return
         ds = self._ds
 
-        def calc():
+        def calc(k=0):
             zeta = None
             if "zeta" in ds.variables:
-                z = _float_nan(ds.variables["zeta"][:])
-                zeta = z[0] if z.ndim == 3 else z
+                vz = ds.variables["zeta"]
+                zeta = _float_nan(vz[0] if len(vz.shape) == 3 else vz[:])
             z = grade.profundidade_z(zeta)                  # (N, E, X), k=0 fundo
             z = z.reshape(z.shape[0], -1).T[:, ::-1]        # (nCells, N), 0 = superficie
             return np.ascontiguousarray(z)
