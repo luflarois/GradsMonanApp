@@ -44,6 +44,65 @@ def _data_do_time_cf(dataset):
     except Exception:
         return None
 
+
+# --- Arquivos abertos sob demanda -------------------------------------------
+# Com centenas/milhares de arquivos abertos (ex.: 'open dir/*.nc'), manter
+# todos os NetCDF abertos estoura o limite de descritores de arquivo do
+# processo (o glibc aborta com "bit out of range 0 - FD_SETSIZE"). Os
+# arquivos a partir do 2o ficam, entao, fechados e sao reabertos sob demanda,
+# mantendo no maximo _MAX_ABERTOS abertos ao mesmo tempo (os menos usados
+# sao fechados primeiro). O arquivo 1 (e a malha) ficam sempre abertos.
+from collections import OrderedDict as _OrderedDict
+_MAX_ABERTOS = 128
+_POOL_ABERTOS = _OrderedDict()
+
+class DatasetPreguicoso(object):
+    def __init__(self, caminho, dataset_aberto=None):
+        self._caminho = caminho
+        if dataset_aberto is not None:
+            self._registrar(dataset_aberto)
+
+    def _registrar(self, ds):
+        _POOL_ABERTOS[self._caminho] = ds
+        _POOL_ABERTOS.move_to_end(self._caminho)
+        while len(_POOL_ABERTOS) > _MAX_ABERTOS:
+            _, velho = _POOL_ABERTOS.popitem(last=False)
+            try:
+                velho.close()
+            except Exception:
+                pass
+
+    def _ds(self):
+        ds = _POOL_ABERTOS.get(self._caminho)
+        if ds is None:
+            ds = adaptar_se_regular(Dataset(self._caminho, 'r'))
+            self._registrar(ds)
+        else:
+            _POOL_ABERTOS.move_to_end(self._caminho)
+        return ds
+
+    @property
+    def variables(self):
+        return self._ds().variables
+
+    @property
+    def dimensions(self):
+        return self._ds().dimensions
+
+    def close(self):
+        self._closed = True
+        ds = _POOL_ABERTOS.pop(self._caminho, None)
+        if ds is not None:
+            try:
+                ds.close()
+            except Exception:
+                pass
+
+    def __getattr__(self, nome):
+        if nome.startswith("_"):
+            raise AttributeError(nome)
+        return getattr(self._ds(), nome)
+
 def file_open(fileName, setup_toml, gridFile=None, setup_anterior=None):
 
     caminho_do_arquivo = os.path.dirname(fileName)
@@ -227,6 +286,15 @@ def file_open(fileName, setup_toml, gridFile=None, setup_anterior=None):
 
             setup = setup_anterior
             novo_indice = len(setup.get("files", [])) + 1
+
+            # Malha em arquivo separado: ja foi lida, nao precisa ficar aberta.
+            if mesh is not dataset:
+                try:
+                    mesh.close()
+                except Exception:
+                    pass
+            # Arquivo fica aberto sob demanda (ver DatasetPreguicoso).
+            dataset = DatasetPreguicoso(fileName, dataset)
 
             set_ion()
 

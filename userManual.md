@@ -214,6 +214,17 @@ Num  Arquivo                                        Timestamp
   arquivo(s) adicional(is) entram na lista.
 - `reinit` fecha todos os arquivos abertos e reinicia a sessão do zero.
 
+### Muitos arquivos abertos (centenas ou milhares)
+
+Os arquivos a partir do 2º são abertos **sob demanda**: depois de lidos os
+metadados no `open`, ficam fechados e são reabertos quando um comando precisa
+deles; no máximo 128 ficam abertos ao mesmo tempo (`_MAX_ABERTOS` em
+`files.py`; os menos usados fecham primeiro). Isso evita estourar o limite de
+descritores de arquivo do sistema (erro `bit out of range 0 - FD_SETSIZE`)
+em `open dir/*.nc` com milhares de arquivos. O arquivo 1 e a malha ficam
+sempre abertos. Séries sobre muitos arquivos ficam mais lentas (reabertura),
+mas funcionam.
+
 ### Referenciando o arquivo de uma variável (sufixo `.N`)
 
 Em qualquer lugar onde uma variável é referenciada para plotagem — `d`/
@@ -1258,6 +1269,7 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 - Despacho espacial de `d sum`/`mean`/`min`/`max`/`p10`..`p90` `all`/`inlimits`/`point <variavel_ou_expressao>` (seção 2.3; dentro do dispatch de `d`/`display`): reúne os dados via `_dados_estatistica`, chama `calcular_campo` (`estatistics.py`) — que também retorna o **modo** (mapa/ponto/corte/mapa_niveis, conforme a seleção atual de lat/lon/nível e o complemento `point`) — e plota o resultado com `plot_estatistica_campo` (`plot_func.py`); no modo `mapa_niveis`, `calcular_campo` já recusou e retornou `None`, então nada é plotado.
 
 ### `files.py` (antigo `files_nc.py`)
+- `DatasetPreguicoso(caminho, dataset_aberto)` — envoltório dos arquivos 2..N: reabre o NetCDF sob demanda e mantém no máximo `_MAX_ABERTOS` abertos (pool LRU `_POOL_ABERTOS`); expõe `variables`, `dimensions`, `close` e delega os demais atributos.
 - `file_open(fileName, setup_toml, gridFile=None, setup_anterior=None)` — abre o arquivo (e a grade, se necessária). Se `setup_anterior` for passado (já há um arquivo aberto na sessão), valida a malha do novo arquivo contra a assinatura já registrada (seção 2.1): rejeita com `(None, None)` se forem diferentes (preservando `setup_anterior` intacto), ou adiciona o novo arquivo a `setup["files"]` com o próximo índice sequencial, se forem iguais. Sem `setup_anterior` (primeiro `open`), monta o `setup` do zero, como antes — inclusive guardando a referência ao `dataset` da malha (`setup["_malha_dataset"]`), usada sob demanda por `gxout hex` (seção 8.1) para ler a conectividade completa. Detecta arquivos em grade regular (`grade_regular.py`, seção 2.5), lê o tempo de `Time` quando não há `xtime` e usa a coordenada de pressão (`level`) como nível padrão quando não há `t_iso_levels`. Resiliente à ausência de `nCells`, malha, `xtime`/`initial_time`, `t_iso_levels`.
 - `carregar_limites(setup, caminho_csv)` — comando `load limits <arquivo.csv>` (seção 2.2): lê o arquivo de pontos (lat/lon, um por linha), calcula a máscara de células da malha dentro do polígono formado por eles e guarda tudo em `setup["limits_*"]`, pronto para as futuras funções estatísticas dentro da área. Retorna `True`/`False`; em caso de falha, preserva os limites já carregados anteriormente (se houver).
 
