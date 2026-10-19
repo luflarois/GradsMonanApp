@@ -10,14 +10,39 @@
 import os
 import re
 import numpy as np
+from datetime import datetime as _datetime, timedelta as _timedelta
 from netCDF4 import Dataset
 from matplotlib.path import Path as _MplPath
 from .plot_func import set_ion, atualizar_titulo_janela
-from .utils import normalize_lon, sem_mascara, assinatura_malha
-from .roms import eh_roms, abrir_roms, tempos_roms
-from .wrf import eh_wrf, abrir_wrf, tempos_wrf
-from .mom6 import eh_mom6, abrir_mom6, tempos_mom6
-from .roms import VisaoTempo
+from .utils import normalize_lon, sem_mascara, assinatura_malha, descritores_disponiveis
+from .grade_regular import adaptar_se_regular
+
+_UNIDADE_TEMPO_CF_RE = re.compile(
+    r'^\s*(seconds?|minutes?|hours?|days?)\s+since\s+(\d{4})-(\d{1,2})-(\d{1,2})'
+    r'(?:[ T](\d{1,2})(?::(\d{2}))?(?::(\d{2}))?)?')
+
+def _data_do_time_cf(dataset):
+    """Data/hora (datetime) do primeiro instante da variavel 'Time' com
+    unidades CF ("<unidade> since AAAA-MM-DD hh:mm:ss"), ou None se nao
+    houver como obter."""
+    try:
+        var = dataset.variables.get("Time")
+        if var is None or "units" not in var.ncattrs():
+            return None
+        m = _UNIDADE_TEMPO_CF_RE.match(str(var.getncattr("units")))
+        if not m:
+            return None
+        unidade = m.group(1).rstrip("s") + "s"
+        ano, mes, dia = int(m.group(2)), int(m.group(3)), int(m.group(4))
+        hora, minuto, seg = (int(m.group(i)) if m.group(i) else 0 for i in (5, 6, 7))
+        valores = np.ma.filled(np.ma.asarray(var[:], dtype=float), np.nan)
+        valor = float(np.ravel(valores)[0])
+        if not np.isfinite(valor):
+            return None
+        base = _datetime(ano, mes, dia, hora, minuto, seg)
+        return base + _timedelta(**{unidade: valor})
+    except Exception:
+        return None
 
 def file_open(fileName, setup_toml, gridFile=None, setup_anterior=None):
 
@@ -29,185 +54,102 @@ def file_open(fileName, setup_toml, gridFile=None, setup_anterior=None):
             print("File ",fileName," not found!")
             print("Please, check it!")
             return None, None
-        grade_estruturada = None
-        entradas = None
-        if eh_roms(dataset):
-            modelo_c = "ROMS"
-        elif eh_wrf(dataset):
-            modelo_c = "WRF"
-        elif eh_mom6(dataset):
-            modelo_c = "MOM6"
-        else:
-            modelo_c = None
-        if modelo_c is not None:
-            # Saida de modelo em grade Arakawa C estruturada - ROMS (oceano,
-            # roms.py), WRF (atmosfera, wrf.py) ou MOM6 (oceano, grade
-            # tripolar, mom6.py): a grade e apresentada ao resto do programa
-            # como uma "malha" de pontos de massa (RHO/h), com as variaveis
-            # defasadas (U/V/PSI/q) ja levadas para eles.
-            abrir_c, tempos_c = {"ROMS": (abrir_roms, tempos_roms),
-                                 "WRF": (abrir_wrf, tempos_wrf),
-                                 "MOM6": (abrir_mom6, tempos_mom6)}[modelo_c]
-            dataset_bruto = dataset
-            try:
-                dataset, grade_usada = abrir_c(dataset_bruto, fileName, gridFile)
-            except Exception as e:
-                print("Erro ao abrir o arquivo {0} '{1}': {2}".format(modelo_c, fileName, e))
-                try:
-                    dataset_bruto.close()
-                except Exception:
-                    pass
-                return None, None
+        # Grade regular lat/lon (identificada pelo conteudo do arquivo -
+        # ver grade_regular.py): cada ponto vira uma "celula" e o arquivo
+        # passa a ser lido no mesmo formato da malha do MPAS.
+        dataset = adaptar_se_regular(dataset)
+        if getattr(dataset, "grade_regular", False):
+            print("Grade regular detectada: {0} latitudes x {1} longitudes = {2} pontos (tratados como celulas).".format(
+                dataset.nlat, dataset.nlon, dataset.nlat * dataset.nlon))
+        nCells_size = None
+        if "nCells" in dataset.dimensions:
+            nCells_size = dataset.dimensions['nCells'].size
+
+        dataset_tem_malha = "latCell" in dataset.variables and "lonCell" in dataset.variables
+
+        if gridFile is None and nCells_size is not None and dataset_tem_malha:
+            # O próprio arquivo de saída já traz a malha (comum quando o stream
+            # do MPAS/MONAN inclui latCell/lonCell) - não precisa de arquivo de grade.
             mesh = dataset
-            new_file = grade_usada if grade_usada else fileName
-            grade = dataset.grade
-            latitudes = grade.latitudes()
-            longitudes = normalize_lon(grade.longitudes())
-            grade_estruturada = {
-                "modelo"  : modelo_c,
-                "shape"   : grade.shape,
-                "lon2d"   : longitudes.reshape(grade.shape),
-                "lat2d"   : grade.lat_rho,
-                "lon_psi" : normalize_lon(grade.lon_psi),
-                "lat_psi" : grade.lat_psi,
-                # fatia do campo (eta, xi) cujas celulas tem os 4 cantos em
-                # lon_psi/lat_psi (para o 'gxout grfill')
-                "recorte" : getattr(grade, "recorte_celulas", (slice(1, -1), slice(1, -1))),
-            }
-
-            datas, time_variable, time_units = tempos_c(dataset)
-            if datas:
-                time = datas
-                time_str = datas[0].strftime("%Y-%m-%d_%H:%M:%S")
-                DataDado = datas[0].strftime("%Y-%m-%dT%H")
-            else:
-                print("Aviso: tempo ({0}) ausente ou nao reconhecido em ".format(
-                    {"ROMS": "ocean_time", "WRF": "Times/XTIME", "MOM6": "time"}[modelo_c]), fileName)
-                time = [0]
-                time_str = ""
-                DataDado = "desconhecida"
-
-            # Cada TEMPO do arquivo vira uma entrada propria em 'files'
-            # (VisaoTempo, roms.py), lida sob demanda: 'set t <n>' escolhe o
-            # tempo e 'set t <ini> <fim>' faz serie/animacao - igual a varios
-            # arquivos de um tempo so do MONAN. Arquivos com centenas de
-            # tempos (MOM6) nao sao carregados inteiros na memoria.
-            n_t = max(int(dataset.n_tempos), 1)
-            entradas = []
-            for k in range(n_t):
-                dk = time[k] if (datas and k < len(time)) else None
-                entradas.append({
-                    "dataset"  : VisaoTempo(dataset, k),
-                    "time"     : [dk] if dk is not None else [k],
-                    "time_str" : dk.strftime("%Y-%m-%d_%H:%M:%S") if dk is not None else "",
-                    "DataDado" : dk.strftime("%Y-%m-%dT%H") if dk is not None else
-                                 ("tempo {0}".format(k + 1) if n_t > 1 else "desconhecida"),
-                })
-            variables = entradas[0]["dataset"].variables
-
-            if "nVertLevels" in dataset.dimensions:
-                levels = list(range(dataset.dimensions["nVertLevels"].size))
-            else:
-                levels = [0]
-            eixo_pressao = False
-            if modelo_c == "ROMS":
-                print("Arquivo ROMS (grade Arakawa C): {0} x {1} pontos RHO (eta x xi), {2} nivel(is) s, {3} tempo(s).".format(
-                    grade.shape[0], grade.shape[1], len(levels), len(time)))
-            elif modelo_c == "MOM6":
-                print("Arquivo MOM6 (grade Arakawa C{0}): {1} x {2} pontos h (yh x xh), {3} nivel(is), {4} tempo(s).".format(
-                    ", global" if grade.periodico_x else "", grade.shape[0], grade.shape[1], len(levels), len(time)))
-                if grade.nominal:
-                    print("Aviso: sem o arquivo estatico (ocean_static.nc, com geolon/geolat) - usando as coordenadas")
-                    print("NOMINAIS xh/yh. Numa grade tripolar elas estao erradas ao norte de ~65N; informe o estatico:")
-                    print("  open {0} <ocean_static.nc>".format(fileName))
-            else:
-                print("Arquivo WRF (grade Arakawa C): {0} x {1} pontos de massa (south_north x west_east), {2} nivel(is) eta, {3} tempo(s).".format(
-                    grade.shape[0], grade.shape[1], len(levels), len(time)))
-            if grade_usada:
-                print("Grade lida de: {0}".format(grade_usada))
-            if modelo_c == "ROMS" and grade.vertical is None and len(levels) > 1:
-                print("Aviso: parametros da coordenada s (s_rho, Cs_r, hc) ou batimetria 'h' ausentes - niveis so por indice.")
+            new_file = fileName
         else:
-            nCells_size = None
-            if "nCells" in dataset.dimensions:
-                nCells_size = dataset.dimensions['nCells'].size
+            if nCells_size is None:
+                print("Aviso: dimensao 'nCells' nao encontrada no arquivo de dados ", fileName)
+                print("Isso costuma acontecer em saidas de diagnostico/pos-processadas, que nao trazem a malha.")
 
-            dataset_tem_malha = "latCell" in dataset.variables and "lonCell" in dataset.variables
-
-            if gridFile is None and nCells_size is not None and dataset_tem_malha:
-                # O próprio arquivo de saída já traz a malha (comum quando o stream
-                # do MPAS/MONAN inclui latCell/lonCell) - não precisa de arquivo de grade.
-                mesh = dataset
-                new_file = fileName
-            else:
-                if nCells_size is None:
-                    print("Aviso: dimensao 'nCells' nao encontrada no arquivo de dados ", fileName)
-                    print("Isso costuma acontecer em saidas de diagnostico/pos-processadas, que nao trazem a malha.")
-
-                if gridFile:
-                    # Grade informada explicitamente pelo usuário (ex: grades regionais,
-                    # ou quando o proprio arquivo de dados nao tem a dimensao nCells)
-                    new_file = gridFile
-                elif nCells_size is not None:
-                    # So e possivel adivinhar o nome padrao se soubermos o numero
-                    # de celulas (obtido do proprio arquivo de dados)
-                    if caminho_do_arquivo!="":
-                        new_file = caminho_do_arquivo+"/x1.{0}.grid.nc".format(nCells_size)
-                    else:
-                        new_file = "x1.{0}.grid.nc".format(nCells_size)
+            if gridFile:
+                # Grade informada explicitamente pelo usuário (ex: grades regionais,
+                # ou quando o proprio arquivo de dados nao tem a dimensao nCells)
+                new_file = gridFile
+            elif nCells_size is not None:
+                # So e possivel adivinhar o nome padrao se soubermos o numero
+                # de celulas (obtido do proprio arquivo de dados)
+                if caminho_do_arquivo!="":
+                    new_file = caminho_do_arquivo+"/x1.{0}.grid.nc".format(nCells_size)
                 else:
-                    # Sem nCells no arquivo de dados e sem grade informada: nao ha
-                    # como adivinhar o nome do arquivo de grade.
-                    print("Forneca um arquivo de grade para abrir este arquivo:")
-                    print("  open "+fileName+" <path_to_grid_file.nc>")
-                    return None, None
-
-                if not os.path.exists(new_file):
-                    print("File ",new_file," not found!")
-                    print("Please, check it!")
-                    if not gridFile:
-                        print("If this is a regional/regionalized grid, provide the grid file explicitly:")
-                        print("  open "+fileName+" <path_to_grid_file.nc>")
-                    return None, None
-
-                try:
-                    mesh = Dataset(new_file, 'r')
-                except:
-                    print("File ",new_file," not found!")
-                    print("Please, check it!")
-                    return None, None
-
-                if "nCells" not in mesh.dimensions:
-                    print("Arquivo de grade '",new_file,"' tambem nao tem a dimensao 'nCells'!")
-                    print("Please, check it!")
-                    return None, None
-
-                if nCells_size is not None and mesh.dimensions['nCells'].size != nCells_size:
-                    print("Warning: grid file '{0}' has {1} cells, but data file '{2}' has {3} cells.".format(
-                        new_file, mesh.dimensions['nCells'].size, fileName, nCells_size))
-                    print("Please, check it!")
-                    return None, None
-            #patch_collection = get_mpas_patches(mesh, pickleFile=None,file = new_file)
-            # Vetorizado com numpy (em vez de um loop Python + math.degrees por
-            # elemento) - para malhas grandes (milhoes de celulas), isso sozinho
-            # e dezenas de vezes mais rapido.
-            latitudes = np.degrees(sem_mascara(mesh.variables['latCell'][:]))
-            longitudes = normalize_lon(np.degrees(sem_mascara(mesh.variables['lonCell'][:])))
-
-            variables = dataset.variables
-
-            if 'xtime' in dataset.variables:
-                time = dataset.variables['xtime'][:]
-                time_str = ''.join([x.decode('utf-8') for x in time[0]])
-                #print(time_str)  # Saída: "2025-04-20_00:00:00"
-                ano = int(time_str[:4])
-                mes = int(time_str[5:7])
-                dia = int(time_str[8:10])
-                hora = int(time_str[11:13])
-                DataDado = "{0:04d}-{1:02d}-{2:02d}T{3}".format(ano,mes,dia,hora)
+                    new_file = "x1.{0}.grid.nc".format(nCells_size)
             else:
-                # Algumas saidas (ex: diagnostico/pos-processadas) nao trazem a
-                # variavel 'xtime' no formato padrao do MPAS/MONAN.
+                # Sem nCells no arquivo de dados e sem grade informada: nao ha
+                # como adivinhar o nome do arquivo de grade.
+                print("Forneca um arquivo de grade para abrir este arquivo:")
+                print("  open "+fileName+" <path_to_grid_file.nc>")
+                return None, None
+
+            if not os.path.exists(new_file):
+                print("File ",new_file," not found!")
+                print("Please, check it!")
+                if not gridFile:
+                    print("If this is a regional/regionalized grid, provide the grid file explicitly:")
+                    print("  open "+fileName+" <path_to_grid_file.nc>")
+                return None, None
+
+            try:
+                mesh = Dataset(new_file, 'r')
+            except:
+                print("File ",new_file," not found!")
+                print("Please, check it!")
+                return None, None
+
+            if "nCells" not in mesh.dimensions:
+                print("Arquivo de grade '",new_file,"' tambem nao tem a dimensao 'nCells'!")
+                print("Please, check it!")
+                return None, None
+
+            if nCells_size is not None and mesh.dimensions['nCells'].size != nCells_size:
+                print("Warning: grid file '{0}' has {1} cells, but data file '{2}' has {3} cells.".format(
+                    new_file, mesh.dimensions['nCells'].size, fileName, nCells_size))
+                print("Please, check it!")
+                return None, None
+        #patch_collection = get_mpas_patches(mesh, pickleFile=None,file = new_file)
+        # Vetorizado com numpy (em vez de um loop Python + math.degrees por
+        # elemento) - para malhas grandes (milhoes de celulas), isso sozinho
+        # e dezenas de vezes mais rapido.
+        latitudes = np.degrees(sem_mascara(mesh.variables['latCell'][:]))
+        longitudes = normalize_lon(np.degrees(sem_mascara(mesh.variables['lonCell'][:])))
+
+        variables = dataset.variables
+
+        if 'xtime' in dataset.variables:
+            time = dataset.variables['xtime'][:]
+            time_str = ''.join([x.decode('utf-8') for x in time[0]])
+            #print(time_str)  # Saída: "2025-04-20_00:00:00"
+            ano = int(time_str[:4])
+            mes = int(time_str[5:7])
+            dia = int(time_str[8:10])
+            hora = int(time_str[11:13])
+            DataDado = "{0:04d}-{1:02d}-{2:02d}T{3}".format(ano,mes,dia,hora)
+        else:
+            # Algumas saidas (ex: diagnostico/pos-processadas) nao trazem a
+            # variavel 'xtime' no formato padrao do MPAS/MONAN.
+            data_cf = _data_do_time_cf(dataset)
+            if data_cf is not None:
+                # Tempo CF (ex: "hours since 2023-12-30 15:00:00") da
+                # variavel 'Time' - comum em saidas em grade regular.
+                time = [0]
+                time_str = data_cf.strftime("%Y-%m-%d_%H:%M:%S")
+                DataDado = data_cf.strftime("%Y-%m-%dT%H")
+                print("Tempo lido da variavel 'Time': {0}".format(time_str))
+            else:
                 print("Aviso: variavel 'xtime' nao encontrada em ",fileName)
                 candidatos = [v for v in dataset.variables if "time" in v.lower()]
                 if candidatos:
@@ -216,42 +158,53 @@ def file_open(fileName, setup_toml, gridFile=None, setup_anterior=None):
                 time_str = ""
                 DataDado = "desconhecida"
 
-            if 'initial_time' in dataset.variables:
-                time_variable = dataset.variables['initial_time']
-                time_units = time_variable.getncattr('units') if 'units' in time_variable.ncattrs() else "desconhecida"
+        if 'initial_time' in dataset.variables:
+            time_variable = dataset.variables['initial_time']
+            time_units = time_variable.getncattr('units') if 'units' in time_variable.ncattrs() else "desconhecida"
+        else:
+            print("Aviso: variavel 'initial_time' nao encontrada em ",fileName)
+            time_variable = None
+            time_units = "desconhecida"
+        #Determina o limite das bordas
+        niveis_pressao = []
+        if 't_iso_levels' not in dataset.variables:
+            niveis_pressao = [d for d in descritores_disponiveis({}, dataset.variables)
+                              if d["tipo"] == "pressao"]
+        if 't_iso_levels' in dataset.variables:
+            levels = sem_mascara(dataset.variables['t_iso_levels'][:])/100.
+            eixo_pressao = True
+        elif niveis_pressao:
+            # Sem 't_iso_levels', mas com uma coordenada vertical de pressao
+            # (ex: 'level' em Pa, em saidas em grade regular)
+            levels = niveis_pressao[0]["valores"]
+            eixo_pressao = True
+            print("Niveis de pressao lidos da coordenada '{0}' ({1} niveis).".format(
+                niveis_pressao[0]["dim"], len(levels)))
+        else:
+            # Em algumas saídas (ex: regionais) o arquivo não traz níveis
+            # isobáricos interpolados (t_iso_levels) - só níveis nativos do modelo.
+            print("Aviso: variavel 't_iso_levels' nao encontrada em ",fileName)
+            vert_dim = None
+            # Prefere os niveis do MODELO (nVertLevels...) a niveis de solo
+            # (nSoilLevels) ou outros: cada variavel usa depois a sua
+            # propria dimensao vertical (ver descritor_nivel em utils.py).
+            candidatas = [d for d in dataset.dimensions
+                          if "lev" in d.lower() or "vert" in d.lower()]
+            for criterio in (lambda d: "vert" in d.lower(),
+                             lambda d: "soil" not in d.lower() and "iso" not in d.lower(),
+                             lambda d: True):
+                achadas = [d for d in candidatas if criterio(d)]
+                if achadas:
+                    vert_dim = achadas[0]
+                    break
+            if vert_dim is not None:
+                n_levels = dataset.dimensions[vert_dim].size
+                levels = list(range(n_levels))
+                print("Usando indices de nivel do modelo (dimensao '{0}', {1} niveis) no lugar de niveis de pressao.".format(vert_dim, n_levels))
             else:
-                print("Aviso: variavel 'initial_time' nao encontrada em ",fileName)
-                time_variable = None
-                time_units = "desconhecida"
-            #Determina o limite das bordas
-            if 't_iso_levels' in dataset.variables:
-                levels = sem_mascara(dataset.variables['t_iso_levels'][:])/100.
-                eixo_pressao = True
-            else:
-                # Em algumas saídas (ex: regionais) o arquivo não traz níveis
-                # isobáricos interpolados (t_iso_levels) - só níveis nativos do modelo.
-                print("Aviso: variavel 't_iso_levels' nao encontrada em ",fileName)
-                vert_dim = None
-                # Prefere os niveis do MODELO (nVertLevels...) a niveis de solo
-                # (nSoilLevels) ou outros: cada variavel usa depois a sua
-                # propria dimensao vertical (ver descritor_nivel em utils.py).
-                candidatas = [d for d in dataset.dimensions
-                              if "lev" in d.lower() or "vert" in d.lower()]
-                for criterio in (lambda d: "vert" in d.lower(),
-                                 lambda d: "soil" not in d.lower() and "iso" not in d.lower(),
-                                 lambda d: True):
-                    achadas = [d for d in candidatas if criterio(d)]
-                    if achadas:
-                        vert_dim = achadas[0]
-                        break
-                if vert_dim is not None:
-                    n_levels = dataset.dimensions[vert_dim].size
-                    levels = list(range(n_levels))
-                    print("Usando indices de nivel do modelo (dimensao '{0}', {1} niveis) no lugar de niveis de pressao.".format(vert_dim, n_levels))
-                else:
-                    levels = [0]
-                    print("Nenhuma dimensao vertical identificada. Assumindo nivel unico (dado 2D).")
-                eixo_pressao = False
+                levels = [0]
+                print("Nenhuma dimensao vertical identificada. Assumindo nivel unico (dado 2D).")
+            eixo_pressao = False
 
         malha_atual = assinatura_malha(latitudes, longitudes)
 
@@ -277,15 +230,25 @@ def file_open(fileName, setup_toml, gridFile=None, setup_anterior=None):
 
             set_ion()
 
-            _registrar_entradas(setup, novo_indice, fileName, new_file, dataset, time,
-                                time_variable, time_units, time_str, DataDado, entradas)
+            file_info = {
+                "index"        : novo_indice,
+                "fileName"     : fileName,
+                "gridFileName" : (None if new_file == fileName else new_file),
+                "dataset"      : dataset,
+                "time"         : time,
+                "time_variable": time_variable,
+                "time_units"   : time_units,
+                "time_str"     : time_str,
+                "DataDado"     : DataDado,
+            }
+            setup["files"].append(file_info)
             # Titulo da janela ja reflete o(s) arquivo(s) recem-aberto(s)
             # (secao 2.1 do manual - mesmo formato usado por 'set t'/'set
             # lat'/'set lon'/'set lev'), sem precisar de nenhum 'set'
             # antes.
             atualizar_titulo_janela(setup)
 
-            return (entradas[0]["dataset"] if entradas else dataset), setup
+            return dataset, setup
 
         novo_indice = 1
 
@@ -365,16 +328,22 @@ def file_open(fileName, setup_toml, gridFile=None, setup_anterior=None):
                  "variables"       :variables,
                  "_malha_assinatura": malha_atual,
                  "_malha_dataset"  : mesh,
-                 "_grade_estruturada": grade_estruturada,
                  "files"           : []}
 
         set_ion()
 
-        if entradas:
-            # grade C: o tempo dentro de cada entrada e sempre o indice 0
-            setup["time_sel"] = 0
-        _registrar_entradas(setup, novo_indice, fileName, new_file, dataset, time,
-                            time_variable, time_units, time_str, DataDado, entradas)
+        file_info = {
+            "index"        : novo_indice,
+            "fileName"     : fileName,
+            "gridFileName" : (None if new_file == fileName else new_file),
+            "dataset"      : dataset,
+            "time"         : time,
+            "time_variable": time_variable,
+            "time_units"   : time_units,
+            "time_str"     : time_str,
+            "DataDado"     : DataDado,
+        }
+        setup["files"].append(file_info)
         # Titulo da janela ja reflete o arquivo recem-aberto (secao 2.1 do
         # manual - mesmo formato usado por 'set t'/'set lat'/'set lon'/
         # 'set lev'), sem precisar de nenhum 'set' antes.
@@ -385,35 +354,7 @@ def file_open(fileName, setup_toml, gridFile=None, setup_anterior=None):
         print("Verifique o caminho ou o arquivo!")
         return None, None
 
-    return (entradas[0]["dataset"] if entradas else dataset), setup
-
-def _registrar_entradas(setup, novo_indice, fileName, new_file, dataset, time,
-                        time_variable, time_units, time_str, DataDado, entradas):
-    """
-    Acrescenta o arquivo recem-aberto a setup['files']. Arquivos de grade C
-    ('entradas' != None) ganham uma entrada por TEMPO (indices consecutivos
-    a partir de 'novo_indice'); os demais (MONAN), uma unica entrada.
-    """
-    grade_file = None if new_file == fileName else new_file
-    if not entradas:
-        entradas = [{"dataset": dataset, "time": time, "time_str": time_str, "DataDado": DataDado}]
-    for k, e in enumerate(entradas):
-        setup["files"].append({
-            "index"        : novo_indice + k,
-            "fileName"     : fileName,
-            "gridFileName" : grade_file,
-            "dataset"      : e["dataset"],
-            "time"         : e["time"],
-            "time_variable": time_variable,
-            "time_units"   : time_units,
-            "time_str"     : e["time_str"],
-            "DataDado"     : e["DataDado"],
-            "tempo_no_arquivo": (k + 1) if len(entradas) > 1 else None,
-        })
-    if len(entradas) > 1:
-        print("Os {0} tempos deste arquivo viraram as entradas {1} a {2} ('show files'): 'set t <n>' escolhe o tempo,".format(
-            len(entradas), novo_indice, novo_indice + len(entradas) - 1))
-        print("'set t <ini> <fim>' faz serie/animacao.")
+    return dataset,setup
 
 _SEP_LIMITES_RE = re.compile(r'[,;\s]+')
 

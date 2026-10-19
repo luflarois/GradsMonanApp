@@ -724,6 +724,56 @@ variáveis do arquivo:
 - `show variables` lista também as variáveis do `let`. `reset` as mantém;
   `reinit` as apaga.
 
+## 2.5 Arquivos em grade regular (latitude × longitude)
+
+Além da malha de Voronoi do MPAS/MONAN, o `open` aceita arquivos já
+interpolados para uma **grade regular lat/lon** (como as saídas
+pós-processadas `MONAN_DIAG_G_POS_*`). O programa identifica o formato
+**pelo conteúdo do arquivo** — não pelo nome:
+
+- não tem `nCells`, `latCell` nem `lonCell`;
+- tem uma variável-coordenada 1-D de **latitude** e outra de **longitude**
+  (dimensão com o mesmo nome da variável), reconhecidas por `standard_name`
+  (`latitude`/`longitude`), unidades em graus (`degree_north`/`degree_east`)
+  ou, na falta delas, pelo nome (`latitude`, `lat`, `longitude`, `lon`…).
+
+```
+> open MONAN_DIAG_G_POS_GFS_2023010100_2023123015.00.00.x163842L18.nc
+Grade regular detectada: 361 latitudes x 721 longitudes = 260281 pontos (tratados como celulas).
+Niveis de pressao lidos da coordenada 'level' (18 niveis).
+Tempo lido da variavel 'Time': 2023-12-30_15:00:00
+```
+
+Como funciona: cada ponto da grade vira uma "célula" (ordem latitude-maior)
+e as variáveis passam a ter o formato `(Time, nCells)` ou `(Time, nCells,
+nível)` — o nível vertical sempre por último, mesmo em variáveis como
+`acc_etrani(Time, level, latitude, longitude)`. O arquivo não é alterado.
+Todo o resto funciona igual ao da malha de Voronoi: `d`, `d3`, perfil,
+corte, séries de tempo, `let`, estatísticas, `set lat/lon/lev` etc.
+
+Detalhes:
+- **Níveis**: uma dimensão genérica como `level` cujo variável-coordenada
+  tem unidade de pressão (`Pa`, `hPa`, `mb`) ou `standard_name =
+  air_pressure` é tratada como **pressão** (eixo em hPa, invertido) — ver
+  seção 8.2.
+- **Tempo**: sem `xtime`, a data vem da variável `Time` quando ela tem
+  unidades CF (`hours since AAAA-MM-DD hh:mm:ss`; também `seconds`,
+  `minutes`, `days`).
+- **Variáveis sem tempo** (ex.: `ter(latitude, longitude)`) aparecem como
+  `(1, nCells)` e plotam normalmente.
+- **Vários arquivos**: valem as regras da seção 2.1 — todos precisam ter a
+  mesma grade (latitudes e longitudes idênticas).
+- **Longitudes** em 0–360 são normalizadas para (−180, 180], como na malha
+  do MPAS.
+- `show info` informa o tipo de grade (regular ou Voronoi).
+- **Desempenho**: a interpolação usa a triangulação de Delaunay dos pontos
+  (seção 10), calculada uma vez por grade (≈4 s para 361×721) e guardada em
+  cache. `gxout hex` (polígonos das células) não está disponível, pois a
+  grade regular não traz a conectividade do MPAS — use `shaded`, `contour`
+  ou `voronoi`.
+- Grades **curvilíneas** (latitude/longitude 2-D) não são tratadas como
+  regulares.
+
 ## 3. Sintaxe do comando `d` / `display` (2D)
 
 | Forma | Efeito |
@@ -1134,29 +1184,8 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 - Despacho espacial de `d sum`/`mean`/`min`/`max`/`p10`..`p90` `all`/`inlimits`/`point <variavel_ou_expressao>` (seção 2.3; dentro do dispatch de `d`/`display`): reúne os dados via `_dados_estatistica`, chama `calcular_campo` (`estatistics.py`) — que também retorna o **modo** (mapa/ponto/corte/mapa_niveis, conforme a seleção atual de lat/lon/nível e o complemento `point`) — e plota o resultado com `plot_estatistica_campo` (`plot_func.py`); no modo `mapa_niveis`, `calcular_campo` já recusou e retornou `None`, então nada é plotado.
 
 ### `files.py` (antigo `files_nc.py`)
-- `file_open(fileName, setup_toml, gridFile=None, setup_anterior=None)` — abre o arquivo (e a grade, se necessária). Se `setup_anterior` for passado (já há um arquivo aberto na sessão), valida a malha do novo arquivo contra a assinatura já registrada (seção 2.1): rejeita com `(None, None)` se forem diferentes (preservando `setup_anterior` intacto), ou adiciona o novo arquivo a `setup["files"]` com o próximo índice sequencial, se forem iguais. Sem `setup_anterior` (primeiro `open`), monta o `setup` do zero, como antes — inclusive guardando a referência ao `dataset` da malha (`setup["_malha_dataset"]`), usada sob demanda por `gxout hex` (seção 8.1) para ler a conectividade completa. Resiliente à ausência de `nCells`, malha, `xtime`/`initial_time`, `t_iso_levels`.
+- `file_open(fileName, setup_toml, gridFile=None, setup_anterior=None)` — abre o arquivo (e a grade, se necessária). Se `setup_anterior` for passado (já há um arquivo aberto na sessão), valida a malha do novo arquivo contra a assinatura já registrada (seção 2.1): rejeita com `(None, None)` se forem diferentes (preservando `setup_anterior` intacto), ou adiciona o novo arquivo a `setup["files"]` com o próximo índice sequencial, se forem iguais. Sem `setup_anterior` (primeiro `open`), monta o `setup` do zero, como antes — inclusive guardando a referência ao `dataset` da malha (`setup["_malha_dataset"]`), usada sob demanda por `gxout hex` (seção 8.1) para ler a conectividade completa. Detecta arquivos em grade regular (`grade_regular.py`, seção 2.5), lê o tempo de `Time` quando não há `xtime` e usa a coordenada de pressão (`level`) como nível padrão quando não há `t_iso_levels`. Resiliente à ausência de `nCells`, malha, `xtime`/`initial_time`, `t_iso_levels`.
 - `carregar_limites(setup, caminho_csv)` — comando `load limits <arquivo.csv>` (seção 2.2): lê o arquivo de pontos (lat/lon, um por linha), calcula a máscara de células da malha dentro do polígono formado por eles e guarda tudo em `setup["limits_*"]`, pronto para as futuras funções estatísticas dentro da área. Retorna `True`/`False`; em caso de falha, preserva os limites já carregados anteriormente (se houver).
-
-### `roms.py`
-- `eh_roms(dataset)` — `True` se o arquivo tem as dimensões `eta_rho`/`xi_rho` (grade C do ROMS).
-- `abrir_roms(dataset, nome_arquivo, arquivo_grade=None)` — monta o `DatasetRoms` (seção 14): lê a geometria da grade (arquivo separado ou o próprio arquivo de saída; na falta de `lon_rho`, o `grd_file` do atributo global) e devolve `(DatasetRoms, grade_usada)`.
-- `DatasetRoms` — expõe `.variables` (só as variáveis de grade, no formato `(Time, nCells[, nVertLevels])`, mais as virtuais `zgrid`, `u_east`/`v_north`, `ubar_east`/`vbar_north`) e `.dimensions` (`Time`, `nCells`, `nVertLevels`, `nVertLevelsP1`); parâmetros escalares ficam em `.parametros`.
-- `VariavelRoms` (também `VariavelGradeC`, usada por WRF e MOM6) — leitura preguiçosa, **um tempo de cada vez** (`tempo(k)`, com cache pequeno): leva U/V/PSI/q para o ponto de massa (`para_rho`), aplica a máscara, achata a grade 2D e ordena os níveis.
-- `VisaoTempo` / `VariavelTempo` — um tempo de um arquivo de grade C apresentado como arquivo de um tempo só (seção 17).
-- `GradeRoms` — lon/lat de RHO e PSI, máscara, ângulo (radianos), `h` e parâmetros da coordenada s; `profundidade_z(zeta)` calcula *z* com `Vtransform` 1 ou 2.
-- `tempos_roms(dataset)` — datas de `ocean_time`.
-
-### `wrf.py`
-- `eh_wrf(dataset)` — `True` se o arquivo tem as dimensões `south_north`/`west_east`.
-- `abrir_wrf(dataset, nome_arquivo, arquivo_grade=None)` — monta o `DatasetWrf` (seção 15) a partir de `XLAT`/`XLONG` do wrfout ou de um geo_em/wrfinput.
-- `DatasetWrf` — mesmas convenções do `DatasetRoms` (usa a mesma `VariavelGradeC`), sem inversão dos níveis e sem máscara; cria `U_east`/`V_north`, `U10_east`/`V10_north`, `pressure`, `theta`, `tk`, `zgrid` e `zs`.
-- `tempos_wrf(dataset)` — datas de `Times` (ou `XTIME`).
-
-### `mom6.py`
-- `eh_mom6(dataset)` — `True` se o arquivo tem as dimensões `xh`/`yh` (ou `xq`/`yq`).
-- `abrir_mom6(dataset, nome_arquivo, arquivo_grade=None)` — monta o `DatasetMom6` (seção 16) com a grade do `ocean_static.nc` (informado, ou citado em `associated_files`) ou, na falta dele, com a grade nominal `xh × yh`.
-- `GradeMom6` — `geolon`/`geolat`, cantos, `wet`, `deptho`, ângulo; detecta grade simétrica/não simétrica e periodicidade em x, e "rola" as colunas para a costura de longitude ficar na borda.
-- `tempos_mom6(dataset)` — datas de `time`, inclusive no calendário `noleap`.
 
 ### `estatistics.py`
 - `calcular_valor(setup, nome_funcao, arrays, mask, rotulo, modo_point=False)` — forma **escalar** de todas as estatísticas (`sum`/`mean`/`min`/`max`/`p10`..`p90`, seção 2.3): empilha `arrays` (ver `_empilhar`) e reduz a **um único número**, sobre todos os tempos selecionados e, conforme o modo espacial atual (mapa/ponto/corte/mapa_niveis — ver `_modo_espacial`/`_fatia`): todas as células (ou só as de `mask`) no nível único (modo mapa) ou na faixa de níveis (modo corte, ou mapa com `modo_point=True` e faixa genuína — modo `mapa_niveis`), ou toda a faixa de níveis na célula mais próxima (modo ponto — `mask` aí só confere se esse ponto está dentro da área). Imprime o resultado e o retorna (`float`), ou `None` em caso de erro/aviso (variável com formato inesperado, máscara não batendo com a malha atual, nenhuma célula disponível, ou ponto fora da área de limites).
@@ -1248,6 +1277,12 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 - `plot_map(setup, ax)` — mapa de fundo 2D.
 - `plot_map_3d(setup, ax3d)` — mapa de fundo projetado na superfície 3D (`d3` + `draw map`).
 
+### `grade_regular.py`
+- `detectar_grade_regular(dataset)` — decide, pelo conteúdo, se o arquivo está em grade regular lat/lon (seção 2.5); devolve as coordenadas ou `None`.
+- `adaptar_se_regular(dataset)` — devolve o próprio dataset (malha do MPAS) ou um `DatasetGradeRegular`.
+- `DatasetGradeRegular` — mesma interface do `Dataset` do netCDF4, com a dimensão `nCells`, as variáveis virtuais `latCell`/`lonCell` (radianos) e as demais variáveis reorganizadas.
+- `VariavelGradeRegular` — visão de uma variável `(…, latitude, longitude)` como `(Time, nCells[, nível])`; leitura sob demanda (um índice de tempo inteiro lê só aquele instante).
+
 ### `utils.py`
 - `normalize_lon(lon)` — normaliza longitude para (-180, 180].
 - `mag(u, v)` — magnitude vetorial.
@@ -1264,282 +1299,11 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 ## 13. Requisitos de arquivo
 
 - **Sempre necessário**: as variáveis a serem plotadas.
-- **Malha**: `nCells` e `latCell`/`lonCell`, embutidos ou num arquivo de grade externo (seção 10 do manual anterior mantém-se válida: vários cenários de ausência são tratados sem travar).
+- **Malha**: `nCells` e `latCell`/`lonCell` (**ou** uma grade regular com coordenadas 1-D de latitude e longitude — seção 2.5), embutidos ou num arquivo de grade externo (seção 10 do manual anterior mantém-se válida: vários cenários de ausência são tratados sem travar).
 - **Tempo** (opcional, com valores de reserva): `xtime`, `initial_time`.
 - **Níveis de pressão** (opcional): `t_iso_levels` (Pa).
 - **Níveis de solo** (opcional): dimensão `nSoilLevels` com `zs` (profundidade dos centros) ou `dzs` (espessura das camadas). Sem isso, usa o índice.
 - Sem nenhum deles, usa índice de nível do modelo.
 - **Altura real** (opcional, corte/perfil/`d3` por altura): `zgrid`.
 - **`voronoi`/`shaded`/`contour`/corte/`streamlines`**: só precisam de `latCell`/`lonCell` — não é necessária a conectividade completa (`verticesOnCell` etc.).
-- **MOM6** (seção 16): dimensões `xh`/`yh`; para a grade tripolar real, `ocean_static.nc` com `geolon`/`geolat`; `time`; níveis `z_l`/`z_i`.
-- **WRF** (seção 15): dimensões `south_north`/`west_east` e `XLAT`/`XLONG`; `Times`; para altura, `PH`/`PHB`; para solo, `ZS`.
-- **ROMS** (seção 14): dimensões `eta_rho`/`xi_rho` e `lon_rho`/`lat_rho` (no arquivo ou numa grade separada); `ocean_time`; para profundidade, `Vtransform`, `s_rho`, `Cs_r`, `hc` e `h`.
 - **`hex`** (seção 8.1): precisa da conectividade completa da malha — `verticesOnCell`, `nEdgesOnCell`, `latVertex`, `lonVertex` — presente no arquivo de grade padrão do MPAS/MONAN (`x1.<nCells>.grid.nc`), mas tipicamente ausente em saídas de diagnóstico/pós-processadas. Sem essa conectividade, o programa avisa e sugere `voronoi` em vez de travar.
-
-## 14. Saídas do modelo oceânico ROMS (grade Arakawa C)
-
-Além da malha de Voronoi do MONAN/MPAS, o programa abre saídas do **ROMS**
-(ex.: `ocean_avg.nc`, `ocean_his.nc` do COAWST), cuja grade é **curvilínea e
-estruturada**, com as variáveis **defasadas** na grade C de Arakawa:
-
-| Ponto | Dimensões | Variáveis típicas |
-| --- | --- | --- |
-| RHO (centro da célula) | `eta_rho`, `xi_rho` | `temp`, `salt`, `rho`, `zeta`, `h`, `omega` |
-| U (face oeste/leste) | `eta_u`, `xi_u` | `u`, `ubar`, `Huon`, `u_temp`... |
-| V (face sul/norte) | `eta_v`, `xi_v` | `v`, `vbar`, `Hvom`, `v_temp`... |
-| PSI (canto da célula) | `eta_psi`, `xi_psi` | (vorticidade, se houver) |
-
-O arquivo é reconhecido automaticamente pelas dimensões `eta_rho`/`xi_rho`.
-
-### 14.1 Abrindo
-
-```
-open ocean_avg.nc                      # grade lida do próprio arquivo de saída
-open ocean_avg.nc swa6_grd.nc          # grade num arquivo separado
-open ocean_avg_*.nc swa6_grd.nc        # vários arquivos (série no tempo)
-```
-
-- Se o arquivo de saída já traz `lon_rho`/`lat_rho`/`mask_rho`/`angle`/`h`
-  (o padrão do ROMS), o arquivo de grade é opcional. Quando informado, a
-  geometria (lon/lat, máscara, ângulo, batimetria) vem dele; os parâmetros
-  da coordenada vertical (`Vtransform`, `s_rho`, `Cs_r`, `hc`) vêm sempre do
-  arquivo de dados.
-- Se o arquivo de saída **não** tiver `lon_rho`/`lat_rho` e nenhuma grade for
-  informada, o programa procura o arquivo do atributo global `grd_file` no
-  mesmo diretório.
-- O ângulo `angle` é sempre usado em radianos. Arquivos de grade costumam
-  rotulá-lo como `degree` mesmo guardando radianos (o ROMS lê radianos); o
-  programa decide pelos valores (|angle| > 2π só pode ser grau).
-- O tempo vem de `ocean_time` (ex.: `seconds since 1970-01-01 00:00:00`).
-
-### 14.2 Como a grade C é tratada
-
-Internamente, cada ponto **RHO** vira uma "célula" (o resto do programa vê
-`nCells = eta_rho × xi_rho`), e:
-
-- variáveis em **U**, **V** ou **PSI** são levadas para os pontos RHO pela
-  média dos dois (ou quatro) vizinhos — nas bordas do domínio, onde só há um
-  vizinho, o valor da borda é repetido;
-- pontos de **terra** (`mask_rho = 0`) e o `_FillValue` viram "sem dado";
-- **`u_east`/`v_north`** (e `ubar_east`/`vbar_north`) são criadas
-  automaticamente: são `u`/`v` (já em RHO) **rotacionadas** da direção da
-  grade (ξ, η) para leste/norte com o `angle` da grade. **Use estas para
-  vetores, barbelas e linhas de corrente** — `u`/`v` puros estão na direção
-  da grade, que pode ser bem diferente de leste/norte numa grade rotacionada:
-
-```
-set lev 0
-set gxout shaded
-d sqrt(u_east**2+v_north**2)
-set gxout vect
-d u_east;v_north
-```
-
-- variáveis de parâmetros escalares (`dt`, `rdrg`, `Cs_r`...) e as
-  coordenadas dos pontos defasados (`lon_u`, `mask_v`...) não aparecem em
-  `show info`.
-
-### 14.3 Níveis verticais (coordenada s)
-
-- `set lev 0` é a **superfície**; o último índice (ex.: `set lev 29` com 30
-  níveis) é o **fundo** — a ordem é invertida em relação ao ROMS (onde
-  k = 1 é o fundo), para ficar natural num oceano.
-- Variáveis em `s_rho` usam a dimensão `nVertLevels`; em `s_w` (ex.:
-  `omega`), `nVertLevelsP1`.
-- A variável virtual **`zgrid`** traz a profundidade *z* (m, negativa) de cada
-  nível *s* em cada ponto, calculada com `Vtransform` 1 ou 2, `Cs_r`, `s_rho`,
-  `hc`, `h` e `zeta` do primeiro tempo. Ela é usada em:
-  - `show levels` / `set lev`: mostram a profundidade **média** de cada nível
-    (o nível *s* acompanha o fundo, então a profundidade real varia de ponto
-    a ponto);
-  - cortes verticais (`set lat <valor>` ou `set lon <valor>` + `set lev 0 29`)
-    e perfis (`set lat`/`set lon` num ponto): o eixo Y é a profundidade real.
-    Colunas em terra aparecem hachuradas.
-
-### 14.4 `gxout` na grade estruturada
-
-| `gxout` | No ROMS |
-| --- | --- |
-| `shaded` / `contour` | `contourf`/`contour` direto nas coordenadas 2D dos pontos RHO, sem triangulação — rápido mesmo na grade cheia. |
-| `grfill` (também `voronoi`/`hex`) | Pinta cada célula com o seu valor, usando os **cantos reais** da célula (pontos PSI): a grade curvilínea exata do modelo, sem interpolação. |
-| `vect` / `barb` | Setas/barbelas amostradas (~45 por lado da área visível), com escala automática e seta de referência em m/s. |
-| `stream` | Linhas de corrente sobre uma grade regular amostrada do ponto RHO mais próximo. |
-
-Os cortes verticais triangulam apenas os pontos em volta da linha do corte
-(em vez da grade inteira), então também ficam rápidos na grade completa.
-
-### 14.5 Limitações conhecidas
-
-- O `zgrid` usa a `zeta` do primeiro tempo do arquivo (diferença de
-  centímetros na profundidade dos níveis).
-- Grades que cruzam a linha de data (±180°) não são tratadas.
-- Arquivos ROMS e MONAN não podem ser abertos na mesma sessão (malhas
-  diferentes — use `reinit`).
-
-## 15. Saídas do modelo atmosférico WRF (grade Arakawa C)
-
-Arquivos `wrfout_*` do WRF são reconhecidos pelas dimensões
-`south_north`/`west_east` e tratados com a mesma maquinaria do ROMS
-(seção 14): os pontos de **massa** viram as "células" e as variáveis
-defasadas são levadas para eles.
-
-| Ponto | Dimensões | Variáveis típicas |
-| --- | --- | --- |
-| Massa | `south_north`, `west_east` | `T`, `P`, `PB`, `QVAPOR`, `T2`, `U10`, `V10`, `HGT`, `RAINNC`... |
-| U | `south_north`, `west_east_stag` | `U`, `MAPFAC_U` |
-| V | `south_north_stag`, `west_east` | `V`, `MAPFAC_V` |
-
-Diferente do ROMS, no WRF a grade defasada tem uma coluna/linha **a mais**
-que a de massa (`west_east_stag` = `west_east` + 1): cada ponto de massa
-recebe a média exata das suas duas faces, sem repetição de borda.
-
-### 15.1 Abrindo
-
-```
-open wrfout_d01_2021-07-01_12:00:00               # grade do próprio wrfout (XLAT/XLONG)
-open wrfout_d01_*                                  # vários arquivos (série no tempo)
-open wrfout_d01_... geo_em.d01.nc                  # grade separada (só se o wrfout não tiver XLAT/XLONG)
-```
-
-O tempo vem de `Times` (ou de `XTIME`, na falta dele). Num wrfout com vários
-horários, cada horário vira uma entrada de `show files`, e `set t <n>`
-escolhe o horário (seção 17).
-
-### 15.2 Níveis
-
-- `bottom_top` → `nVertLevels` (níveis de massa); `bottom_top_stag` →
-  `nVertLevelsP1` (interfaces: `W`, `PH`, `PHB`...); `soil_layers_stag` →
-  `nSoilLevels` (solo).
-- A ordem do WRF é mantida: **nível 0 = o mais baixo**, junto à superfície
-  (a mesma convenção do MONAN).
-- `zgrid` (virtual) = altura geopotencial `(PH+PHB)/g` nas interfaces, do
-  primeiro tempo. É usada por `set lev` (altura média do nível), cortes
-  verticais e perfis, que acompanham o terreno.
-- `zs` (virtual) = profundidade das camadas de solo (de `ZS`), usada por
-  `show levels solo` e `set lev` em variáveis como `TSLB` e `SMOIS`.
-
-### 15.3 Variáveis derivadas (virtuais)
-
-| Variável | Conteúdo |
-| --- | --- |
-| `U_east`, `V_north` | `U`/`V` em pontos de massa, rotacionados para leste/norte com `SINALPHA`/`COSALPHA` |
-| `U10_east`, `V10_north` | o mesmo para `U10`/`V10` |
-| `pressure` | pressão total `P+PB`, em hPa |
-| `theta` | temperatura potencial `T+300`, em K |
-| `tk` | temperatura do ar, em K |
-
-Em projeção Mercator a rotação é nula, mas em Lambert ou estereográfica
-polar ela é necessária, por isso use sempre `U_east;V_north` para vetores:
-
-```
-set lev 0
-set gxout shaded
-d T2-273.15
-set gxout barb
-d U10_east;V10_north
-```
-
-Os comandos de `gxout` (`shaded`, `contour`, `grfill`, `vect`, `barb`,
-`stream`) funcionam como descrito na seção 14.4.
-
-### 15.4 Limitações conhecidas
-
-- Não há interpolação para níveis de pressão (`set lev 850` em hPa): os
-  níveis são os níveis eta do modelo. Para um campo numa superfície de
-  pressão, interpole antes (ex.: com `wrf-python`/`p_interp`).
-- `zgrid` usa o primeiro tempo do arquivo.
-- WRF e MONAN/ROMS não podem ser abertos na mesma sessão (use `reinit`).
-
-## 16. Saídas do modelo oceânico MOM6 (grade tripolar, Arakawa C)
-
-Arquivos de diagnóstico do MOM6 (ex.: `tempsalt.nc`, `ocean_daily.nc`,
-`ocean_month.nc`) são reconhecidos pelas dimensões `xh`/`yh` e tratados com
-a mesma maquinaria do ROMS e do WRF (seções 14 e 15).
-
-### 16.1 Abrindo — e por que o `ocean_static.nc` importa
-
-```
-open tempsalt.nc ocean_static.nc     # grade real (recomendado)
-open tempsalt.nc                      # procura o estático citado em 'associated_files'
-open ocean_daily_*.nc ocean_static.nc # vários arquivos
-```
-
-Os arquivos de diagnóstico só trazem as coordenadas **nominais** 1-D `xh`
-e `yh`. Numa grade **tripolar** global, elas não são a posição real ao norte
-de ~65°N, onde a grade se dobra sobre dois polos sobre a terra. A posição
-real fica no arquivo estático (`ocean_static.nc`), com `geolon`/`geolat`
-(centros), `geolon_c`/`geolat_c` (cantos), `wet` (máscara), `deptho`
-(profundidade) e `sin_rot`/`cos_rot` (rotação da grade).
-
-- Sem estático informado, o programa procura o arquivo citado no atributo
-  global `associated_files` (ex.: `area_t: ocean_static.nc`) no mesmo
-  diretório.
-- Sem nenhum, usa a grade nominal `xh × yh` e avisa. Isso é correto para
-  grades regulares e para tudo ao sul de ~65°N numa grade tripolar.
-
-### 16.2 Tratamento da grade
-
-| Ponto | Dimensões | Variáveis típicas |
-| --- | --- | --- |
-| h (centro) | `yh`, `xh` | `temp`, `salt`, `SSH`, `thetao`, `so`, `mlotst` |
-| u (face leste) | `yh`, `xq` | `uo`, `u`, `taux` |
-| v (face norte) | `yq`, `xh` | `vo`, `v`, `tauy` |
-| q (canto) | `yq`, `xq` | vorticidade |
-
-- Grade **simétrica** (`xq` = `xh` + 1): média das duas faces. Grade
-  **não simétrica** (`xq` = `xh`): face leste/norte de cada célula, e num
-  domínio global a primeira coluna usa a última como face oeste
-  (periodicidade em x).
-- **`uo_east`/`vo_north`** (e `u_east`/`v_north`, `taux_east`/`tauy_north`)
-  são criadas quando os pares existem: correntes rotacionadas para
-  leste/norte com `sin_rot`/`cos_rot` (ou com o ângulo calculado das
-  coordenadas). Use-as para vetores.
-- **Costura de longitude:** em geral `geolon` vai de −300 a 60. Normalizada
-  para (−180, 180], cada linha teria um salto de 360°; as colunas são
-  "roladas" para o salto ficar na borda do mapa. Na região tripolar do
-  Ártico ainda há saltos, e os pontos vizinhos a eles são mascarados nos
-  mapas, para não aparecer uma faixa atravessando o globo (fica uma linha
-  fina sem cor ao longo da costura).
-- Pontos de terra (`wet = 0`) e o `_FillValue` (1e20) viram "sem dado".
-
-### 16.3 Níveis
-
-- `z_l` (centro da camada) → `nVertLevels`; `z_i` (interfaces) →
-  `nVertLevelsP1`. Também valem `zl`/`zi` e `rho2_l`/`rho2_i`.
-- **`set lev 0` é a superfície** (a ordem do próprio MOM6).
-- `zgrid` (virtual) = −`z_l` em todos os pontos. `show levels` e `set lev`
-  mostram a profundidade de cada camada, e cortes e perfis usam
-  profundidade no eixo Y; o fundo e a terra aparecem hachurados.
-
-### 16.4 Tempo
-
-O tempo vem de `time` (ex.: `days since 2026-03-29 00:00:00`), com suporte
-aos calendários `gregorian`/`julian` e `noleap`/`365_day`, comum no MOM6.
-
-## 17. Arquivos com vários tempos (ROMS, WRF, MOM6)
-
-Num arquivo de grade C com vários tempos, **cada tempo vira uma entrada
-própria** em `show files`, como se fosse um arquivo de um tempo só. Assim
-`set t` funciona como entre vários arquivos do MONAN:
-
-```
-open tempsalt.nc ocean_static.nc   # 767 tempos -> entradas 1 a 767
-show files                         # lista as entradas, com a data de cada uma
-set t 300                          # escolhe o tempo 300
-d temp
-set lat -23
-set lon -40
-set t 1 767                        # série temporal no ponto
-d SSH
-```
-
-- Os dados são lidos **um tempo de cada vez**, sob demanda: um arquivo
-  maior que a memória (ex.: `temp` com 767 × 75 × 155 × 180 valores, ~6 GB)
-  abre normalmente.
-- Abrindo vários arquivos (`open ocean_daily_*.nc`), as entradas seguem em
-  sequência: os tempos do primeiro arquivo, depois os do segundo, e assim
-  por diante.
-- Séries e estatísticas sobre um intervalo longo de tempos (`set t 1 767`)
-  leem cada tempo uma vez, mas guardam o resultado de todos. Para uma
-  variável 3D num intervalo longo, isso pode ocupar bastante memória; num
-  ponto, numa área ou com uma variável 2D, o custo é pequeno.
