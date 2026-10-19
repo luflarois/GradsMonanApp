@@ -26,7 +26,7 @@ from .estatistics import NOMES_ESTATISTICA_ESCALAR
 _COMANDOS_CONHECIDOS = {
     "!", "exec", "q", "exit", "quit", "run", "open", "reinit",
     "gxprint", "show", "c", "reset", "load", "set", "draw", "d3", "display", "d",
-    "let", "undef",
+    "let", "undef", "sel", "acum",
 } | set(NOMES_ESTATISTICA_ESCALAR)
 
 # Marcadores de texto (secao 1 do manual) usados para reconhecer, na saida
@@ -119,7 +119,7 @@ def main():
     print("|                  GRADS-MONAN APP                   |")
     print("|        (a Grads/Cola clone for MONAN Model)        |")
     print("| Author: Luiz Flávio Rodrigues : luflarois@pm.me    |")
-    print("| Revision: 0.6.0                                    |")
+    print("| Revision: 0.1.0                                    |")
     print("| Licence: \U0001F12F GPLv3 \U0001F12F                                 |")
     print("+----------------------------------------------------+\n")
 

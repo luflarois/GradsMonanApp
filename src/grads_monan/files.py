@@ -285,6 +285,7 @@ def file_open(fileName, setup_toml, gridFile=None, setup_anterior=None):
                  "title_style"     : setup_toml.get("title_style", "normal"),
                  "bar_position"    : setup_toml.get("bar_position", ""),
                  "background"      : setup_toml.get("background", ""),
+                 "sel"             : {"lat": None, "lon": None, "t": None},
                  "grid_color"      : setup_toml.get("grid_color", ""),
                  "grid_size"       : setup_toml.get("grid_size", ""),
                  "grid_type"       : setup_toml.get("grid_type", ""),

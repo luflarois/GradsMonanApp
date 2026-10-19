@@ -12,7 +12,8 @@ import numpy as np
 
 from .plot_func import atualizar_titulo_janela, _fonte_existe, _aplicar_rotulos_eixos, aplicar_fundo, restaurar_fundo, aplicar_grade, reaplicar_estilo_grade, resolver_tipo_linha
 from matplotlib.colors import is_color_like
-from .utils import descritores_disponiveis, formatar_nivel
+from .utils import descritores_disponiveis, formatar_nivel, normalize_lon
+from .estatistics import nova_selecao, descricao_sel
 
 _ESTILOS_TEXTO_VALIDOS = ("bold", "italic", "normal")
 _BAR_POSICOES_VALIDAS = ("U", "D", "L", "R")
@@ -197,16 +198,13 @@ def _print_level_info(setup, l, lf=None):
     for d in niveis:
         if ultimo >= d["n"]:
             continue
-        if d["tipo"] in ("pressao", "solo") or d.get("unidade") == "m":
+        if d["tipo"] in ("pressao", "solo"):
             txt = formatar_nivel(d, l) if l == ultimo else "{0} ate {1}".format(formatar_nivel(d, l), formatar_nivel(d, ultimo))
             partes.append("{0}: {1}".format(d["nome_tipo"], txt))
         elif d["tipo"] == "altura" and "zgrid" in variables:
             try:
                 altura = _altura_media_zgrid(variables["zgrid"], d["n"], l)
-                if getattr(variables, "modelo", None) in ("ROMS", "MOM6"):
-                    partes.append("{0}: profundidade media = {1:.1f} m".format(d["nome_tipo"], altura))
-                else:
-                    partes.append("{0}: zgrid medio = {1:.1f} m".format(d["nome_tipo"], altura))
+                partes.append("{0}: zgrid medio = {1:.1f} m".format(d["nome_tipo"], altura))
             except Exception:
                 partes.append("{0}: indice {1}".format(d["nome_tipo"], l))
         else:
@@ -220,7 +218,6 @@ def _print_level_info(setup, l, lf=None):
             print("Nivel {0} selecionado.".format(l))
         return
 
-    partes = [p for i, p in enumerate(partes) if p not in partes[:i]]
     if not partes:
         print("Nivel {0} selecionado.".format(l))
         return
@@ -243,12 +240,7 @@ def _altura_media_zgrid(zgrid_var, n_levels, l):
         raise ValueError("dimensao de nivel nao identificada em zgrid")
     slicer = [slice(None)] * len(shape)
     slicer[eixo_nivel] = l
-    valor = np.asarray(zgrid_var[tuple(slicer)], dtype=float)
-    if shape[eixo_nivel] == n_levels + 1:
-        # zgrid nas interfaces e niveis no meio das camadas: centro da camada
-        slicer[eixo_nivel] = l + 1
-        valor = 0.5 * (valor + np.asarray(zgrid_var[tuple(slicer)], dtype=float))
-    return float(np.nanmean(valor))
+    return float(np.nanmean(np.asarray(zgrid_var[tuple(slicer)])))
 
 def _print_arquivo_info(setup, n):
     """
@@ -262,6 +254,92 @@ def _print_arquivo_info(setup, n):
             print("Arquivo {0} selecionado: {1} ({2}).".format(n, info["fileName"], timestamp))
             return
     print("Arquivo {0} selecionado.".format(n))
+
+def _faixa_lon_sel(a, b):
+    """Normaliza a faixa de longitude de 'sel lon <ini> <fim>'. Aceita
+    -180..180 e 0..360; <ini> maior que <fim> (apos a normalizacao) cruza a
+    linha de data/meridiano 0 (ex: 'sel lon 170 -170'); faixa de 360 graus
+    ou mais cobre tudo."""
+    if a <= b:
+        if b - a >= 360 or (a <= -180 and b >= 180):
+            return (-180.0, 180.0)
+        if -180 <= a and b <= 180:
+            return (a, b)
+    return (float(normalize_lon(a)), float(normalize_lon(b)))
+
+def cmd_sel(cmd_split, setup, cmd_user):
+    """
+    Comando 'sel' (secao 2.6 do manual): REGIAO e INTERVALO DE TEMPO usados
+    pelas estatisticas ao longo do tempo ('<estatistica> sel <variavel>',
+    'd <estatistica> sel <variavel>', com o pre-comando 'acum'). Independente
+    do 'set' (que continua escolhendo o que 'd'/'d3' plotam):
+
+      sel                     mostra a selecao atual
+      sel lat <ini> <fim>     faixa de latitude (graus)
+      sel lon <ini> <fim>     faixa de longitude (graus; aceita -180..180 e 0..360)
+      sel t <ini> <fim>       arquivos abertos de <ini> a <fim> (o mesmo
+                              numero de 'show files'; <fim> opcional)
+      sel lat|lon|t clear     limpa so aquele item
+      sel clear               limpa tudo (todo o dominio e todos os arquivos)
+    """
+    sel = setup.get("sel")
+    if sel is None:
+        sel = setup["sel"] = nova_selecao()
+    uso = "Uso: sel  |  sel lat <ini> <fim>  |  sel lon <ini> <fim>  |  sel t <ini> <fim>  |  sel lat|lon|t clear  |  sel clear"
+    if len(cmd_split) == 1:
+        print("Selecao (sel): " + descricao_sel(setup))
+        return setup
+    sub = cmd_split[1]
+    if sub in ("clear", "off", "reset"):
+        setup["sel"] = nova_selecao()
+        print("Selecao 'sel' limpa (todo o dominio, todos os arquivos abertos).")
+        return setup
+    if sub not in ("lat", "lon", "t", "time"):
+        print(uso)
+        return setup
+    sub = "t" if sub == "time" else sub
+    if len(cmd_split) == 3 and cmd_split[2] in ("clear", "off"):
+        sel[sub] = None
+        print("Selecao de {0} limpa.".format(sub))
+        return setup
+    try:
+        if sub == "t":
+            if len(cmd_split) not in (3, 4):
+                print("Uso: sel t <arquivo_inicial> [<arquivo_final>]")
+                return setup
+            a = int(cmd_split[2])
+            b = int(cmd_split[3]) if len(cmd_split) == 4 else a
+        else:
+            if len(cmd_split) != 4:
+                print("Uso: sel {0} <inicial> <final>".format(sub))
+                return setup
+            a, b = float(cmd_split[2]), float(cmd_split[3])
+    except ValueError:
+        print("Erro: valores invalidos em '{0}'.".format(cmd_user))
+        return setup
+
+    if sub == "lat":
+        if a > b:
+            print("Erro: a latitude inicial ({0:g}) nao pode ser maior que a final ({1:g}).".format(a, b))
+            return setup
+        if a < -90 or b > 90:
+            print("Erro: latitude fora do intervalo -90 a 90.")
+            return setup
+        sel["lat"] = (a, b)
+    elif sub == "lon":
+        sel["lon"] = _faixa_lon_sel(a, b)
+    else:
+        indices = [f["index"] for f in setup.get("files", [])]
+        if a not in indices or b not in indices:
+            print("Erro: arquivo(s) fora dos abertos (arquivos abertos: {0}). Use 'show files'.".format(
+                ", ".join(str(i) for i in indices) if indices else "nenhum"))
+            return setup
+        if a > b:
+            print("Erro: o arquivo inicial ({0}) nao pode ser maior que o final ({1}).".format(a, b))
+            return setup
+        sel["t"] = (a, b)
+    print("Selecao (sel): " + descricao_sel(setup))
+    return setup
 
 def cmd_set(cmd_split, setup, cmd_user):
     """

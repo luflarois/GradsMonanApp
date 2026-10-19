@@ -101,8 +101,10 @@ começam com `Aviso:` são avisos informativos (ex.: ao abrir um arquivo sem
 | `load limits <arquivo.csv>` | Carrega uma área fechada (polígono) a partir de um arquivo de pontos lat/lon, marca quais células da malha aberta caem dentro dela e plota um mapa de conferência — ver seção 2.2. |
 | `sum`/`mean`/`min`/`max`/`p10`..`p90` `all\|inlimits\|point <variavel>` | Imprime uma estatística (soma, média, mínimo, máximo ou percentil) da variável — em todas as células da malha, só nas de dentro da última área de `load limits`, ou (`point`) reduzindo também sobre a faixa de níveis selecionada, mesmo sem um ponto/corte fixado; agregando todos os arquivos do intervalo de `set t`, quando houver mais de um — ver seção 2.3. |
 | `d sum\|mean\|min\|max\|p10..p90 all\|inlimits\|point <variavel>` | Como acima, mas plota o resultado **ponto a ponto** (um mapa, perfil ou corte), em vez de reduzir a um único número — ver seção 2.3. |
+| `sel` / `sel lat <ini> <fim>` / `sel lon <ini> <fin>` / `sel t <ini> [<fim>]` | Define a **região e o período** usados pelas estatísticas ao longo do tempo (`sel`, **não** `set`). Sem argumentos, mostra a seleção atual — ver seção 2.6. |
+| `sum`/`mean`/`min`/`max`/`p10`..`p90 sel <variavel>` e `acum <estatistica> sel <variavel>` | Estatística da variável **na região do `sel`, instante a instante** (uma linha por arquivo); com `acum`, sobre o campo **acumulado** no tempo. `d ...` plota a curva — ver seção 2.6. |
 | `reinit` | Fecha **todos** os arquivos abertos na sessão, apaga toda a configuração associada a eles (inclusive os caches de triangulação em memória) e volta ao estado inicial, pronto para um novo `open`. Também limpa a janela de gráficos. |
-| `reset` | Volta a seleção de **latitude/longitude/nível/corte (`set cut`)/arquivo (`set t`)** para a condição inicial (toda a malha, nível padrão da configuração, corte desligado, arquivo 1, série/animação desligada) e **limpa** título, rótulo de linha/legenda, rótulo da colorbar, o mapa de fundo automático (`draw map`) e o gráfico atual — mas **mantém os arquivos abertos** (ao contrário de `reinit`). Ver detalhes abaixo. |
+| `reset` | Volta a seleção de **latitude/longitude/nível/corte (`set cut`)/arquivo (`set t`)/região do `sel`** para a condição inicial (toda a malha, nível padrão da configuração, corte desligado, arquivo 1, série/animação desligada) e **limpa** título, rótulo de linha/legenda, rótulo da colorbar, o mapa de fundo automático (`draw map`) e o gráfico atual — mas **mantém os arquivos abertos** (ao contrário de `reinit`). Ver detalhes abaixo. |
 | `run <script>` | Executa, em sequência, os comandos contidos no arquivo de script informado (um comando por linha). |
 | `c` | Limpa o gráfico ativo no momento. Se o `d3` foi o último a plotar, limpa a **janela 3D** (recriando o eixo); se foi o `d`, limpa a janela 2D (só o painel atual, se `set pages` estiver ativo). |
 | `gxprint <arquivo_saida>` | Salva a figura atual em disco (PNG, PDF, etc.), usando `fig_dpi`/`fig_inches`/`fig_transparency` do `setup`. |
@@ -774,6 +776,76 @@ Detalhes:
 - Grades **curvilíneas** (latitude/longitude 2-D) não são tratadas como
   regulares.
 
+## 2.6 Estatística ao longo do tempo numa região (`sel`, `acum`)
+
+Os comandos `sel` (atenção: é `sel`, **não** `set`) definem uma **região
+geográfica** e um **período**; combinados com uma função estatística
+(seção 2.3) e a palavra `sel`, produzem uma **curva da estatística no
+tempo** — um valor por arquivo/instante aberto.
+
+| Comando | Efeito |
+|---|---|
+| `sel` | Mostra a seleção atual (e quantas células ela contém). |
+| `sel lat <ini> <fin>` | Faixa de latitude (−90 a 90, `ini <= fin`). |
+| `sel lon <ini> <fin>` | Faixa de longitude. Aceita 0–360 ou −180–180; se `ini > fin` a faixa **cruza o meridiano** (ex. `sel lon 350 10` = −10 a 10; `sel lon 170 -170` cruza a linha de data). |
+| `sel t <ini> [<fim>]` | Arquivos (pelo número de `show files`) incluídos na curva. Sem `sel t`, todos os abertos. |
+| `sel lat\|lon\|t clear` | Limpa só aquela parte. |
+| `sel clear` (ou `off`, `reset`) | Limpa toda a seleção. |
+
+O `reset` também limpa o `sel`. Cada parte não definida significa "tudo"
+(todo o domínio / todos os arquivos abertos). O `sel` é **independente** do
+`set lat`/`set lon`/`set t`, que continuam controlando o que `d` plota
+como mapa.
+
+### Estatística no tempo: `<função> sel <variável>`
+
+```
+> sel lat 10 30
+> sel lon 10 30
+> sum sel t2m
+Soma de t2m (lat 10 a 30, lon 10 a 30, t: todos os arquivos abertos; 25 celula(s)):
+  arquivo   1  2024-01-01T0   50.0
+  arquivo   2  2024-01-01T6   100.0
+  arquivo   3  2024-01-01T12  150.0
+> d sum sel t2m          # plota a curva (eixo x = data/hora)
+> d mean sel t2m-273.15  # aceita expressão e variáveis do let
+```
+
+- Funções: `sum`, `mean`, `min`, `max`, `p10`..`p90` (as mesmas da seção 2.3).
+- Sem `d`: imprime a tabela. Com `d`: plota a curva, com o eixo x em
+  data/hora (como as séries da seção 2.1), o eixo y `"<Função> de <var>"`
+  e a região no título.
+- Variável 3D: usa o nível de `set lev`; com faixa (`set lev 0 2`), reduz
+  também sobre os níveis da faixa.
+- A variável pode ser nome, `nome.N`, expressão ou variável do `let`.
+- Erros: região sem nenhuma célula, `sel t` fora dos arquivos abertos,
+  variável inexistente. Com apenas um instante, avisa que não há curva.
+
+### Acumulação no tempo: `acum`
+
+`acum` é um **pré-comando**: antes de aplicar a estatística, acumula
+(soma ao longo do tempo) o campo **célula a célula**, ignorando `NaN`; só
+depois reduz a região.
+
+```
+> acum sum sel t2m
+Soma de t2m (acumulado no tempo) (lat 10 a 30, lon 10 a 30, t: todos os arquivos abertos; 25 celula(s)):
+  arquivo   1  2024-01-01T0   50.0
+  arquivo   2  2024-01-01T6   150.0
+  arquivo   3  2024-01-01T12  300.0
+> d acum sum sel chuva   # curva da chuva acumulada na região
+```
+
+`acum` exige `sel` no comando (`d acum t2m` dá erro de uso).
+
+### `show info` e `show sel`
+
+`show info` agora mostra, além do arquivo e das variáveis, os blocos
+**"Configuração atual (set)"** (lat, lon, lev, t, gxout, cmap, clevs, cut,
+map, grade…) e **"Seleção atual (sel)"** (`sel lat`, `sel lon`, `sel t` e
+nº de células na região). `show sel` mostra apenas o segundo bloco.
+
+---
 ## 3. Sintaxe do comando `d` / `display` (2D)
 
 | Forma | Efeito |
@@ -859,6 +931,7 @@ globais muito amplos.
 | `show map_color` / `show map_line` | Cor/espessura da linha do mapa de fundo. |
 | `show lat` / `show lon` | Intervalo de latitude/longitude atualmente selecionado. |
 | `show cmap` | Colormap atual. |
+| `show sel` | Seleção atual do `sel` (lat, lon, t) e nº de células na região — seção 2.6. O `show info` também mostra os `set` e `sel` atuais. |
 | `show setup` | Imprime o dicionário `setup` inteiro (debug). |
 | `show limits` | Resumo da área de limites carregada por `load limits` (seção 2.2): arquivo, número de pontos do polígono e quantas células da malha caem dentro dela. Avisa se nenhuma área foi carregada ainda. |
 | `show fonts` | Lista, em ordem alfabética, as fontes TrueType/OpenType instaladas no sistema e reconhecidas pelo matplotlib — use um destes nomes em `set label font <nome>`/`set title font <nome>`/`set xlabel font <nome>`/`set ylabel font <nome>` (seção 6). |
@@ -1118,6 +1191,7 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 | `levels` / `eixo_pressao` | Nível *padrão* do arquivo (pressão se houver `t_iso_levels`; senão níveis do modelo), usado só quando a variável é desconhecida. O tipo de nível de cada variável vem de `utils.descritor_nivel` (seção 8.2). |
 | `_nivel_atual` | Descritor do nível da variável do comando em andamento (tipo, valores, rótulo, sentido do eixo), registrado por `exec_func.py` ao resolver a variável. |
 | `lat_min`, `lat_max`, `lon_min`, `lon_max` | Domínio geográfico selecionado. |
+| `sel` | `{"lat": None\|(ini, fin), "lon": None\|(ini, fin), "t": None\|(ini, fim)}` — região/período do comando `sel` (seção 2.6). Limpo por `reset`. |
 | `lev`, `levf` | Índice de nível (único ou intervalo) selecionado. |
 | `cut` | `None`, ou `(minimo, maximo)` — ver `set cut`. |
 | `time`, `time_variable`, `time_units`, `time_str`, `DataDado` | Informações de tempo (com valores de reserva se ausentes). |
@@ -1200,14 +1274,20 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 - `sum_all`/`sum_inlimits`/`mean_all`/`mean_inlimits` — atalhos nomeados equivalentes a `calcular_valor` com o nome da função já fixado (úteis para chamar diretamente, ex. em testes).
 - `NOMES_ESTATISTICA_ESCALAR`, `NOMES_ESTATISTICA_ESPACIAL` — tuplas com os nomes de comando reconhecidos por `exec_func.py` (todas as estatísticas têm tanto a forma escalar quanto a espacial, incluindo `sum`).
 
+- `mascara_sel(setup)` / `descricao_sel(setup)` / `nova_selecao()` — máscara booleana de células na região do `sel` (com cruzamento de meridiano), texto da região e seleção vazia. `calcular_serie_sel(setup, nome_funcao, dados, rotulo, acumular=False)` — para cada arquivo, fatia `[time_sel][máscara]` (e os níveis de `set lev`), acumula célula a célula (`acum`, ignorando `NaN`) e aplica a estatística; retorna `(valores, {n_cel, niveis})` ou `None`.
+
 ### `set_func.py`
 - `cmd_set(...)` / `_cmd_set_dispatch(...)` — comando `set` (tabela da seção 6), com validação numérica segura. `set lev <n1> <n2>` valida `<n1>`/`<n2>` como índices de nível **inclusivos** (0 a `n_niveis-1`, com `<n1> <= <n2>`) e guarda internamente `setup["levf"] = <n2> + 1` — o limite EXCLUSIVO usado por toda fatia de nível do resto do código (`var[..., lev:levf]` — ver `levf_efetivo` em `utils.py`); sem esse `+1`, incluir o último nível pedido exigiria um índice inválido.
+- `cmd_sel(cmd_split, setup, cmd_user)` / `_faixa_lon_sel(a, b)` — comando `sel` (seção 2.6): valida e guarda `setup['sel']`; normaliza longitudes (0–360 → −180–180, preservando o cruzamento do meridiano).
 - `_print_level_info(setup, l, lf=None)` — informação do nível (ou faixa) ao usar `set lev`, em cada tipo de nível do arquivo (pressão, solo, altura).
 - `_set_estilo_texto(setup, alvo, cmd_split, cmd_user)` — implementa `set label|title|xlabel|ylabel font/color/size/style` (`alvo` é `"label"`, `"title"`, `"xlabel"` ou `"ylabel"`; os dois últimos reaplicam o estilo na hora ao gráfico atual), guardando o resultado em `setup['<alvo>_font']`/`_color`/`_size`/`_style`. `font` verifica a existência da fonte no sistema (`_fonte_existe`, de `plot_func.py`) antes de aceitar.
 - `_set_contour(setup, cmd_split, cmd_user)` — implementa `set contour line size/<bw|color>` e `set contour font/<color|size|style>` (linhas e rótulos inline do `gxout contour`), guardando o resultado em `setup['contour_line_size']`/`_line_mode`/`_font`/`_font_color`/`_font_size`/`_font_style`.
 
+- `_estatistica_sel(setup, cmd_user, cmd_split, inicio, plotar, ax, cbar)` — `<função> sel <var>`, `acum <função> sel <var>` e `d ...` (seção 2.6): detecta o prefixo `acum`, reúne os dados com `_dados_sel`, chama `calcular_serie_sel` e imprime a tabela ou plota com `plot_curva_sel`. `_dados_sel(setup, expr)` — lista `{index, DataDado, array}` dos arquivos do `sel t`, avaliando variável/expressão/`let` com `_avaliar_expressao_serie`. `sel` e `acum` são nomes reservados para `let`.
+
 ### `show_func.py`
 - `cmd_show(setup, cmd_split)` / `_mostrar_info_arquivo(setup)` — comando `show` (tabela da seção 5).
+- `_mostrar_sets(setup)` / `_mostrar_sels(setup)` — blocos "Configuração atual (set)" e "Seleção atual (sel)" do `show info`; `_mostrar_sels` também atende `show sel` (seção 2.6).
 - `_mostrar_niveis(setup, filtro)` / `_mostrar_lev(setup)` — `show levels [tipo]` e `show lev`: níveis de cada tipo de coordenada vertical (seção 8.2).
 - `_mostrar_arquivos(setup)` — `show files`: tabela com os arquivos abertos na sessão (seção 2.1).
 - `_mostrar_tempos(setup)` — `show times`: mesma tabela de `_mostrar_arquivos`, restrita ao(s) tempo(s) atualmente selecionado(s) por `set t` (o intervalo inteiro no modo série, ou só o arquivo pontual de `setup['arquivo_sel']` fora dele) — seção 2.1/5.
@@ -1232,6 +1312,7 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 - `_obter_poligonos_celulas(setup)` — polígonos de cada célula para `gxout hex`, em cache de memória (`setup["_poligonos_celulas"]`); construído uma única vez por sessão via `construir_poligonos_celulas` (utils.py), a partir de `setup["_malha_dataset"]`.
 - `plot_limites(setup)` — `load limits <arquivo.csv>` (seção 2.2): plota o contorno do polígono lido e destaca os centros de célula dentro dele (`setup["limits_mask"]`), com os demais em cinza claro para contexto.
 - `plot_estatistica_campo(setup, campo, modo, cbar=None)` — `d mean|min|max|p10..p90 all|inlimits <variavel>` (seção 2.3): plota `campo`, já reduzido por `calcular_campo` (`estatistics.py`), no formato indicado por `modo` ("mapa"/"ponto"/"corte" — mesma decisão que `plot_var` tomaria para a própria variável, seção 8): mapa (`(nCells,)`, embrulhado como `(1, nCells)` e passado a `plot_var` com `time_sel` forçado a 0 só durante a chamada), perfil (`(nLevels,)`, via `_plotar_perfil_dados`) ou corte (`(nCells, nLevels)`, via `_plotar_corte_dados`).
+- `plot_curva_sel(setup, rotulo_y, dados, valores, descricao_regiao, cbar=None)` — curva da estatística no tempo de `<função> sel <var>` (seção 2.6): eixo x em data/hora (`_eixo_x_tempo`), eixo y `rotulo_y`, região no título; respeita fundo, grade e estilos de `xlabel`/`ylabel`.
 - `_indice_mais_proximo_estatistica(setup)` — índice da célula mais próxima do ponto de lat/lon selecionado, usado por `plot_estatistica_campo` no modo "ponto" (mesma fórmula de `_indice_mais_proximo` em `estatistics.py`).
 - `plot_wind`, `plot_vector_field`, `plot_barbs`, `plot_streams` — vento (`vect`/`barb`/`stream`); `plot_wind` também redesenha o mapa e reaplica o título automaticamente se definidos.
 - `plot_marks(setup)` — mecanismo antigo de `set mark` (legado).

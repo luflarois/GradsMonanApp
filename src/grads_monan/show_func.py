@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 
 from .plot_func import _listar_fontes
 from .utils import descritor_nivel, descritores_disponiveis, formatar_nivel, levf_efetivo
+from .estatistics import descricao_sel, mascara_sel
 
 def show_legend():
     plt.legend()
@@ -29,6 +30,63 @@ def _mostrar_fontes():
         return
     for nome in fontes:
         print(nome)
+
+def _mostrar_sels(setup):
+    """Bloco 'sel' de 'show info' / 'show sel': regiao e intervalo de tempo
+    das estatisticas ao longo do tempo (secao 2.6 do manual)."""
+    print("Selecao atual (sel) - usada por '<estatistica> sel <variavel>':")
+    sel = setup.get("sel") or {}
+    if sel.get("lat"):
+        print("  sel lat: {0:g} a {1:g}".format(*sel["lat"]))
+    else:
+        print("  sel lat: nao definido (todo o dominio)")
+    if sel.get("lon"):
+        print("  sel lon: {0:g} a {1:g}".format(*sel["lon"]))
+    else:
+        print("  sel lon: nao definido (todo o dominio)")
+    if sel.get("t"):
+        print("  sel t:   arquivos {0} a {1}".format(*sel["t"]))
+    else:
+        print("  sel t:   nao definido (todos os arquivos abertos)")
+    try:
+        mascara = mascara_sel(setup)
+        print("  celulas na regiao: {0} de {1}".format(int(mascara.sum()), len(mascara)))
+    except Exception:
+        pass
+
+def _mostrar_sets(setup):
+    """Bloco 'set' de 'show info': valores atuais dos principais comandos
+    'set' (secao 6 do manual)."""
+    print("Configuracao atual (set):")
+    print("  set lat:    {0:g} a {1:g}".format(setup["lat_min"], setup["lat_max"]))
+    print("  set lon:    {0:g} a {1:g}".format(setup["lon_min"], setup["lon_max"]))
+    lev, levf = setup["lev"], setup["levf"]
+    ultimo = max(lev, levf_efetivo(lev, levf) - 1)
+    txt = "{0}".format(lev) if ultimo == lev else "{0} a {1}".format(lev, ultimo)
+    print("  set lev:    {0}".format(txt))
+    for d in descritores_disponiveis(setup):
+        if ultimo < d["n"] and d["tipo"] in ("pressao", "solo"):
+            v = formatar_nivel(d, lev) if ultimo == lev else "{0} ate {1}".format(formatar_nivel(d, lev), formatar_nivel(d, ultimo))
+            print("              {0}: {1}".format(d["nome_tipo"], v))
+    ini, fim = setup.get("time_ini"), setup.get("time_fim")
+    if ini is not None and fim is not None and len(setup.get("files") or []) > 1:
+        print("  set t:      serie/animacao, arquivos {0} a {1} (set tint {2:g} s)".format(ini, fim, setup.get("tint", 1.0)))
+    else:
+        print("  set t:      arquivo {0} (instante {1} dentro do arquivo)".format(setup.get("arquivo_sel", 1), setup.get("time_sel", 0)))
+    print("  set gxout:  {0}".format(setup.get("gxout")))
+    print("  set cmap:   {0}".format(setup.get("cmap")))
+    clevs = setup.get("clevs")
+    print("  set clevs:  {0}".format(" ".join("{0:g}".format(c) for c in clevs) if clevs else "automatico"))
+    cut = setup.get("cut")
+    print("  set cut:    {0}".format("{0:g} a {1:g}".format(*cut) if cut else "desligado"))
+    print("  set map:    {0} (cor {1}, espessura {2})".format(setup.get("map"), setup.get("map_color"), setup.get("map_line")))
+    if setup.get("background"):
+        print("  set background: {0}".format(setup["background"]))
+    estilo_grade = [str(setup[k]) for k in ("grid_color", "grid_size", "grid_type") if setup.get(k) not in (None, "")]
+    if estilo_grade:
+        print("  set grid:   {0}".format(", ".join(estilo_grade)))
+    if setup.get("bar_position"):
+        print("  set bar position: {0}".format(setup["bar_position"]))
 
 def _mostrar_info_arquivo(setup):
     """
@@ -62,6 +120,12 @@ def _mostrar_info_arquivo(setup):
     n_tempos = len(setup.get("time", []))
     if n_tempos:
         print("  Numero de tempos: {0}".format(n_tempos))
+
+    print("")
+    _mostrar_sets(setup)
+    print("")
+    _mostrar_sels(setup)
+    print("")
 
     print("Numero de variaveis: {0}".format(len(variables)))
     for vname in sorted(variables.keys()):
@@ -223,6 +287,9 @@ def cmd_show(setup, cmd_split):
         return
     if cmd_split[1] == "files":
         _mostrar_arquivos(setup)
+        return
+    if cmd_split[1] == "sel":
+        _mostrar_sels(setup)
         return
     if cmd_split[1] == "times":
         _mostrar_tempos(setup)

@@ -457,3 +457,113 @@ def mean_all(setup, arrays, rotulo):
 def mean_inlimits(setup, arrays, mask, rotulo):
     """Equivalente ao comando 'mean inlimits <variavel>' (ver 'calcular_valor')."""
     return calcular_valor(setup, "mean", arrays, mask, rotulo)
+
+
+# ---------------------------------------------------------------------------
+# Estatistica sobre uma REGIAO ao longo do tempo: 'sel' (secao 2.6 do manual)
+#
+#   sel lat <ini> <fim>   sel lon <ini> <fim>   sel t <ini> <fim>
+#   <estatistica> sel <variavel>        d <estatistica> sel <variavel>
+#   acum <estatistica> sel <variavel>   d acum <estatistica> sel <variavel>
+#
+# Para CADA instante (arquivo aberto no intervalo de 'sel t', ou todos),
+# reduz a variavel - sobre as celulas dentro da caixa de 'sel lat'/'sel lon'
+# e sobre a faixa de niveis de 'set lev' - a UM numero, formando uma curva
+# valor x tempo. Com 'acum', a variavel e acumulada no tempo, celula a
+# celula, ANTES da estatistica.
+# ---------------------------------------------------------------------------
+
+def nova_selecao():
+    """Selecao 'sel' vazia (todo o dominio e todos os arquivos)."""
+    return {"lat": None, "lon": None, "t": None}
+
+
+def mascara_sel(setup):
+    """Mascara booleana (nCells,) das celulas dentro de 'sel lat'/'sel lon'
+    (sem 'sel': todas). Longitudes na convencao (-180, 180], com suporte a
+    caixas que cruzam a linha de data (ex: 'sel lon 170 -170')."""
+    sel = setup.get("sel") or nova_selecao()
+    lats = np.asarray(setup["latitudes"], dtype=float)
+    lons = np.asarray(setup["longitudes"], dtype=float)
+    mascara = np.ones(lats.shape, dtype=bool)
+    if sel.get("lat") is not None:
+        a, b = sel["lat"]
+        mascara &= (lats >= a) & (lats <= b)
+    if sel.get("lon") is not None:
+        a, b = sel["lon"]
+        if a <= b:
+            mascara &= (lons >= a) & (lons <= b)
+        else:
+            mascara &= (lons >= a) | (lons <= b)
+    return mascara
+
+
+def descricao_sel(setup):
+    """Texto curto da regiao/intervalo de 'sel' atuais."""
+    sel = setup.get("sel") or nova_selecao()
+    partes = []
+    partes.append("lat {0:g} a {1:g}".format(*sel["lat"]) if sel.get("lat") else "lat: todo o dominio")
+    partes.append("lon {0:g} a {1:g}".format(*sel["lon"]) if sel.get("lon") else "lon: todo o dominio")
+    partes.append("t: arquivos {0} a {1}".format(*sel["t"]) if sel.get("t") else "t: todos os arquivos abertos")
+    return ", ".join(partes)
+
+
+def calcular_serie_sel(setup, nome_funcao, dados, rotulo, acumular=False):
+    """
+    Curva da estatistica 'nome_funcao' ao longo do tempo, sobre a regiao de
+    'sel' (ver comentario acima). 'dados' e a lista, na ordem do tempo, de
+    {"index", "DataDado", "array"} (array bruto (Time, nCells[, niveis])).
+
+    Retorna (valores, info) - 'valores': array (n_tempos,) ; 'info': dict
+    com 'n_cel' e 'niveis' (texto, ou None para variavel 2D) - ou None, com
+    a mensagem de erro ja impressa.
+    """
+    mascara = mascara_sel(setup)
+    n_cel = int(mascara.sum())
+    if n_cel == 0:
+        print("Erro: nenhuma celula da malha dentro da regiao de 'sel' ({0}).".format(descricao_sel(setup)))
+        return None
+
+    time_sel = setup.get("time_sel", 0)
+    lev = setup["lev"]
+    levf_ok = _levf_efetivo(lev, setup["levf"])
+    operacao = _OPERACOES[nome_funcao]
+
+    valores = []
+    acumulado = None
+    visto = None
+    tem_nivel = None
+    for d in dados:
+        arr = d["array"]
+        if arr.ndim < 2 or arr.shape[1] != len(mascara):
+            print("Erro: a variavel '{0}' tem {1} ponto(s), mas a malha aberta tem {2} ponto(s).".format(
+                rotulo, arr.shape[1] if arr.ndim >= 2 else "?", len(mascara)))
+            return None
+        if time_sel < 0 or time_sel >= arr.shape[0]:
+            print("Erro: 'set t {0}' invalido para '{1}' no arquivo {2} - indices de tempo validos: 0 a {3}.".format(
+                time_sel, rotulo, d["index"], arr.shape[0] - 1))
+            return None
+        campo = arr[time_sel]
+        if campo.ndim == 1:
+            campo = campo[mascara]
+            tem_nivel = False
+        else:
+            campo = campo[mascara][:, lev:levf_ok]
+            tem_nivel = True
+            if campo.shape[1] == 0:
+                print("Erro: nenhum nivel disponivel em '{0}' para 'set lev' atual ({1}).".format(rotulo, lev))
+                return None
+        campo = np.asarray(campo, dtype=float)
+        if acumular:
+            valido = ~np.isnan(campo)
+            parcial = np.where(valido, campo, 0.0)
+            acumulado = parcial if acumulado is None else acumulado + parcial
+            visto = valido if visto is None else (visto | valido)
+            campo = np.where(visto, acumulado, np.nan)
+        if np.all(np.isnan(campo)):
+            valores.append(np.nan)
+        else:
+            valores.append(float(operacao(campo)))
+
+    info = {"n_cel": n_cel, "niveis": _descricao_intervalo_niveis(setup) if tem_nivel else None}
+    return np.array(valores, dtype=float), info
