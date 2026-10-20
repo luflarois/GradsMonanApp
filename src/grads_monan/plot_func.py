@@ -192,6 +192,10 @@ def clear_plots(setup=None):
         plt.gca().cla()
     else:
         plt.clf()
+        if setup is not None:
+            setup["plots"] = []     # curvas numeradas (plot1, plot2...) recomecam
+            # (com varios paineis, o 'cla' do painel deixa as curvas mortas, que
+            #  plots_ativos descarta sozinha, sem mexer nas dos outros paineis)
 
 def set_window_title(titulo):
     """
@@ -415,6 +419,444 @@ def _aplicar_rotulos_eixos(setup, ax):
         texto = setup.get(prefixo) or atual
         if texto:
             setter(texto, **kw)
+    aplicar_limites_eixos(setup, ax)
+
+def _e_eixo_de_data(eixo):
+    try:
+        if isinstance(eixo.get_major_locator(), mdates.DateLocator):
+            return True
+        conv = eixo.get_converter()
+        return conv is not None and type(conv).__module__ == "matplotlib.dates"
+    except Exception:
+        return False
+
+def aplicar_limites_eixos(setup, ax):
+    """'set xrange|yrange <min> <max>' (limites) e 'set xdiv|ydiv <valor>'
+    (tamanho de cada divisao dos eixos). Sem nada definido, nao muda nada.
+    Eixo X de tempo: xrange aceita datas e xdiv e dado em HORAS. Eixos
+    invertidos (ex.: pressao) mantem o sentido."""
+    from matplotlib.ticker import MultipleLocator, FixedFormatter
+    for eixo in ("x", "y"):
+        if setup.get(eixo + "tics", True) is False:
+            # 'set xtics|ytics off': sem marcas nem valores no eixo
+            try:
+                kw = {"bottom": False, "labelbottom": False} if eixo == "x" else {"left": False, "labelleft": False}
+                ax.tick_params(axis=eixo, **kw)
+            except Exception:
+                pass
+        else:
+            try:
+                kw = {"bottom": True, "labelbottom": True} if eixo == "x" else {"left": True, "labelleft": True}
+                ax.tick_params(axis=eixo, **kw)
+            except Exception:
+                pass
+        faixa = setup.get(eixo + "range")
+        if faixa:
+            try:
+                lo, hi = faixa
+                inv = getattr(ax, eixo + "axis_inverted")()
+                getattr(ax, "set_" + eixo + "lim")((hi, lo) if inv else (lo, hi))
+            except Exception:
+                pass
+        div = setup.get(eixo + "div")
+        if div:
+            try:
+                ax_eixo = getattr(ax, eixo + "axis")
+                if isinstance(ax_eixo.get_major_formatter(), FixedFormatter):
+                    continue   # rotulos posicionais fixos: nao reposicionar
+                passo = div / 24.0 if _e_eixo_de_data(ax_eixo) else div
+                ax_eixo.set_major_locator(MultipleLocator(passo))
+            except Exception:
+                pass
+
+def restaurar_divisoes_eixos(ax, eixo):
+    """Volta a divisao automatica do eixo ('x' ou 'y') - 'set xdiv off'."""
+    from matplotlib.ticker import AutoLocator
+    ax_eixo = getattr(ax, eixo + "axis")
+    ax_eixo.set_major_locator(mdates.AutoDateLocator() if _e_eixo_de_data(ax_eixo) else AutoLocator())
+
+# Ultimo grafico de linha desenhado (para 'write csv') - ver registrar_linha.
+_ULTIMA_LINHA = {}
+
+_APELIDOS_MARCADOR = {
+    "circulo": "o", "circle": "o", "quadrado": "s", "square": "s", "S": "s",
+    "diamante": "D", "diamond": "D", "estrela": "*", "star": "*",
+    "triangulo": "^", "triangle": "^", "ponto": ".", "point": ".",
+    "cruz": "+", "plus": "+", "x": "x",
+}
+
+# --- Configuracao POR PAINEL (set pages) -------------------------------------
+# Com mais de um painel, os comandos de aparencia abaixo valem so para o painel
+# selecionado ('set page <lin> <col>'): ao trocar de painel, os valores de
+# 'setup' do painel que sai sao guardados em setup['painel_cfg'] e os do que
+# entra sao carregados (painel ainda nao configurado = valores de quando
+# 'set pages' foi dado, setup['painel_base']). Com um painel so, tudo e global.
+import copy as _copy
+CHAVES_PAINEL = (
+    "marker", "marker_type", "marker_size", "marker_color", "marker_text", "plot_estilos",
+    "legend_color", "legend_line", "legend_linetype", "legend_title_size",
+    "xrange", "yrange", "xdiv", "ydiv", "xtics", "ytics",
+    "grid_color", "grid_size", "grid_type",
+    "title", "xlabel", "ylabel",
+    "title_font", "title_color", "title_size", "title_style",
+    "xlabel_font", "xlabel_color", "xlabel_size", "xlabel_style",
+    "ylabel_font", "ylabel_color", "ylabel_size", "ylabel_style",
+)
+
+def pagina_atual(setup):
+    return (setup.get("page_row", 1), setup.get("page_col", 1))
+
+def _varios_paineis(setup):
+    return setup.get("pages_rows", 1) * setup.get("pages_cols", 1) > 1
+
+def valor_painel(setup, painel, chave, padrao=None):
+    """Valor de 'chave' para o painel 'painel' (o do painel atual esta em setup)."""
+    if painel is None or not _varios_paineis(setup) or painel == pagina_atual(setup):
+        return setup.get(chave, padrao)
+    cfg = (setup.get("painel_cfg") or {}).get(painel)
+    if cfg is not None and chave in cfg:
+        return cfg[chave]
+    base = setup.get("painel_base") or {}
+    if chave in base:
+        return base[chave]
+    return setup.get(chave, padrao)
+
+def iniciar_paineis(setup):
+    """Chamado por 'set pages': guarda os valores atuais como base dos paineis."""
+    setup["painel_cfg"] = {}
+    setup["painel_base"] = {k: _copy.deepcopy(setup[k]) for k in CHAVES_PAINEL if k in setup}
+
+def trocar_painel(setup, novo):
+    """Chamado por 'set page': salva a configuracao do painel atual e carrega a do novo."""
+    antigo = pagina_atual(setup)
+    if antigo == novo or not _varios_paineis(setup):
+        return
+    setup.setdefault("painel_cfg", {})[antigo] = {k: _copy.deepcopy(setup[k]) for k in CHAVES_PAINEL if k in setup}
+    cfg = setup["painel_cfg"].get(novo) or setup.get("painel_base") or {}
+    for k in CHAVES_PAINEL:
+        if k in cfg:
+            setup[k] = _copy.deepcopy(cfg[k])
+
+_CORES_ANSI = ["#000000", "#cd0000", "#00cd00", "#cdcd00", "#0000ee", "#cd00cd", "#00cdcd", "#e5e5e5"]
+_NOMES_ANSI = ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white"]   # ESC[1;30m .. ESC[1;37m
+_MARCADORES_SEQ = ["o", "s", "D", "*", "^", "v", "<", ">", "p", "h", "+", "x"]
+
+def resolver_tipo_marcador(txt):
+    """Tipo de marcador do matplotlib (D, s, *, ^, o, v, <, >, p, h, +, x...)
+    ou apelido em portugues/ingles; 'auto' = sequencia automatica por curva;
+    None se invalido."""
+    from matplotlib.markers import MarkerStyle
+    if txt.lower() == "auto":
+        return "auto"
+    txt = _APELIDOS_MARCADOR.get(txt, _APELIDOS_MARCADOR.get(txt.lower(), txt)) if txt not in ("D", "d", "H", "h", "P", "p", "X", "x", "s", "o", "v", "V") else txt
+    if txt in ("", "None", "none", " "):
+        return None
+    try:
+        MarkerStyle(txt)
+        return txt
+    except Exception:
+        return None
+
+def _linha_viva(linha):
+    try:
+        return linha is not None and linha.axes is not None and linha in linha.axes.lines
+    except Exception:
+        return False
+
+def plots_ativos(setup, ax=None):
+    """Curvas numeradas (plot1, plot2, ...) ainda na tela; limpa da memoria
+    (setup['plots']) as que sumiram (apos 'c', 'reset', ...)."""
+    vivos = [e for e in setup.get("plots", []) if _linha_viva(e["linha"])]
+    setup["plots"] = vivos
+    if ax is not None:
+        return [e for e in vivos if e["linha"].axes is ax]
+    return vivos
+
+def estilo_efetivo(setup, entrada):
+    """Estilo final de uma curva: 'set plot <n> ...' > 'set marker ...' > sequencia
+    automatica (cores ANSI 30-37, marcadores o s D * ^ v < > p h + x) - tudo
+    conforme a configuracao do PAINEL em que a curva esta."""
+    n = entrada["n"]
+    v = lambda k, d=None: valor_painel(setup, entrada.get("painel"), k, d)
+    est = (v("plot_estilos") or {}).get(n, {})
+    cor = est.get("color") or _CORES_ANSI[(n - 1) % len(_CORES_ANSI)]
+    if not v("marker", True):
+        marcador = ""
+    else:
+        mt = v("marker_type")
+        marcador = est.get("marker") or (mt if mt not in (None, "auto") else None) \
+            or _MARCADORES_SEQ[(n - 1) % len(_MARCADORES_SEQ)]
+    return {
+        "color": cor, "marker": marcador,
+        "markersize": est.get("markersize") or v("marker_size", 6),
+        "markercolor": est.get("markercolor") or v("marker_color") or cor,
+        "linetype": est.get("linetype") or "-",
+        "linesize": est.get("linesize") or 1.5,
+        "label": est.get("label") or entrada.get("ynome", ""),
+    }
+
+def aplicar_estilo_plot(setup, entrada):
+    """Aplica cor/linha/marcador (e o texto do valor, se 'set marker text on')."""
+    linha = entrada["linha"]
+    e = estilo_efetivo(setup, entrada)
+    linha.set_color(e["color"])
+    linha.set_linestyle(e["linetype"])
+    linha.set_linewidth(e["linesize"])
+    linha.set_marker(e["marker"])
+    linha.set_markersize(e["markersize"])
+    linha.set_markerfacecolor(e["markercolor"])
+    linha.set_markeredgecolor(e["markercolor"])
+    linha.set_label(e["label"])
+    for t in entrada.get("textos", []):
+        try:
+            t.remove()
+        except Exception:
+            pass
+    entrada["textos"] = []
+    if valor_painel(setup, entrada.get("painel"), "marker_text", False) and linha.axes is not None:
+        xs, ys = linha.get_xdata(), linha.get_ydata()
+        valores = xs if entrada.get("tipo") == "perfil" else ys
+        for xi, yi, vi in zip(xs, ys, valores):
+            try:
+                entrada["textos"].append(linha.axes.annotate(
+                    "{0:.4g}".format(float(vi)), (xi, yi), textcoords="offset points",
+                    xytext=(0, 6), ha="center", fontsize=8))
+            except Exception:
+                pass
+
+_POSICOES_LEGENDA = {"L": "L", "R": "R", "U": "U", "D": "D",
+                     "LEFT": "L", "ESQUERDA": "L", "RIGHT": "R", "DIREITA": "R",
+                     "UP": "U", "ACIMA": "U", "CIMA": "U", "DOWN": "D", "ABAIXO": "D", "BAIXO": "D"}
+
+def _chave_painel(ax):
+    """(linha, coluna) do painel (set pages) a que o eixo pertence."""
+    try:
+        ss = ax.get_subplotspec()
+        return (ss.rowspan.start + 1, ss.colspan.start + 1)
+    except Exception:
+        return (1, 1)
+
+def _chave_painel_atual():
+    try:
+        if plt.get_fignums():
+            return _chave_painel(plt.gca())
+    except Exception:
+        pass
+    return (1, 1)
+
+def definir_estado_legenda(setup, **kw):
+    """Guarda on/pos/title da legenda do PAINEL ATUAL (cada painel tem a sua)
+    e espelha em setup['legend_on'|'legend_pos'|'legend_title']."""
+    est = setup.setdefault("legend_paineis", {}).setdefault(_chave_painel_atual(), {})
+    est.update(kw)
+    for k, v in kw.items():
+        setup["legend_" + {"on": "on", "pos": "pos", "title": "title"}[k]] = v
+
+def estado_legenda(setup, ax=None):
+    chave = _chave_painel(ax) if ax is not None else _chave_painel_atual()
+    return (setup.get("legend_paineis") or {}).get(chave, {})
+
+def atualizar_legenda(setup, ax=None):
+    """Legenda do painel 'ax' (cada painel tem a sua: ligada, posicao e titulo
+    por painel - 'set legend on|off', 'set legend position', 'draw legend
+    title' valem para o painel selecionado). A caixa fica FORA do grafico, do
+    lado L (esquerda - padrao), R (direita), U (acima) ou D (abaixo); o
+    proprio eixo e encolhido para dar lugar a ela, sem mexer nos demais
+    paineis. Sem legenda ligada (ou sem curvas), remove."""
+    try:
+        ax = ax if ax is not None else plt.gca()
+        fig = ax.figure
+        leg = ax.get_legend()
+        if leg is not None:
+            leg.remove()
+        if getattr(ax, "_gm_pos_alterada", False):
+            try:
+                ax.set_position(ax.get_subplotspec().get_position(fig))
+            except Exception:
+                pass
+            ax._gm_pos_alterada = False
+        est = estado_legenda(setup, ax)
+        plots = plots_ativos(setup, ax)
+        if not est.get("on") or not plots:
+            return
+        pos = est.get("pos", "L")
+        painel = _chave_painel(ax)
+        cor = valor_painel(setup, painel, "legend_color")
+        renderer = fig.canvas.get_renderer()
+        inv = fig.transFigure.inverted()
+        tb = ax.get_tightbbox(renderer).transformed(inv)       # eixo + rotulos + titulo
+        p0 = ax.get_position()
+        x0, x1 = max(tb.x0, 0.005), min(tb.x1, 0.995)
+        y0, y1 = max(tb.y0, 0.005), min(tb.y1, 0.995)
+        xc, yc = (p0.x0 + p0.x1) / 2, (p0.y0 + p0.y1) / 2
+        loc, ancora = {"L": ("center left", (x0, yc)), "R": ("center right", (x1, yc)),
+                       "U": ("upper center", (xc, y1)), "D": ("lower center", (xc, y0))}[pos]
+        kw = {"loc": loc, "bbox_to_anchor": ancora, "bbox_transform": fig.transFigure,
+              "fontsize": 8, "framealpha": 1.0}
+        if pos in ("U", "D"):
+            kw["ncol"] = min(len(plots), 6)
+        titulo = est.get("title")
+        if titulo:
+            kw["title"] = titulo
+            kw["title_fontsize"] = valor_painel(setup, painel, "legend_title_size", 10)
+        if cor:
+            kw["labelcolor"] = cor
+        leg = ax.legend([e["linha"] for e in plots], [estilo_efetivo(setup, e)["label"] for e in plots], **kw)
+        quadro = leg.get_frame()
+        if cor:
+            quadro.set_edgecolor(cor)
+            if titulo:
+                leg.get_title().set_color(cor)
+        lw_leg = valor_painel(setup, painel, "legend_line")
+        if lw_leg:
+            quadro.set_linewidth(lw_leg)
+        lt_leg = valor_painel(setup, painel, "legend_linetype")
+        if lt_leg not in (None, ""):
+            quadro.set_linestyle(lt_leg)
+        # encolhe o eixo para abrir espaco para a caixa
+        bb = leg.get_window_extent(renderer).transformed(inv)
+        w, h, pad = bb.width, bb.height, 0.01
+        if pos == "L":
+            nova = [p0.x0 + w + pad, p0.y0, max(p0.width - w - pad, 0.3 * p0.width), p0.height]
+        elif pos == "R":
+            nova = [p0.x0, p0.y0, max(p0.width - w - pad, 0.3 * p0.width), p0.height]
+        elif pos == "U":
+            nova = [p0.x0, p0.y0, p0.width, max(p0.height - h - pad, 0.3 * p0.height)]
+        else:
+            nova = [p0.x0, p0.y0 + h + pad, p0.width, max(p0.height - h - pad, 0.3 * p0.height)]
+        ax.set_position(nova)
+        ax._gm_pos_alterada = True
+    except Exception:
+        pass
+
+def atualizar_legendas_figura(setup, fig):
+    """Refaz a legenda de cada painel da figura (as posicoes dos eixos podem
+    ter sido recalculadas por subplots_adjust)."""
+    for a in list(fig.axes):
+        if a.get_legend() is not None or getattr(a, "_gm_pos_alterada", False) or plots_ativos(setup, a):
+            atualizar_legenda(setup, a)
+
+def reaplicar_marcadores(setup):
+    """Re-estiliza, na hora, todas as curvas ainda na tela (e a legenda)."""
+    try:
+        ax_atual = plt.gca() if plt.get_fignums() else None
+    except Exception:
+        ax_atual = None
+    vivos = plots_ativos(setup, ax_atual) if ax_atual is not None else []
+    for e in vivos:
+        aplicar_estilo_plot(setup, e)       # so as curvas do painel selecionado
+    if vivos:
+        atualizar_legendas_figura(setup, ax_atual.figure)
+        ax_atual.figure.canvas.draw_idle()
+
+def registrar_linha(linha, tipo, x, y, xnome, ynome, setup=None):
+    """Registra a curva recem-plotada: guarda os dados (para 'write csv') e,
+    em setup['plots'], a numera (plot1, plot2, ... - recomeca apos 'c')."""
+    _ULTIMA_LINHA.clear()
+    _ULTIMA_LINHA.update({"linha": linha, "tipo": tipo, "x": list(x), "y": list(y),
+                          "xnome": xnome, "ynome": ynome})
+    if setup is not None:
+        mesmos = plots_ativos(setup, linha.axes)
+        n = max([e["n"] for e in mesmos], default=0) + 1
+        entrada = {"n": n, "tipo": tipo, "linha": linha, "xnome": xnome, "ynome": ynome,
+                   "painel": _chave_painel(linha.axes),
+                   "x": list(x), "y": list(y), "textos": []}
+        setup["plots"].append(entrada)
+        aplicar_estilo_plot(setup, entrada)
+
+def listar_plots(setup):
+    """Tabela de 'show plots': Plot #, Variable, Color, Marker (e 'Page' quando
+    ha curvas em mais de um painel; a numeracao plot1, plot2... e por painel)."""
+    ents = plots_ativos(setup)
+    if not ents:
+        return []
+    multi = len({e.get("painel") for e in ents}) > 1
+    linhas = []
+    for e in ents:
+        s = estilo_efetivo(setup, e)
+        cor = s["color"]
+        if cor in _CORES_ANSI:
+            cor = _NOMES_ANSI[_CORES_ANSI.index(cor)]
+        l = [str(e["n"]), str(e.get("ynome", "")), str(cor), s["marker"] or "none"]
+        if multi:
+            l = ["{0},{1}".format(*e["painel"])] + l
+        linhas.append(tuple(l))
+    cab = ("Plot #", "Variable", "Color", "Marker")
+    if multi:
+        cab = ("Page",) + cab
+    nc = len(cab)
+    larg = [max(len(cab[k]), max(len(l[k]) for l in linhas)) for k in range(nc)]
+    fmt = "  ".join("{%d:<%d}" % (k, larg[k]) for k in range(nc))
+    out = [fmt.format(*cab), "-" * (sum(larg) + 2 * (nc - 1))]
+    out += [fmt.format(*l) for l in linhas]
+    return out
+
+def salvar_csv(caminho, setup=None):
+    """Comando 'write csv': grava TODAS as curvas (graficos de linha) ainda na
+    tela, no eixo ativo. 1a coluna = eixo comum (tempo numa serie; nivel/altura
+    num perfil) e uma coluna por curva (nome = texto da legenda); curvas com
+    valores diferentes na 1a coluna sao alinhadas (celula vazia onde nao ha
+    valor). Curvas de tipos diferentes (ex.: serie e perfil) saem em blocos
+    separados por uma linha em branco. Retorna True/False."""
+    import csv
+    ultima = _ULTIMA_LINHA.get("linha")
+    entradas = []
+    if setup is not None and _linha_viva(ultima):
+        entradas = plots_ativos(setup, ultima.axes)
+    if not entradas:
+        if not _linha_viva(ultima):
+            print("Erro: nao ha grafico de linha na tela (serie temporal, curva de 'sel' ou perfil vertical) para gravar em CSV.")
+            return False
+        entradas = [{"n": 1, "xnome": _ULTIMA_LINHA["xnome"], "ynome": _ULTIMA_LINHA["ynome"],
+                     "x": _ULTIMA_LINHA["x"], "y": _ULTIMA_LINHA["y"]}]
+    # agrupa por tipo de 1a coluna (xnome), preservando a ordem das curvas
+    grupos = {}
+    for e in entradas:
+        grupos.setdefault(e["xnome"], []).append(e)
+
+    def _nome(e, usados):
+        nome = estilo_efetivo(setup, e)["label"] if setup is not None and "linha" in e else e["ynome"]
+        if nome in usados:
+            nome = "{0} #{1}".format(nome, e["n"])
+        usados.add(nome)
+        return nome
+
+    def _chave_ordem(chaves):
+        try:
+            return sorted(chaves, key=float)         # niveis numericos
+        except (TypeError, ValueError):
+            return chaves                              # rotulos de tempo: ordem de aparicao
+
+    try:
+        with open(caminho, "w", newline="") as f:
+            w = csv.writer(f)
+            nlin_total = 0
+            colunas = []
+            for k, (xnome, grp) in enumerate(grupos.items()):
+                if k:
+                    w.writerow([])
+                usados = set()
+                nomes = [_nome(e, usados) for e in grp]
+                chaves = []
+                vistos = set()
+                for e in grp:
+                    for a in e["x"]:
+                        if a not in vistos:
+                            vistos.add(a)
+                            chaves.append(a)
+                chaves = _chave_ordem(chaves)
+                mapas = [dict(zip(e["x"], e["y"])) for e in grp]
+                w.writerow([xnome] + nomes)
+                for a in chaves:
+                    w.writerow([a] + [(repr(float(m[a])) if a in m else "") for m in mapas])
+                nlin_total += len(chaves)
+                colunas += [xnome] + nomes
+    except OSError as e:
+        print("Erro: nao foi possivel gravar '{0}': {1}".format(caminho, e))
+        return False
+    print("CSV gravado em '{0}' ({1} linhas, {2} curva(s); colunas: {3}).".format(
+        caminho, nlin_total, len(entradas), ", ".join(colunas)))
+    return True
 
 def _niveis_cor(setup):
     """
@@ -763,14 +1205,16 @@ def _plotar_perfil_dados(setup, vertical_profile, closest_index):
         y_vals = np.array(levels[lev:levf_dados])
         ylabel = 'Levels'
 
-    plt.scatter(vertical_profile,y_vals)
-    plt.plot(vertical_profile,y_vals, color='blue', linestyle='-',label=label)
+    linha, = plt.plot(vertical_profile,y_vals, linestyle='-', label=label)
     plt.xlabel(label)
     plt.ylabel(ylabel)
     _aplicar_rotulos_eixos(setup, plt.gca())
     if nv["invertido"] and ylabel == nv["rotulo"]:
         plt.gca().invert_yaxis()
+    aplicar_limites_eixos(setup, plt.gca())
     aplicar_grade(setup)
+    registrar_linha(linha, "perfil", y_vals, vertical_profile, ylabel, label or "valor", setup)
+    atualizar_legendas_figura(setup, plt.gcf())
     return 1
 
 def save_fig(fig_name, setup):
@@ -1680,9 +2124,24 @@ def _eixo_x_tempo(dados):
     except Exception:
         return list(range(len(dados))), False, rotulos
 
+def _formatar_datas_eixo(ax, fig):
+    """Rotaciona os rotulos de data SO do eixo 'ax'. (fig.autofmt_xdate()
+    esconde os rotulos e o titulo do eixo X de TODOS os outros paineis da
+    figura - ruim com 'set pages'.)"""
+    ax.tick_params(axis="x", labelrotation=30)
+    plt.setp(ax.get_xticklabels(which="major"), rotation=30, ha="right")
+    try:
+        fig.subplots_adjust(bottom=max(fig.subplotpars.bottom, 0.2))
+        if ax.get_subplotspec().get_gridspec().nrows > 1:
+            # varias linhas de paineis: afasta-os para os rotulos girados nao
+            # invadirem o painel de baixo
+            fig.subplots_adjust(hspace=max(fig.subplotpars.hspace, 0.7))
+    except Exception:
+        pass
+
 def _formatar_eixo_x_tempo(ax, fig, x_vals, usa_datetime, rotulos):
     if usa_datetime:
-        fig.autofmt_xdate()
+        _formatar_datas_eixo(ax, fig)
     else:
         ax.set_xticks(x_vals)
         ax.set_xticklabels(rotulos, rotation=45, ha='right')
@@ -1753,7 +2212,7 @@ def plot_serie_temporal(setup, var_name, dados, cbar=None):
             y_vals.append(float(valor))
         y_vals = _aplicar_corte(np.array(y_vals), cut)
 
-        ax.plot(x_vals, y_vals, marker='o', linestyle='-', color=setup.get("lc", "black"))
+        linha, = ax.plot(x_vals, y_vals, linestyle='-')
         _formatar_eixo_x_tempo(ax, fig, x_vals, usa_datetime, rotulos)
         ax.set_xlabel('Tempo')
         ax.set_ylabel(label)
@@ -1761,6 +2220,8 @@ def plot_serie_temporal(setup, var_name, dados, cbar=None):
         if Title:
             ax.set_title(Title)
         aplicar_grade(setup, ax)
+        registrar_linha(linha, "serie", rotulos, y_vals, "tempo", label or "valor", setup)
+        atualizar_legendas_figura(setup, fig)
         return ax, cbar
 
     # Exatamente uma faixa (lat, lon ou nivel): diagrama tempo x faixa,
@@ -1830,7 +2291,7 @@ def plot_serie_temporal(setup, var_name, dados, cbar=None):
 
     if usa_datetime:
         ax.xaxis_date()
-        fig.autofmt_xdate()
+        _formatar_datas_eixo(ax, fig)
     else:
         ax.set_xticks(x_num)
         ax.set_xticklabels(rotulos, rotation=45, ha='right')
@@ -1932,7 +2393,7 @@ def plot_curva_sel(setup, rotulo_y, dados, valores, descricao_regiao, cbar=None)
     fig = ax.get_figure()
 
     x_vals, usa_datetime, rotulos = _eixo_x_tempo(dados)
-    ax.plot(x_vals, valores, marker='o', linestyle='-', color=setup.get("lc", "black"))
+    linha, = ax.plot(x_vals, valores, linestyle='-')
     _formatar_eixo_x_tempo(ax, fig, x_vals, usa_datetime, rotulos)
     ax.set_xlabel('Tempo')
     ax.set_ylabel(rotulo_y)
@@ -1942,6 +2403,8 @@ def plot_curva_sel(setup, rotulo_y, dados, valores, descricao_regiao, cbar=None)
     elif descricao_regiao:
         ax.set_title(descricao_regiao, fontsize=10)
     aplicar_grade(setup, ax)
+    registrar_linha(linha, "curva_sel", rotulos, valores, "tempo", rotulo_y, setup)
+    atualizar_legendas_figura(setup, fig)
     return ax, cbar
 
 def plot_serie(setup, var_name, dados, cbar=None):

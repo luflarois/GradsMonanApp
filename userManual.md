@@ -103,6 +103,9 @@ começam com `Aviso:` são avisos informativos (ex.: ao abrir um arquivo sem
 | `d sum\|mean\|min\|max\|p10..p90 all\|inlimits\|point <variavel>` | Como acima, mas plota o resultado **ponto a ponto** (um mapa, perfil ou corte), em vez de reduzir a um único número — ver seção 2.3. |
 | `sel` / `sel lat <ini> <fim>` / `sel lon <ini> <fin>` / `sel t <ini> [<fim>]` | Define a **região e o período** usados pelas estatísticas ao longo do tempo (`sel`, **não** `set`). Sem argumentos, mostra a seleção atual — ver seção 2.6. |
 | `sum`/`mean`/`min`/`max`/`p10`..`p90 sel <variavel>` e `acum <estatistica> sel <variavel>` | Estatística da variável **na região do `sel`, instante a instante** (uma linha por arquivo); com `acum`, sobre o campo **acumulado** no tempo. `d ...` plota a curva — ver seção 2.6. |
+| `write csv <arquivo>` | Grava em CSV (separado por vírgula, com cabeçalho) **todas as curvas** (gráficos de linha) ainda na tela: série temporal (`d <var>` em ponto com `set t <ini> <fim>`), curva de `d <estat> sel <var>` ou perfil vertical. Colunas: 1ª = eixo comum (tempo numa série, nível/altura num perfil) e uma coluna por curva, com o nome da legenda. Se faltar extensão, acrescenta `.csv`. Sem gráfico de linha na tela (ou após `c`) dá erro. Ver seção 2.7. |
+| `help` / `help <termo>` | Lista sucinta de **todos os comandos**, agrupados, cada um com um comentário curto. `help <termo>` mostra só o que se relaciona ao termo (`help set`, `help marker`, `help sel`, `help show`…). Funciona sem arquivo aberto. Um guia impresso equivalente está em `refcard.md` (A4 paisagem, 6 painéis). |
+| `debug` / `debug <on\|off>` | Liga/desliga as mensagens na tela. `on` (padrão): tudo aparece, como sempre. `off`: os comandos ficam **silenciosos** (confirmações, avisos, detalhes de `open`/`set`/`d`...); continuam aparecendo os **erros** e a saída dos comandos cuja finalidade é imprimir (`show`, `let`/`sel` sem argumentos, estatísticas escalares como `sum sel t2m`). Sem argumento, mostra o estado. Vale para a sessão (sobrevive a `reinit`); útil em scripts (`run`) e aberturas de milhares de arquivos. |
 | `reinit` | Fecha **todos** os arquivos abertos na sessão, apaga toda a configuração associada a eles (inclusive os caches de triangulação em memória) e volta ao estado inicial, pronto para um novo `open`. Também limpa a janela de gráficos. |
 | `reset` | Volta a seleção de **latitude/longitude/nível/corte (`set cut`)/arquivo (`set t`)/região do `sel`** para a condição inicial (toda a malha, nível padrão da configuração, corte desligado, arquivo 1, série/animação desligada) e **limpa** título, rótulo de linha/legenda, rótulo da colorbar, o mapa de fundo automático (`draw map`) e o gráfico atual — mas **mantém os arquivos abertos** (ao contrário de `reinit`). Ver detalhes abaixo. |
 | `run <script>` | Executa, em sequência, os comandos contidos no arquivo de script informado (um comando por linha). |
@@ -857,6 +860,107 @@ map, grade…) e **"Seleção atual (sel)"** (`sel lat`, `sel lon`, `sel t` e
 nº de células na região). `show sel` mostra apenas o segundo bloco.
 
 ---
+## 2.7 Exportando gráficos de linha (`write csv`)
+
+```
+> sel lat 10 30
+> sel lon 10 30
+> d sum sel t2m
+> d mean sel t2m
+> write csv estatisticas
+CSV gravado em 'estatisticas.csv' (3 linhas, 2 curva(s); colunas: tempo, Soma de t2m, Media de t2m).
+```
+
+Conteúdo de `estatisticas.csv`:
+
+```
+tempo,Soma de t2m,Media de t2m
+2024-01-01T0,50.0,2.0
+2024-01-01T6,100.0,4.0
+2024-01-01T12,150.0,6.0
+```
+
+- **Todas as curvas** do gráfico ativo são gravadas (plot1, plot2… — seção 2.8), uma coluna para cada, na ordem em que foram plotadas. O cabeçalho usa o texto da legenda (`set plot <n> label`); nomes repetidos recebem o sufixo `#<n>`.
+- **Série temporal / curva de `sel`:** 1ª coluna = tempo (eixo X).
+- **Perfil vertical:** 1ª coluna = nível ou altura (eixo Y, na unidade do eixo). Perfis com níveis diferentes são **alinhados** pela 1ª coluna (ordenada), com célula vazia onde a curva não tem o nível.
+- Curvas de **tipos diferentes** no mesmo gráfico (ex.: série e perfil) saem em **blocos** separados por uma linha em branco, cada um com seu cabeçalho.
+- Os valores gravados são os do gráfico (com `set cut` aplicado).
+- Só vale para gráficos de linha **ainda na tela**: depois de `c`, ou com um mapa/corte/Hovmöller, o comando dá erro.
+
+---
+## 2.8 Várias curvas: plot1, plot2…, cores, marcadores e legenda
+
+Cada **gráfico de linha** (série temporal em ponto, curva de `d <estat> sel <var>` ou perfil vertical) recebe, na ordem em que é plotado, o número **plot1, plot2, plot3…**, guardado em `setup['plots']`. Sem `c` entre dois `d`, as curvas se acumulam no mesmo gráfico; **`c` (ou `reset`) recomeça a contagem em plot1**.
+
+**Sequência automática**
+- **Cores** — as 8 cores ANSI padrão (`ESC[1;30m` a `ESC[1;37m`): preto, vermelho, verde, amarelo, azul, magenta, ciano, branco; depois da 8ª recomeça. (O branco aparece pouco sobre fundo branco — ajuste com `set plot <n> color`.)
+- **Marcadores** — `o s D * ^ v < > p h + x`, e recomeça na 13ª curva.
+
+```
+> sel lat 10 30
+> sel lon 10 30
+> d sum sel t2m        # plot1: preto, círculo
+> d mean sel t2m       # plot2: vermelho, quadrado
+> d max sel t2m        # plot3: verde, losango
+> show plots
+```
+
+**Ajuste por curva** — `set plot <n> ...` (vale para a curva na tela e, se ainda não existe, para quando for plotada):
+
+```
+set plot 2 color blue          cor da linha (e do marcador)
+set plot 2 marker D            tipo do marcador (auto = sequência)
+set plot 2 markercolor green   cor do marcador
+set plot 2 markersize 10
+set plot 2 linetype tracejada  cheia tracejada traco-ponto pontilhada nenhuma …
+set plot 2 linesize 2.5
+set plot 2 label Controle      texto na legenda
+set plot 2 default             volta ao automático
+```
+
+Prioridade: `set plot <n>` > `set marker ...` (global: `set marker type D` força o tipo em **todas** as curvas; `set marker off` apaga todos) > sequência automática. `set plot_line` é legado e não afeta as curvas numeradas.
+
+**Legenda** — **cada painel tem a sua** (`set pages`): `set legend on|off`, `set legend position` e `draw legend title` valem para o **painel selecionado** (`set page <lin> <col>`); os demais painéis não mudam. A caixa fica **fora** do gráfico (por padrão à esquerda) e só o eixo do próprio painel encolhe para dar lugar a ela, então legendas de painéis diferentes nunca se sobrepõem. As opções de estilo (`color`, `line`, `linetype`, `title size`) valem para todas. `set pages` recomeça as legendas.
+
+```
+set legend on                     liga (off desliga)
+set legend position R             L esquerda, R direita, U acima, D abaixo
+draw legend title Minhas curvas   título da caixa
+set legend title size 12          tamanho do título
+set legend color red              texto, título e borda
+set legend line 2                 espessura da borda
+set legend linetype pontilhada    tipo da borda
+```
+
+Cada entrada é **só o nome da variável** (ou o `label` definido por `set plot <n> label`). `draw legend` com curvas na tela equivale a `set legend on`.
+
+**`show plots`** mostra, no prompt, uma tabela com as curvas na tela:
+
+```
+> show plots
+Plot #  Variable      Color  Marker
+-----------------------------------
+1       Soma de t2m   black  o
+2       Media de t2m  red    s
+```
+
+(`Color` usa o nome ANSI da sequência automática, ou o que você definiu em `set plot <n> color`.) `write csv` grava **todas** as curvas (seção 2.7).
+
+---
+### Aparência por painel (`set pages` / `set page`)
+
+Com **mais de um painel** (`set pages <lin> <col>`), os comandos de **aparência** valem **só para o painel selecionado** (`set page <lin> <col>`); os demais painéis não mudam:
+
+- marcadores e curvas: `set marker ...`, `set plot <n> ...`;
+- legenda: `set legend ...`, `draw legend title`;
+- eixos: `set xrange|yrange|xdiv|ydiv|xtics|ytics`;
+- grade: `set grid color|size|type`;
+- textos: `draw title`, `draw xlabel|ylabel`, `set title|xlabel|ylabel font|color|size|style`.
+
+Ao trocar de painel, a configuração do que sai é guardada e a do que entra é carregada; um painel ainda não configurado parte dos valores que valiam quando o `set pages` foi dado (então dá para ajustar o estilo **antes** de dividir a janela e ele vale para todos). Os comandos de **dados** (`set lat|lon|lev|t|cut|cmap|clevs|gxout`, `sel`, `let`) continuam globais — valem para o próximo `d` em qualquer painel. `set background` é da janela inteira. Com um painel só, tudo é global, como sempre. `show plots` ganha a coluna `Page` quando há curvas em mais de um painel (a numeração plot1, plot2… é **por painel**).
+
+---
+
 ## 3. Sintaxe do comando `d` / `display` (2D)
 
 | Forma | Efeito |
@@ -931,6 +1035,8 @@ globais muito amplos.
 |---|---|
 | `show info` | Nome do arquivo NetCDF (e da grade, se houver), dimensões (inclusive **cada tipo de nível vertical** do arquivo, com dimensão, nº de níveis e fonte dos valores) e a lista completa de variáveis, com nº de níveis, **tipo de nível entre colchetes** (`[pressao]`, `[solo]`, `[altura]`), descrição e unidade — sempre referente ao **arquivo 1**. Se houver mais de um arquivo aberto, avisa e aponta para `show files`. |
 | `show files` | Tabela com **todos** os arquivos abertos na sessão: número, nome do arquivo e timestamp (data/hora, quando disponível) — ver seção 2.1. Se nenhum arquivo estiver aberto, informa isso. |
+| `show plots` | Tabela das curvas (plot1, plot2…) na tela: `Plot #`, `Variable`, `Color`, `Marker` — seção 2.8. |
+| `show timestamp [<n>]` | Timestamp do arquivo **n** (número de `show files`), ex.: `show timestamp 5` → `Arquivo 5 (nome.nc): 2023-12-30T15`. Sem `n`, o do arquivo selecionado por `set t`. Erro se `n` não for um arquivo aberto. |
 | `show times` | Tabela (número + timestamp) só com o(s) tempo(s) **atualmente selecionado(s)** por `set t` (seção 2.1/6): todos os arquivos do intervalo, um por linha, se o modo de série/animação estiver ligado (`set t <inicio> <fim>`); senão, uma única linha, o arquivo/tempo pontual selecionado (`set t <n>`, padrão o arquivo 1). |
 | `show latitudes` / `show longitudes` | Lista de coordenadas da malha, ordenada. |
 | `show levels [pressao\|altura\|solo]` | Lista os níveis de **cada tipo** de coordenada vertical do arquivo, com o índice a usar em `set lev`: pressão em hPa (`t_iso_levels`), níveis do modelo (`nVertLevels`; a altura em m vem do `zgrid`, por célula) e camadas do solo (`nSoilLevels`, profundidade em m — ver seção 8.2). Com o filtro, mostra só um tipo. |
@@ -958,10 +1064,25 @@ faltando avisa e **mantém a configuração anterior**, sem travar.
 |---|---|
 | `set lev <n>` | Nível único. É um **índice**, aceito até o maior número de níveis entre os tipos do arquivo (ex.: 0–17 com pressão de 18 níveis e solo de 6). Imprime o nível em cada tipo que o tem: pressão em hPa, profundidade do solo em m, altura média (`zgrid`) ou só o índice. Ao plotar, o índice é conferido contra os níveis **da variável** (ex.: `set lev 10` seguido de `d tslb` avisa que o solo só tem 6 níveis, 0 a 5). |
 | `set lev <n1> <n2>` | Intervalo de níveis, **ambos inclusivos** (corte vertical, perfil, `d3`) — `<n1>` e `<n2>` são índices de nível válidos, de `0` a `n_niveis-1` (a mesma faixa aceita por `set lev <n>`), e o nível `<n2>` **entra** na seleção. `<n1>` não pode ser maior que `<n2>`. Um corte vertical/`d3` precisa de pelo menos 2 níveis na faixa; um perfil (seção 8) aceita também uma faixa de 1 nível só (equivalente a `set lev <n1>`, com `<n1> == <n2>`). |
-| `set lat <valor>` / `set lat <min> <max>` | Latitude fixa num ponto, ou intervalo (domínio do mapa). |
-| `set lon <valor>` / `set lon <min> <max>` | Longitude fixa num ponto, ou intervalo. |
+| `set lat <valor>` / `set lat <min> <max>` / `set lat` | Latitude fixa num ponto, ou intervalo (domínio do mapa). Sem argumentos, volta ao domínio completo de latitude. |
+| `set lon <valor>` / `set lon <min> <max>` / `set lon` | Longitude fixa num ponto, ou intervalo. Sem argumentos, volta ao domínio completo de longitude. |
 | `set gxout <tipo>` | `shaded`/`contour`/`voronoi`/`hex` (2D, variáveis escalares — também vale `shaded` no `d3`); `vect` (padrão)/`stream`/`barb` (vento, `d u;v` ou `d mag(...)`). |
 | `set cut <minimo> <maximo>` | Só plota valores dentro de `[minimo, maximo]`; fora disso fica transparente. Vale para `d` (mapa, corte, perfil) e `d3`. `set cut` sem valores desliga. |
+| `set xrange <min> <max>` | Fixa os limites do eixo X de todos os gráficos com eixos (mapa, perfil, corte, séries, curvas do `sel`...), no gráfico atual e nos seguintes. Aceita números (ex. `set xrange -60 -30`) ou, num eixo de tempo, datas `AAAA-MM-DDTHH` (ex. `set xrange 2024-01-01T00 2024-01-02T00`). `set xrange off` (ou sem valores) volta ao automático. `min` deve ser menor que `max`; valor inválido avisa e mantém o anterior. Não é alterado por `reset`. |
+| `set yrange <min> <max>` | Como `set xrange`, para o eixo Y (só números). Em eixos invertidos (pressão) o sentido é preservado. `set yrange off` volta ao automático. |
+| `set xdiv <valor>` / `set ydiv <valor>` | Tamanho de **cada divisão** do eixo X / Y (espaçamento dos marcadores e, com `set grid on`, das linhas da grade). Ex.: `set xdiv 5` → marcas de 5 em 5 graus. Em eixo de **tempo**, `xdiv` é dado em **horas** (`set xdiv 6`). Valor positivo; `off` volta ao automático. Não se aplica a eixos de tempo com rótulos fixos por arquivo (sem datas). |
+| `set xtics <on\|off>` / `set ytics <on\|off>` | Liga/desliga as marcações (traços e valores) dos eixos X / Y, no gráfico atual e nos seguintes. Padrão `on`. Não é alterado por `reset`. |
+| `set marker <on\|off>` | Liga/desliga os **marcadores** dos gráficos de linha (série temporal em ponto, curva de `d <estat> sel <var>` e perfil vertical). Padrão `on`. |
+| `set marker type <tipo>` | Forma do marcador: qualquer código do matplotlib — `o` círculo, `s` quadrado, `D` diamante, `d` diamante fino, `*` estrela, `^` `v` `<` `>` triângulos, `p` pentágono, `h` `H` hexágonos, `+` `x` `X` `P`, `.` `,` `\|` `_`, `1`..`4` — ou apelidos (`circulo`, `quadrado`, `diamante`, `estrela`, `triangulo`; `S` = `s`). `auto` (padrão) volta à sequência por curva (seção 2.8). Também liga os marcadores. Tipo inválido avisa e mantém o anterior. |
+| `set marker size <tamanho>` | Tamanho do marcador em pontos (número positivo; padrão `6`). |
+| `set marker color <cor>` | Cor do marcador (nome do matplotlib ou `#RRGGBB`); `set marker color default` usa a cor da linha. |
+| `set marker text <on\|off>` | Escreve, junto de cada marcador, o **valor** do ponto (3–4 algarismos significativos): nas séries e curvas, o valor do eixo Y; no perfil vertical, o valor da variável (eixo X). Padrão `off`. |
+| `set plot <n> color <cor>` / `markercolor <cor>` / `marker <tipo\|auto>` / `markersize <n>` / `linetype <tipo>` / `linesize <n>` / `label <texto>` / `default` | Estilo da curva número `<n>` (**plot1, plot2, …** — seção 2.8): cor da linha, cor/tipo/tamanho do marcador, tipo e espessura da linha (mesmos tipos de `set grid type`), texto na legenda; `default` volta ao automático. Vale na hora para a curva na tela e, se ainda não existir, para quando for plotada. |
+| `set legend <on\|off>` | Liga/desliga a **caixa de legenda do painel selecionado** (uma entrada por curva — seção 2.8). Cada painel de `set pages` tem a sua legenda. |
+| `set legend position <L\|R\|U\|D>` | Posição da caixa de legenda **do painel selecionado**: `L` esquerda (padrão), `R` direita, `U` acima, `D` abaixo do gráfico (também aceita `esquerda`/`direita`/`acima`/`abaixo`). A margem correspondente se abre sozinha; em `U`/`D` as entradas ficam lado a lado. |
+| `set legend title size <n>` | Tamanho da fonte do título da legenda (padrão 10). O texto do título é `draw legend title <texto>`. |
+| `set legend color <cor>` | Cor do texto, do título e da **borda** da caixa (`default` volta ao automático). |
+| `set legend line <espessura>` / `set legend linetype <tipo>` | Espessura e tipo (cheia, tracejada, traço-ponto, pontilhada…, como em `set grid type`) da **borda** da caixa. |
 | `set clevs <v0> <v1> ... <vn>` | Fronteiras exatas dos intervalos de cor/contorno (ex.: `0 100 200 ... 1500`). Usadas em todo tipo de plotagem com barra de cores, inclusive `d3`. Lista vazia volta ao padrão automático (20 níveis). |
 | `set cmap <nome>` | Colormap do matplotlib. |
 | `set pages <linhas> <colunas>` | Grade de painéis da janela 2D (ex.: `set pages 1 2`). Limpa a janela e seleciona o primeiro painel. |
@@ -1202,6 +1323,13 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 | `levels` / `eixo_pressao` | Nível *padrão* do arquivo (pressão se houver `t_iso_levels`; senão níveis do modelo), usado só quando a variável é desconhecida. O tipo de nível de cada variável vem de `utils.descritor_nivel` (seção 8.2). |
 | `_nivel_atual` | Descritor do nível da variável do comando em andamento (tipo, valores, rótulo, sentido do eixo), registrado por `exec_func.py` ao resolver a variável. |
 | `lat_min`, `lat_max`, `lon_min`, `lon_max` | Domínio geográfico selecionado. |
+| `plots` / `plot_estilos` | Lista das curvas numeradas na tela (`{n, tipo, linha, x, y,…}`) e `{n: {color, marker, markersize, markercolor, linetype, linesize, label}}` de `set plot <n> ...` (seção 2.8). |
+| `legend_paineis` | `{(linha, coluna): {on, pos, title}}` — legenda de cada painel (seção 2.8); `legend_on`/`legend_pos`/`legend_title` espelham o painel selecionado. |
+| `legend_on`, `legend_pos`, `legend_title`, `legend_title_size`, `legend_color`, `legend_line`, `legend_linetype` | Estado de `set legend ...` / `draw legend title` (seção 2.8). |
+| `marker`, `marker_type`, `marker_size`, `marker_color`, `marker_text` | Estilo dos marcadores dos gráficos de linha (`set marker ...`; padrões `True`, `"auto"`, `6.0`, `None` = cor da linha, `False`). |
+| `xtics` / `ytics` | `True`/`False` — `set xtics|ytics on|off` (padrão `True`). |
+| `yrange` / `xdiv` / `ydiv` | `None` ou `(min, max)` / valor — `set yrange`, `set xdiv`, `set ydiv` (seção 6). |
+| `xrange` | `None` ou `(min, max)` — limites do eixo X de `set xrange`. |
 | `sel` | `{"lat": None\|(ini, fin), "lon": None\|(ini, fin), "t": None\|(ini, fim)}` — região/período do comando `sel` (seção 2.6). Limpo por `reset`. |
 | `lev`, `levf` | Índice de nível (único ou intervalo) selecionado. |
 | `cut` | `None`, ou `(minimo, maximo)` — ver `set cut`. |
@@ -1252,7 +1380,11 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
   `main()`).
 - `main()` — ponto de entrada de `grads-monan-setup` (reinicializa a config).
 
+### `help_func.py`
+- `AJUDA` / `cmd_help(cmd_split)` — comando `help [termo]`: tabela (grupo → sintaxe, comentário) e filtro por termo. **Ao criar um comando novo, acrescente-o em `AJUDA`** (há um teste que confere que todo comando do `cli.py` aparece na ajuda) e em `refcard.md`.
+
 ### `exec_func.py`
+- `exec_cmd(...)` (wrapper) / `_exec_cmd_core(...)` / `_cmd_debug` / `_FiltroSaida` / `_DEBUG` — `debug on|off`: com `off`, a saída do comando passa por `_FiltroSaida`, que só deixa passar linhas de erro/uso (`_MARCAS_SEMPRE`), salvo nos comandos que imprimem resultado (`_comando_imprime_resultado`). Os comandos de dentro de `run` seguem a mesma regra, linha a linha.
 - `exec_cmd(...)` — despachante central de todos os comandos do prompt.
 - `run_file(...)` — executa um script de comandos linha a linha.
 - `_resolver_variavel(setup, token)` — resolve um token de variável com sufixo opcional `.N` (seção 2.1): localiza o arquivo aberto correspondente e a variável nele, com mensagens de erro/sugestões (`difflib`) quando o arquivo não está aberto ou a variável não existe. Sem sufixo `.N`, usa `setup['arquivo_sel']` (padrão `1`, alterado por `set t <n>`) em vez de sempre o arquivo 1.
@@ -1291,6 +1423,8 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 ### `set_func.py`
 - `cmd_set(...)` / `_cmd_set_dispatch(...)` — comando `set` (tabela da seção 6), com validação numérica segura. `set lev <n1> <n2>` valida `<n1>`/`<n2>` como índices de nível **inclusivos** (0 a `n_niveis-1`, com `<n1> <= <n2>`) e guarda internamente `setup["levf"] = <n2> + 1` — o limite EXCLUSIVO usado por toda fatia de nível do resto do código (`var[..., lev:levf]` — ver `levf_efetivo` em `utils.py`); sem esse `+1`, incluir o último nível pedido exigiria um índice inválido.
 - `cmd_sel(cmd_split, setup, cmd_user)` / `_faixa_lon_sel(a, b)` — comando `sel` (seção 2.6): valida e guarda `setup['sel']`; normaliza longitudes (0–360 → −180–180, preservando o cruzamento do meridiano).
+- `set xtics|ytics on|off` guarda `setup['xtics'|'ytics']`; a aplicação é feita por `aplicar_limites_eixos` (`tick_params`).
+- `_valor_xrange(txt)` — interpreta número ou data para `set xrange|yrange`; `_reaplicar_limites_atuais` aplica na hora ao gráfico atual. A aplicação em si é `aplicar_limites_eixos(setup, ax)` (`plot_func.py`; xrange/yrange/xdiv/ydiv, chamada por `_aplicar_rotulos_eixos` ao final de toda plotagem); `restaurar_divisoes_eixos` atende `set xdiv|ydiv off`.
 - `_print_level_info(setup, l, lf=None)` — informação do nível (ou faixa) ao usar `set lev`, em cada tipo de nível do arquivo (pressão, solo, altura).
 - `_set_estilo_texto(setup, alvo, cmd_split, cmd_user)` — implementa `set label|title|xlabel|ylabel font/color/size/style` (`alvo` é `"label"`, `"title"`, `"xlabel"` ou `"ylabel"`; os dois últimos reaplicam o estilo na hora ao gráfico atual), guardando o resultado em `setup['<alvo>_font']`/`_color`/`_size`/`_style`. `font` verifica a existência da fonte no sistema (`_fonte_existe`, de `plot_func.py`) antes de aceitar.
 - `_set_contour(setup, cmd_split, cmd_user)` — implementa `set contour line size/<bw|color>` e `set contour font/<color|size|style>` (linhas e rótulos inline do `gxout contour`), guardando o resultado em `setup['contour_line_size']`/`_line_mode`/`_font`/`_font_color`/`_font_size`/`_font_style`.
@@ -1301,6 +1435,7 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 - `cmd_show(setup, cmd_split)` / `_mostrar_info_arquivo(setup)` — comando `show` (tabela da seção 5).
 - `_mostrar_sets(setup)` / `_mostrar_sels(setup)` — blocos "Configuração atual (set)" e "Seleção atual (sel)" do `show info`; `_mostrar_sels` também atende `show sel` (seção 2.6).
 - `_mostrar_niveis(setup, filtro)` / `_mostrar_lev(setup)` — `show levels [tipo]` e `show lev`: níveis de cada tipo de coordenada vertical (seção 8.2).
+- `_mostrar_timestamp(setup, cmd_split)` — `show timestamp [n]`.
 - `_mostrar_arquivos(setup)` — `show files`: tabela com os arquivos abertos na sessão (seção 2.1).
 - `_mostrar_tempos(setup)` — `show times`: mesma tabela de `_mostrar_arquivos`, restrita ao(s) tempo(s) atualmente selecionado(s) por `set t` (o intervalo inteiro no modo série, ou só o arquivo pontual de `setup['arquivo_sel']` fora dele) — seção 2.1/5.
 - `_mostrar_fontes()` — `show fonts`: lista as fontes do sistema (ver `_listar_fontes` em `plot_func.py`) — seção 5/6.
@@ -1315,6 +1450,11 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 - `_SIMBOLOS_MARK` — tabela símbolo → `marker`/`fillstyle`.
 
 ### `plot_func.py`
+- `resolver_tipo_marcador(txt)` / `_kwargs_marcador(setup)` / `aplicar_marcador_linha(setup, linha)` / `reaplicar_marcadores(setup)` — `set marker ...`: o estilo é aplicado na criação de cada linha (série, curva de `sel`, perfil — que agora usa os marcadores da própria linha, não mais um `scatter`) e reaplicado na hora ao último gráfico de linha na tela.
+- `_formatar_datas_eixo(ax, fig)` — gira os rótulos de data **só do eixo plotado** (antes usava `fig.autofmt_xdate()`, que apagava os rótulos e o título do eixo X dos demais painéis de `set pages`); em grade com mais de uma linha de painéis abre o espaçamento vertical (`hspace`).
+- `CHAVES_PAINEL` / `valor_painel(setup, painel, chave)` / `iniciar_paineis` / `trocar_painel` — configuração de aparência **por painel**: `set pages` guarda a base (`setup['painel_base']`), `set page` salva o painel que sai em `setup['painel_cfg'][(lin, col)]` e carrega o que entra; `estilo_efetivo`/`atualizar_legenda` leem o valor do painel de cada curva.
+- `registrar_linha(..., setup)` numera a curva (plot1, plot2… — `plots_ativos`), `estilo_efetivo` (set plot > set marker > sequência `_CORES_ANSI`/`_MARCADORES_SEQ`), `aplicar_estilo_plot`, `atualizar_legenda(setup, ax)` (legenda **por painel**, em L/R/U/D, fora do eixo, que é encolhido só no próprio painel; estado em `setup['legend_paineis'][(linha, coluna)]` = `{on, pos, title}`, via `definir_estado_legenda`/`estado_legenda`), `atualizar_legendas_figura` (refaz todas depois de qualquer ajuste de layout), `listar_plots` (tabela de `show plots`). Seção 2.8.
+- `registrar_linha(...)` / `salvar_csv(caminho, setup)` — `write csv` (seção 2.7): cada gráfico de linha (série em ponto, curva de `sel`, perfil vertical) registra seus dados em `setup['plots']`; `salvar_csv` grava, numa tabela só, todas as curvas vivas do eixo ativo (alinhadas pela 1ª coluna; blocos separados se os tipos diferem).
 **Plotagem 2D:**
 - `plot_var(setup, var, cbar=None)` — despacha mapa/corte/perfil (seção 8) e `shaded`/`contour`/`voronoi`. No mapa horizontal, redesenha o mapa de fundo (`plot_map`) automaticamente se `setup["draw_map_on"]` estiver ligado (seção 7/2.1), e reaplica título (`_aplicar_titulo`) e rótulo da colorbar (`_aplicar_rotulo_cbar`), se definidos.
 - `plot_perfil(setup, var)` / `plot_corte(setup, var, cbar=None)` — resolvem a fatia bruta (`var[...]`) da variável comum e delegam o desenho a `_plotar_perfil_dados`/`_plotar_corte_dados`.

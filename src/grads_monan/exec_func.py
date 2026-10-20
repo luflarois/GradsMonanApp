@@ -13,13 +13,15 @@ import re
 import glob
 import difflib
 import numpy as np
+import matplotlib.pyplot as plt
 #
 #My functions
 from .files import file_open, carregar_limites
 from .show_func import cmd_show, show_legend
-from .plot_func import plot_wind, plot_var, plot_var_3d, clear_plots,save_fig, plot_serie, plot_serie_mapa_3d, plot_limites, plot_estatistica_campo, atualizar_titulo_janela, plot_curva_sel
+from .plot_func import plot_wind, plot_var, plot_var_3d, clear_plots,save_fig, plot_serie, plot_serie_mapa_3d, plot_limites, plot_estatistica_campo, atualizar_titulo_janela, plot_curva_sel, salvar_csv, atualizar_legendas_figura, definir_estado_legenda, estado_legenda, plots_ativos
 from .draw_func import draw_title, draw_mark, draw_map, draw_label, draw_axis_label
 from .set_func import cmd_set, cmd_sel
+from .help_func import cmd_help
 from .utils import mag, sem_mascara, descritor_nivel, checar_niveis
 from .estatistics import calcular_valor, calcular_campo, NOMES_ESTATISTICA_ESCALAR, NOMES_ESTATISTICA_ESPACIAL, calcular_serie_sel, descricao_sel, nova_selecao, _NOMES_FUNCAO as _NOMES_ESTATISTICA
 
@@ -144,7 +146,7 @@ def _nomes_reservados():
     return set(_FUNCOES_EXPR) | {
         "!", "exec", "q", "exit", "quit", "run", "open", "reinit", "gxprint",
         "show", "c", "reset", "load", "set", "draw", "d3", "display", "d",
-        "let", "undef", "sel", "acum"} | set(NOMES_ESTATISTICA_ESCALAR)
+        "let", "undef", "sel", "acum", "debug", "write", "help"} | set(NOMES_ESTATISTICA_ESCALAR)
 
 def _vars_usuario(setup):
     if not isinstance(setup, dict):
@@ -540,7 +542,7 @@ def _dados_estatistica(setup, expr):
         return None
     return [var]
 
-def exec_cmd(cmd_user, cmd,cmd_split,setup, dataset, ax, cbar, setup_toml):
+def _exec_cmd_core(cmd_user, cmd,cmd_split,setup, dataset, ax, cbar, setup_toml):
 
     # A coordenada vertical (pressao/altura/solo) e registrada de novo a
     # cada comando, ao resolver a variavel (ver _registrar_nivel).
@@ -685,11 +687,14 @@ def exec_cmd(cmd_user, cmd,cmd_split,setup, dataset, ax, cbar, setup_toml):
             setup["time_ini"] = None
             setup["time_fim"] = None
             setup["sel"] = nova_selecao()      # 'sel lat/lon/t' tambem voltam ao padrao
+            # limites e divisoes dos eixos ('set xrange|yrange|xdiv|ydiv') voltam ao automatico
+            for chave in ("xrange", "yrange", "xdiv", "ydiv"):
+                setup[chave] = None
             clear_plots(setup)
             ax = 0
             cbar = 0
             atualizar_titulo_janela(setup)
-            print("Reset: lat/lon voltaram para toda a malha, nivel {0}, arquivo 1; titulo, rotulos, corte (cut) e mapa limpos. Arquivos abertos mantidos.".format(setup["lev"]))
+            print("Reset: lat/lon voltaram para toda a malha, nivel {0}, arquivo 1; titulo, rotulos, corte (cut), faixas/divisoes dos eixos e mapa limpos. Arquivos abertos mantidos.".format(setup["lev"]))
         elif cmd == "load":
             if len(cmd_split) < 3 or cmd_split[1] != "limits":
                 print("Uso: load limits <arquivo.csv>")
@@ -733,6 +738,14 @@ def exec_cmd(cmd_user, cmd,cmd_split,setup, dataset, ax, cbar, setup_toml):
                             arrays = None
                     if arrays is not None:
                         calcular_valor(setup, cmd, arrays, mask, token, modo_point=modo_point)
+        elif cmd == "write":
+            if len(cmd_split) >= 3 and cmd_split[1] == "csv":
+                nome = cmd_user.split(None, 2)[2].strip().strip('"').strip("'")
+                if not os.path.splitext(nome)[1]:
+                    nome += ".csv"
+                salvar_csv(nome, setup)
+            else:
+                print("Uso: write csv <nome do arquivo>")
         elif cmd == "sel":
             setup = cmd_sel(cmd_split, setup, cmd_user)
         elif cmd == "acum":
@@ -751,7 +764,20 @@ def exec_cmd(cmd_user, cmd,cmd_split,setup, dataset, ax, cbar, setup_toml):
             if cmd_split[1] == "mark":
                 draw_mark(cmd_split)
             if cmd_split[1] == "legend":
-                show_legend()
+                if len(cmd_split) >= 3 and cmd_split[2].lower() == "title":
+                    # 'draw legend title <titulo>': titulo da caixa de legenda
+                    if len(cmd_split) < 4:
+                        print("Uso: draw legend title <titulo>")
+                    else:
+                        definir_estado_legenda(setup, title=cmd_user.split(None, 3)[3])
+                        print("Titulo da legenda (deste painel): '{0}'{1}".format(setup["legend_title"], "" if estado_legenda(setup).get("on") else "  (ative com 'set legend on')"))
+                        atualizar_legendas_figura(setup, plt.gcf())
+                elif plots_ativos(setup):
+                    # equivale a 'set legend on' quando ha curvas numeradas
+                    definir_estado_legenda(setup, on=True)
+                    atualizar_legendas_figura(setup, plt.gcf())
+                else:
+                    show_legend()
             if cmd_split[1] == "map":
                 if len(cmd_split) > 2 and cmd_split[2].lower() == "off":
                     # Desliga o mapa de fundo: para de ser redesenhado
@@ -938,3 +964,63 @@ def run_file(script_file,setup, dataset, ax, cbar, setup_toml):
             continue
         setup, dataset, ax, cbar  = exec_cmd(line, cmd, cmd_split,setup, dataset, ax, cbar, setup_toml)     
     return setup, dataset, ax
+
+
+# --- Modo debug (comando 'debug on|off') -------------------------------------
+# on  (padrao): todas as saidas aparecem na tela, como sempre.
+# off: os comandos nao escrevem mensagens informativas (confirmacoes, avisos,
+#      detalhes de 'open'/'set'/'d'...). Continuam aparecendo: erros/usos
+#      incorretos e a saida dos comandos cuja finalidade e justamente imprimir
+#      (show, let/sel sem argumentos, estatisticas escalares, debug).
+_DEBUG = {"on": True}
+_MARCAS_SEMPRE = ("Erro", "Falha", "Uso:", "Command not recognized", "not found", "Please, check", "nao encontrad", "Variaveis disponiveis", "Voce quis dizer", "Did you mean", "invalid", "Invalid")
+
+class _FiltroSaida(object):
+    def __init__(self, destino):
+        self._destino = destino
+        self._resto = ""
+    def write(self, texto):
+        self._resto += texto
+        while "\n" in self._resto:
+            linha, self._resto = self._resto.split("\n", 1)
+            if any(m in linha for m in _MARCAS_SEMPRE):
+                self._destino.write(linha + "\n")
+        return len(texto)
+    def flush(self):
+        self._destino.flush()
+    def __getattr__(self, nome):
+        return getattr(self._destino, nome)
+
+def _comando_imprime_resultado(cmd, cmd_split):
+    if cmd in ("show", "run", "debug", "q", "exit", "quit", "!", "exec"):
+        return True
+    if cmd in ("let", "sel") and len(cmd_split) == 1:
+        return True
+    if cmd == "acum" or cmd in _COMANDOS_ESTATISTICA_ESCALAR:
+        return True
+    return False
+
+def _cmd_debug(cmd_split):
+    if len(cmd_split) == 1:
+        print("debug: {0}".format("on" if _DEBUG["on"] else "off"))
+    elif len(cmd_split) == 2 and cmd_split[1].lower() in ("on", "off"):
+        _DEBUG["on"] = cmd_split[1].lower() == "on"
+        print("debug: {0}".format("on" if _DEBUG["on"] else "off"))
+    else:
+        print("Uso: debug <on|off>")
+
+def exec_cmd(cmd_user, cmd, cmd_split, setup, dataset, ax, cbar, setup_toml):
+    if cmd == "debug":
+        _cmd_debug(cmd_split)
+        return setup, dataset, ax, cbar
+    if cmd == "help":
+        cmd_help(cmd_split)
+        return setup, dataset, ax, cbar
+    if _DEBUG["on"] or _comando_imprime_resultado(cmd, cmd_split):
+        return _exec_cmd_core(cmd_user, cmd, cmd_split, setup, dataset, ax, cbar, setup_toml)
+    real = sys.stdout
+    sys.stdout = _FiltroSaida(real)
+    try:
+        return _exec_cmd_core(cmd_user, cmd, cmd_split, setup, dataset, ax, cbar, setup_toml)
+    finally:
+        sys.stdout = real

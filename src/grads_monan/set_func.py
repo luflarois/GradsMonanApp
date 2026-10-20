@@ -10,7 +10,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .plot_func import atualizar_titulo_janela, _fonte_existe, _aplicar_rotulos_eixos, aplicar_fundo, restaurar_fundo, aplicar_grade, reaplicar_estilo_grade, resolver_tipo_linha
+from .plot_func import iniciar_paineis, trocar_painel, _POSICOES_LEGENDA, definir_estado_legenda, atualizar_legendas_figura, reaplicar_marcadores, resolver_tipo_marcador, aplicar_limites_eixos, restaurar_divisoes_eixos, atualizar_titulo_janela, _fonte_existe, _aplicar_rotulos_eixos, aplicar_fundo, restaurar_fundo, aplicar_grade, reaplicar_estilo_grade, resolver_tipo_linha
 from matplotlib.colors import is_color_like
 from .utils import descritores_disponiveis, formatar_nivel, normalize_lon
 from .estatistics import nova_selecao, descricao_sel
@@ -74,6 +74,31 @@ def _set_estilo_texto(setup, alvo, cmd_split, cmd_user):
     setup["{0}_style".format(alvo)] = cmd_split[3]
     print("Estilo de '{0}' definido para '{1}'.".format(alvo, cmd_split[3]))
     return setup
+
+def _valor_xrange(txt):
+    """Numero (float) ou data (datetime) para 'set xrange'; None se invalido."""
+    try:
+        v = float(txt)
+        return v if np.isfinite(v) else None
+    except ValueError:
+        pass
+    from datetime import datetime
+    for fmt in ("%Y-%m-%dT%H:%M", "%Y-%m-%dT%H", "%Y-%m-%d_%H:%M:%S", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(txt, fmt)
+        except ValueError:
+            continue
+    return None
+
+def _reaplicar_limites_atuais(setup):
+    """Aplica na hora, no grafico atual (se houver), xrange/yrange/xdiv/ydiv."""
+    try:
+        if plt.get_fignums():
+            ax = plt.gca()
+            aplicar_limites_eixos(setup, ax)
+            ax.figure.canvas.draw_idle()
+    except Exception:
+        pass
 
 def _reaplicar_rotulos_eixos_atuais(setup):
     """Aplica na hora, no grafico atual (se houver), o estilo dos rotulos
@@ -405,6 +430,117 @@ def _cmd_set_dispatch(cmd_split, setup, cmd_user):
         else:
             print("Uso: set lev <nivel>  ou  set lev <nivel_inicial> <nivel_final>")
         return setup
+    elif cmd_split[1] in ("xrange", "yrange"):
+        # set xrange|yrange <min> <max> : limites do eixo. Sem valores (ou
+        # 'off'), volta ao automatico. Em eixo de tempo (X) aceita datas.
+        eixo = cmd_split[1][0]
+        chave = cmd_split[1]
+        if len(cmd_split) == 2 or (len(cmd_split) == 3 and cmd_split[2].lower() in ("off", "clear", "auto")):
+            setup[chave] = None
+            print("Faixa do eixo {0} (set {1}) automatica (vale no proximo grafico).".format(eixo.upper(), chave))
+        elif len(cmd_split) == 4:
+            a, b = _valor_xrange(cmd_split[2]), _valor_xrange(cmd_split[3])
+            if a is None or b is None or (eixo == "y" and not (isinstance(a, float) and isinstance(b, float))):
+                print("Erro: valores invalidos para {0} (use numeros{1}).".format(chave, " ou datas AAAA-MM-DD[THH]" if eixo == "x" else ""))
+                return setup
+            try:
+                if a >= b:
+                    print("Erro: o minimo ({0}) deve ser menor que o maximo ({1}).".format(cmd_split[2], cmd_split[3]))
+                    return setup
+            except TypeError:
+                print("Erro: minimo e maximo devem ser do mesmo tipo (numeros ou datas).")
+                return setup
+            setup[chave] = (a, b)
+            print("Eixo {0} (set {1}): {2} a {3}".format(eixo.upper(), chave, cmd_split[2], cmd_split[3]))
+            _reaplicar_limites_atuais(setup)
+        else:
+            print("Uso: set {0} <minimo> <maximo>  ou  set {0} off".format(chave))
+        return setup
+    elif cmd_split[1] == "marker":
+        # Marcadores dos graficos de linha (serie, curva de sel, perfil):
+        #   set marker <on|off> | type <tipo> | size <n> | color <cor|default> | text <on|off>
+        sub = cmd_split[2].lower() if len(cmd_split) > 2 else ""
+        uso = "Uso: set marker <on|off>  |  set marker type <tipo>  |  set marker size <tamanho>  |  set marker color <cor>  |  set marker text <on|off>"
+        if sub in ("on", "off") and len(cmd_split) == 3:
+            setup["marker"] = sub == "on"
+            print("Marcadores (set marker): {0}".format(sub))
+        elif sub == "type" and len(cmd_split) == 4:
+            tipo = resolver_tipo_marcador(cmd_split[3])
+            if tipo is None:
+                print("Erro: tipo de marcador invalido '{0}'. Exemplos: o . , D s * ^ v < > p h H + x X d | _ 1 2 3 4 (ou circulo, quadrado, diamante, estrela, triangulo).".format(cmd_split[3]))
+                return setup
+            setup["marker_type"] = tipo
+            setup["marker"] = True
+            print("Tipo de marcador (set marker type): {0}".format(tipo))
+        elif sub == "size" and len(cmd_split) == 4:
+            try:
+                v = float(cmd_split[3])
+            except ValueError:
+                v = float("nan")
+            if not np.isfinite(v) or v <= 0:
+                print("Erro: o tamanho do marcador deve ser um numero positivo.")
+                return setup
+            setup["marker_size"] = v
+            print("Tamanho do marcador (set marker size): {0:g}".format(v))
+        elif sub == "color" and len(cmd_split) == 4:
+            if cmd_split[3].lower() in ("default", "auto"):
+                setup["marker_color"] = None
+                print("Cor do marcador (set marker color): igual a da linha.")
+            elif is_color_like(cmd_split[3]):
+                setup["marker_color"] = cmd_split[3]
+                print("Cor do marcador (set marker color): {0}".format(cmd_split[3]))
+            else:
+                print("Erro: cor invalida '{0}'.".format(cmd_split[3]))
+                return setup
+        elif sub == "text" and len(cmd_split) == 4 and cmd_split[3].lower() in ("on", "off"):
+            setup["marker_text"] = cmd_split[3].lower() == "on"
+            print("Valor escrito em cada marcador (set marker text): {0}".format(cmd_split[3].lower()))
+        else:
+            print(uso)
+            return setup
+        try:
+            reaplicar_marcadores(setup)
+        except Exception:
+            pass
+        return setup
+    elif cmd_split[1] in ("xtics", "ytics"):
+        # set xtics|ytics <on|off> : marcas e valores nos eixos
+        chave = cmd_split[1]
+        if len(cmd_split) == 3 and cmd_split[2].lower() in ("on", "off"):
+            setup[chave] = cmd_split[2].lower() == "on"
+            print("Marcacoes do eixo {0} (set {1}): {2}".format(chave[0].upper(), chave, cmd_split[2].lower()))
+            _reaplicar_limites_atuais(setup)
+        else:
+            print("Uso: set {0} <on|off>".format(chave))
+        return setup
+    elif cmd_split[1] in ("xdiv", "ydiv"):
+        # set xdiv|ydiv <valor> : tamanho de cada divisao (e da grade) do eixo.
+        # Eixo X de tempo: valor em horas. 'off' volta ao automatico.
+        eixo = cmd_split[1][0]
+        chave = cmd_split[1]
+        if len(cmd_split) == 3 and cmd_split[2].lower() in ("off", "clear", "auto"):
+            setup[chave] = None
+            try:
+                if plt.get_fignums():
+                    restaurar_divisoes_eixos(plt.gca(), eixo)
+                    plt.gcf().canvas.draw_idle()
+            except Exception:
+                pass
+            print("Divisao do eixo {0} (set {1}) automatica.".format(eixo.upper(), chave))
+        elif len(cmd_split) == 3:
+            try:
+                v = float(cmd_split[2])
+            except ValueError:
+                v = float("nan")
+            if not np.isfinite(v) or v <= 0:
+                print("Erro: {0} deve ser um numero positivo.".format(chave))
+                return setup
+            setup[chave] = v
+            print("Divisao do eixo {0} (set {1}): {2:g}{3}".format(eixo.upper(), chave, v, " (horas, se o eixo for de tempo)" if eixo == "x" else ""))
+            _reaplicar_limites_atuais(setup)
+        else:
+            print("Uso: set {0} <valor>  ou  set {0} off".format(chave))
+        return setup
     elif cmd_split[1] == "cut":
         # Intervalo [minimo, maximo] plotado (2D e 3D); fora dele, fica
         # transparente. 'set cut' sem valores desliga o corte.
@@ -433,8 +569,10 @@ def _cmd_set_dispatch(cmd_split, setup, cmd_user):
             return setup
         setup["pages_rows"] = m
         setup["pages_cols"] = n
+        setup["legend_paineis"] = {}      # a janela e refeita: legendas por painel recomecam
         setup["page_row"] = 1
         setup["page_col"] = 1
+        iniciar_paineis(setup)            # aparencia (marker, legenda, eixos, grade...) passa a ser por painel
         plt.clf()
         plt.subplot(m, n, 1)
         return setup
@@ -450,6 +588,7 @@ def _cmd_set_dispatch(cmd_split, setup, cmd_user):
         if m < 1 or m > rows or n < 1 or n > cols:
             print("Pagina fora do intervalo: linhas de 1 a {0}, colunas de 1 a {1}.".format(rows, cols))
             return setup
+        trocar_painel(setup, (m, n))       # guarda a aparencia do painel que sai, carrega a do que entra
         setup["page_row"] = m
         setup["page_col"] = n
         indice = (m-1)*cols + n
@@ -531,6 +670,16 @@ def _cmd_set_dispatch(cmd_split, setup, cmd_user):
         setup["map_line"] =  float(cmd_split[3])
         return setup
     elif cmd_split[1] == "lat":
+        if len(cmd_split) == 2:
+            _v = setup.get("latitudes")
+            if _v is None:
+                print("Erro: nenhum arquivo aberto; dominio completo indisponivel.")
+                return setup
+            setup["lat_min"] = float(_v.min())
+            setup["lat_max"] = float(_v.max())
+            print("lat: dominio completo restaurado (%g a %g)." % (setup["lat_min"], setup["lat_max"]))
+            atualizar_titulo_janela(setup)
+            return setup
         if len(cmd_split) == 3:
             setup["lat_min"] = float(cmd_split[2])
             setup["lat_max"] = float(cmd_split[2])
@@ -542,6 +691,16 @@ def _cmd_set_dispatch(cmd_split, setup, cmd_user):
             atualizar_titulo_janela(setup)
             return setup
     elif cmd_split[1] == "lon":
+        if len(cmd_split) == 2:
+            _v = setup.get("longitudes")
+            if _v is None:
+                print("Erro: nenhum arquivo aberto; dominio completo indisponivel.")
+                return setup
+            setup["lon_min"] = float(_v.min())
+            setup["lon_max"] = float(_v.max())
+            print("lon: dominio completo restaurado (%g a %g)." % (setup["lon_min"], setup["lon_max"]))
+            atualizar_titulo_janela(setup)
+            return setup
         if len(cmd_split) == 3:
             setup["lon_min"] = float(cmd_split[2])
             setup["lon_max"] = float(cmd_split[2])
@@ -554,6 +713,136 @@ def _cmd_set_dispatch(cmd_split, setup, cmd_user):
             return setup
     elif cmd_split[1] == "cmap":
         setup["cmap"] = cmd_split[2]    
+        return setup
+    elif cmd_split[1] == "plot":
+        # set plot <n> color|marker|markersize|markercolor|linetype|linesize|label <valor>
+        # (n = numero da curva: plot1, plot2, ... - vale ja para curvas futuras)
+        uso = ("Uso: set plot <n> color <cor> | marker <tipo|auto> | markersize <n> | markercolor <cor> | "
+               "linetype <tipo> | linesize <n> | label <texto> | default")
+        if len(cmd_split) < 4:
+            print(uso)
+            return setup
+        try:
+            n = int(cmd_split[2])
+            if n < 1:
+                raise ValueError
+        except ValueError:
+            print("Erro: o numero da curva deve ser um inteiro >= 1 (plot1, plot2, ...).")
+            return setup
+        est = setup.setdefault("plot_estilos", {})
+        campo = cmd_split[3].lower()
+        valor = cmd_split[4] if len(cmd_split) > 4 else None
+        if campo == "default" and len(cmd_split) == 4:
+            est.pop(n, None)
+            print("plot{0}: estilo voltou ao automatico.".format(n))
+        elif campo == "label" and len(cmd_split) >= 5:
+            est.setdefault(n, {})["label"] = cmd_user.split(None, 4)[4]
+            print("plot{0}: texto da legenda = '{1}'".format(n, est[n]["label"]))
+        elif campo in ("color", "markercolor") and valor is not None and len(cmd_split) == 5:
+            if valor.lower() in ("default", "auto"):
+                est.setdefault(n, {}).pop(campo, None)
+                print("plot{0}: {1} automatica.".format(n, campo))
+            elif is_color_like(valor):
+                est.setdefault(n, {})[campo] = valor
+                print("plot{0}: {1} = {2}".format(n, campo, valor))
+            else:
+                print("Erro: cor invalida '{0}'.".format(valor))
+                return setup
+        elif campo == "marker" and valor is not None and len(cmd_split) == 5:
+            tipo = resolver_tipo_marcador(valor)
+            if tipo is None:
+                print("Erro: tipo de marcador invalido '{0}'.".format(valor))
+                return setup
+            if tipo == "auto":
+                est.setdefault(n, {}).pop("marker", None)
+            else:
+                est.setdefault(n, {})["marker"] = tipo
+            print("plot{0}: marker = {1}".format(n, tipo))
+        elif campo in ("markersize", "linesize") and valor is not None and len(cmd_split) == 5:
+            try:
+                v = float(valor)
+            except ValueError:
+                v = float("nan")
+            if not np.isfinite(v) or v <= 0:
+                print("Erro: {0} deve ser um numero positivo.".format(campo))
+                return setup
+            est.setdefault(n, {})[campo] = v
+            print("plot{0}: {1} = {2:g}".format(n, campo, v))
+        elif campo == "linetype" and valor is not None:
+            tipo = resolver_tipo_linha(" ".join(cmd_split[4:]))
+            if tipo is None:
+                print("Erro: tipo de linha invalido '{0}'. Use cheia, tracejada, traco-ponto, pontilhada, nenhuma ou estilos do matplotlib.".format(" ".join(cmd_split[4:])))
+                return setup
+            est.setdefault(n, {})["linetype"] = tipo
+            print("plot{0}: linetype = {1}".format(n, " ".join(cmd_split[4:])))
+        else:
+            print(uso)
+            return setup
+        if not est.get(n, True) and n in est:
+            est.pop(n, None)
+        reaplicar_marcadores(setup)
+        return setup
+    elif cmd_split[1] == "legend":
+        # set legend on|off | title size <n> | color <cor> | line <espessura> | linetype <tipo>
+        uso = ("Uso: set legend <on|off> | set legend position <L|R|U|D> | set legend title size <n> | set legend color <cor> | "
+               "set legend line <espessura> | set legend linetype <tipo>   (titulo: draw legend title <texto>)")
+        sub = cmd_split[2].lower() if len(cmd_split) > 2 else ""
+        if sub in ("on", "off") and len(cmd_split) == 3:
+            definir_estado_legenda(setup, on=(sub == "on"))
+            print("Legenda (set legend) deste painel: {0}".format(sub))
+        elif sub == "position" and len(cmd_split) == 4:
+            pos = _POSICOES_LEGENDA.get(cmd_split[3].upper())
+            if pos is None:
+                print("Erro: posicao invalida '{0}'. Use L (esquerda), R (direita), U (acima) ou D (abaixo).".format(cmd_split[3]))
+                return setup
+            definir_estado_legenda(setup, pos=pos)
+            print("Posicao da legenda (set legend position): {0}".format({"L": "L (esquerda)", "R": "R (direita)", "U": "U (acima)", "D": "D (abaixo)"}[pos]))
+        elif sub == "title" and len(cmd_split) == 5 and cmd_split[3].lower() == "size":
+            try:
+                v = float(cmd_split[4])
+            except ValueError:
+                v = float("nan")
+            if not np.isfinite(v) or v <= 0:
+                print("Erro: o tamanho deve ser um numero positivo.")
+                return setup
+            setup["legend_title_size"] = v
+            print("Tamanho do titulo da legenda: {0:g}".format(v))
+        elif sub == "color" and len(cmd_split) == 4:
+            if cmd_split[3].lower() in ("default", "auto"):
+                setup["legend_color"] = None
+                print("Cor da legenda: automatica.")
+            elif is_color_like(cmd_split[3]):
+                setup["legend_color"] = cmd_split[3]
+                print("Cor da legenda (texto e borda): {0}".format(cmd_split[3]))
+            else:
+                print("Erro: cor invalida '{0}'.".format(cmd_split[3]))
+                return setup
+        elif sub == "line" and len(cmd_split) == 4:
+            try:
+                v = float(cmd_split[3])
+            except ValueError:
+                v = float("nan")
+            if not np.isfinite(v) or v <= 0:
+                print("Erro: a espessura deve ser um numero positivo.")
+                return setup
+            setup["legend_line"] = v
+            print("Espessura da borda da legenda: {0:g}".format(v))
+        elif sub == "linetype" and len(cmd_split) >= 4:
+            tipo = resolver_tipo_linha(" ".join(cmd_split[3:]))
+            if tipo is None:
+                print("Erro: tipo de linha invalido '{0}'.".format(" ".join(cmd_split[3:])))
+                return setup
+            setup["legend_linetype"] = tipo
+            print("Tipo da borda da legenda: {0}".format(" ".join(cmd_split[3:])))
+        else:
+            print(uso)
+            return setup
+        try:
+            if plt.get_fignums():
+                atualizar_legendas_figura(setup, plt.gcf())
+                plt.gcf().canvas.draw_idle()
+        except Exception:
+            pass
         return setup
     elif cmd_split[1] == "gxout":
         setup["gxout"]  =  cmd_split[2] 

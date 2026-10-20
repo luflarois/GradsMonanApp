@@ -10,7 +10,7 @@
 import os
 import matplotlib.pyplot as plt
 
-from .plot_func import _listar_fontes
+from .plot_func import listar_plots, _listar_fontes
 from .utils import descritor_nivel, descritores_disponiveis, formatar_nivel, levf_efetivo
 from .estatistics import descricao_sel, mascara_sel
 
@@ -78,6 +78,18 @@ def _mostrar_sets(setup):
     clevs = setup.get("clevs")
     print("  set clevs:  {0}".format(" ".join("{0:g}".format(c) for c in clevs) if clevs else "automatico"))
     cut = setup.get("cut")
+    xr = setup.get("xrange")
+    print("  set xrange: {0}".format("{0} a {1}".format(*xr) if xr else "automatico"))
+    yr = setup.get("yrange")
+    print("  set yrange: {0}".format("{0} a {1}".format(*yr) if yr else "automatico"))
+    print("  set xdiv:   {0}".format("{0:g}".format(setup["xdiv"]) if setup.get("xdiv") else "automatico"))
+    print("  set ydiv:   {0}".format("{0:g}".format(setup["ydiv"]) if setup.get("ydiv") else "automatico"))
+    print("  set xtics:  {0}".format("on" if setup.get("xtics", True) else "off"))
+    print("  set ytics:  {0}".format("on" if setup.get("ytics", True) else "off"))
+    print("  set marker: {0} (tipo {1}, tamanho {2:g}, cor {3}, texto {4})".format(
+        "on" if setup.get("marker", True) else "off", setup.get("marker_type", "o"),
+        setup.get("marker_size", 6.0), setup.get("marker_color") or "da linha",
+        "on" if setup.get("marker_text", False) else "off"))
     print("  set cut:    {0}".format("{0:g} a {1:g}".format(*cut) if cut else "desligado"))
     print("  set map:    {0} (cor {1}, espessura {2})".format(setup.get("map"), setup.get("map_color"), setup.get("map_line")))
     if setup.get("background"):
@@ -225,6 +237,30 @@ def _mostrar_arquivos(setup):
         print(linha_fmt.format(info["index"], info["fileName"], timestamp,
                                 w0=largura_num, w1=largura_nome, w2=largura_tempo))
 
+def _mostrar_timestamp(setup, cmd_split):
+    """Comando 'show timestamp [n]': timestamp do arquivo n (sem n, o
+    arquivo selecionado por 'set t')."""
+    arquivos = setup.get("files") or []
+    if not arquivos:
+        print("Nenhum arquivo aberto.")
+        return
+    if len(cmd_split) > 3:
+        print("Uso: show timestamp [<numero do arquivo>]")
+        return
+    if len(cmd_split) == 3:
+        try:
+            n = int(cmd_split[2])
+        except ValueError:
+            print("Erro: o numero do arquivo deve ser um inteiro (1 a {0}).".format(len(arquivos)))
+            return
+    else:
+        n = setup.get("arquivo_sel", 1)
+    info = next((i for i in arquivos if i["index"] == n), None)
+    if info is None:
+        print("Erro: arquivo {0} nao esta aberto (abertos: 1 a {1}; veja 'show files').".format(n, len(arquivos)))
+        return
+    print("Arquivo {0} ({1}): {2}".format(n, info["fileName"], info.get("DataDado") or "desconhecida"))
+
 def _mostrar_tempos(setup):
     """
     Comando 'show times': mostra uma tabela (numero do arquivo + timestamp)
@@ -290,6 +326,16 @@ def cmd_show(setup, cmd_split):
         return
     if cmd_split[1] == "sel":
         _mostrar_sels(setup)
+        return
+    if cmd_split[1] == "plots":
+        linhas = listar_plots(setup)
+        if not linhas:
+            print("Nenhuma curva (grafico de linha) na tela.")
+        for l in linhas:
+            print(l)
+        return
+    if cmd_split[1] == "timestamp":
+        _mostrar_timestamp(setup, cmd_split)
         return
     if cmd_split[1] == "times":
         _mostrar_tempos(setup)
