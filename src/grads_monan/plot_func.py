@@ -192,6 +192,10 @@ def clear_plots(setup=None):
         plt.gca().cla()
     else:
         plt.clf()
+        if setup is not None:
+            setup["plots"] = []     # curvas numeradas (plot1, plot2...) recomecam
+            # (com varios paineis, o 'cla' do painel deixa as curvas mortas, que
+            #  plots_ativos descarta sozinha, sem mexer nas dos outros paineis)
 
 def set_window_title(titulo):
     """
@@ -415,6 +419,444 @@ def _aplicar_rotulos_eixos(setup, ax):
         texto = setup.get(prefixo) or atual
         if texto:
             setter(texto, **kw)
+    aplicar_limites_eixos(setup, ax)
+
+def _e_eixo_de_data(eixo):
+    try:
+        if isinstance(eixo.get_major_locator(), mdates.DateLocator):
+            return True
+        conv = eixo.get_converter()
+        return conv is not None and type(conv).__module__ == "matplotlib.dates"
+    except Exception:
+        return False
+
+def aplicar_limites_eixos(setup, ax):
+    """'set xrange|yrange <min> <max>' (limites) e 'set xdiv|ydiv <valor>'
+    (tamanho de cada divisao dos eixos). Sem nada definido, nao muda nada.
+    Eixo X de tempo: xrange aceita datas e xdiv e dado em HORAS. Eixos
+    invertidos (ex.: pressao) mantem o sentido."""
+    from matplotlib.ticker import MultipleLocator, FixedFormatter
+    for eixo in ("x", "y"):
+        if setup.get(eixo + "tics", True) is False:
+            # 'set xtics|ytics off': sem marcas nem valores no eixo
+            try:
+                kw = {"bottom": False, "labelbottom": False} if eixo == "x" else {"left": False, "labelleft": False}
+                ax.tick_params(axis=eixo, **kw)
+            except Exception:
+                pass
+        else:
+            try:
+                kw = {"bottom": True, "labelbottom": True} if eixo == "x" else {"left": True, "labelleft": True}
+                ax.tick_params(axis=eixo, **kw)
+            except Exception:
+                pass
+        faixa = setup.get(eixo + "range")
+        if faixa:
+            try:
+                lo, hi = faixa
+                inv = getattr(ax, eixo + "axis_inverted")()
+                getattr(ax, "set_" + eixo + "lim")((hi, lo) if inv else (lo, hi))
+            except Exception:
+                pass
+        div = setup.get(eixo + "div")
+        if div:
+            try:
+                ax_eixo = getattr(ax, eixo + "axis")
+                if isinstance(ax_eixo.get_major_formatter(), FixedFormatter):
+                    continue   # rotulos posicionais fixos: nao reposicionar
+                passo = div / 24.0 if _e_eixo_de_data(ax_eixo) else div
+                ax_eixo.set_major_locator(MultipleLocator(passo))
+            except Exception:
+                pass
+
+def restaurar_divisoes_eixos(ax, eixo):
+    """Volta a divisao automatica do eixo ('x' ou 'y') - 'set xdiv off'."""
+    from matplotlib.ticker import AutoLocator
+    ax_eixo = getattr(ax, eixo + "axis")
+    ax_eixo.set_major_locator(mdates.AutoDateLocator() if _e_eixo_de_data(ax_eixo) else AutoLocator())
+
+# Ultimo grafico de linha desenhado (para 'write csv') - ver registrar_linha.
+_ULTIMA_LINHA = {}
+
+_APELIDOS_MARCADOR = {
+    "circulo": "o", "circle": "o", "quadrado": "s", "square": "s", "S": "s",
+    "diamante": "D", "diamond": "D", "estrela": "*", "star": "*",
+    "triangulo": "^", "triangle": "^", "ponto": ".", "point": ".",
+    "cruz": "+", "plus": "+", "x": "x",
+}
+
+# --- Configuracao POR PAINEL (set pages) -------------------------------------
+# Com mais de um painel, os comandos de aparencia abaixo valem so para o painel
+# selecionado ('set page <lin> <col>'): ao trocar de painel, os valores de
+# 'setup' do painel que sai sao guardados em setup['painel_cfg'] e os do que
+# entra sao carregados (painel ainda nao configurado = valores de quando
+# 'set pages' foi dado, setup['painel_base']). Com um painel so, tudo e global.
+import copy as _copy
+CHAVES_PAINEL = (
+    "marker", "marker_type", "marker_size", "marker_color", "marker_text", "plot_estilos",
+    "legend_color", "legend_line", "legend_linetype", "legend_title_size",
+    "xrange", "yrange", "xdiv", "ydiv", "xtics", "ytics",
+    "grid_color", "grid_size", "grid_type",
+    "title", "xlabel", "ylabel",
+    "title_font", "title_color", "title_size", "title_style",
+    "xlabel_font", "xlabel_color", "xlabel_size", "xlabel_style",
+    "ylabel_font", "ylabel_color", "ylabel_size", "ylabel_style",
+)
+
+def pagina_atual(setup):
+    return (setup.get("page_row", 1), setup.get("page_col", 1))
+
+def _varios_paineis(setup):
+    return setup.get("pages_rows", 1) * setup.get("pages_cols", 1) > 1
+
+def valor_painel(setup, painel, chave, padrao=None):
+    """Valor de 'chave' para o painel 'painel' (o do painel atual esta em setup)."""
+    if painel is None or not _varios_paineis(setup) or painel == pagina_atual(setup):
+        return setup.get(chave, padrao)
+    cfg = (setup.get("painel_cfg") or {}).get(painel)
+    if cfg is not None and chave in cfg:
+        return cfg[chave]
+    base = setup.get("painel_base") or {}
+    if chave in base:
+        return base[chave]
+    return setup.get(chave, padrao)
+
+def iniciar_paineis(setup):
+    """Chamado por 'set pages': guarda os valores atuais como base dos paineis."""
+    setup["painel_cfg"] = {}
+    setup["painel_base"] = {k: _copy.deepcopy(setup[k]) for k in CHAVES_PAINEL if k in setup}
+
+def trocar_painel(setup, novo):
+    """Chamado por 'set page': salva a configuracao do painel atual e carrega a do novo."""
+    antigo = pagina_atual(setup)
+    if antigo == novo or not _varios_paineis(setup):
+        return
+    setup.setdefault("painel_cfg", {})[antigo] = {k: _copy.deepcopy(setup[k]) for k in CHAVES_PAINEL if k in setup}
+    cfg = setup["painel_cfg"].get(novo) or setup.get("painel_base") or {}
+    for k in CHAVES_PAINEL:
+        if k in cfg:
+            setup[k] = _copy.deepcopy(cfg[k])
+
+_CORES_ANSI = ["#000000", "#cd0000", "#00cd00", "#cdcd00", "#0000ee", "#cd00cd", "#00cdcd", "#e5e5e5"]
+_NOMES_ANSI = ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white"]   # ESC[1;30m .. ESC[1;37m
+_MARCADORES_SEQ = ["o", "s", "D", "*", "^", "v", "<", ">", "p", "h", "+", "x"]
+
+def resolver_tipo_marcador(txt):
+    """Tipo de marcador do matplotlib (D, s, *, ^, o, v, <, >, p, h, +, x...)
+    ou apelido em portugues/ingles; 'auto' = sequencia automatica por curva;
+    None se invalido."""
+    from matplotlib.markers import MarkerStyle
+    if txt.lower() == "auto":
+        return "auto"
+    txt = _APELIDOS_MARCADOR.get(txt, _APELIDOS_MARCADOR.get(txt.lower(), txt)) if txt not in ("D", "d", "H", "h", "P", "p", "X", "x", "s", "o", "v", "V") else txt
+    if txt in ("", "None", "none", " "):
+        return None
+    try:
+        MarkerStyle(txt)
+        return txt
+    except Exception:
+        return None
+
+def _linha_viva(linha):
+    try:
+        return linha is not None and linha.axes is not None and linha in linha.axes.lines
+    except Exception:
+        return False
+
+def plots_ativos(setup, ax=None):
+    """Curvas numeradas (plot1, plot2, ...) ainda na tela; limpa da memoria
+    (setup['plots']) as que sumiram (apos 'c', 'reset', ...)."""
+    vivos = [e for e in setup.get("plots", []) if _linha_viva(e["linha"])]
+    setup["plots"] = vivos
+    if ax is not None:
+        return [e for e in vivos if e["linha"].axes is ax]
+    return vivos
+
+def estilo_efetivo(setup, entrada):
+    """Estilo final de uma curva: 'set plot <n> ...' > 'set marker ...' > sequencia
+    automatica (cores ANSI 30-37, marcadores o s D * ^ v < > p h + x) - tudo
+    conforme a configuracao do PAINEL em que a curva esta."""
+    n = entrada["n"]
+    v = lambda k, d=None: valor_painel(setup, entrada.get("painel"), k, d)
+    est = (v("plot_estilos") or {}).get(n, {})
+    cor = est.get("color") or _CORES_ANSI[(n - 1) % len(_CORES_ANSI)]
+    if not v("marker", True):
+        marcador = ""
+    else:
+        mt = v("marker_type")
+        marcador = est.get("marker") or (mt if mt not in (None, "auto") else None) \
+            or _MARCADORES_SEQ[(n - 1) % len(_MARCADORES_SEQ)]
+    return {
+        "color": cor, "marker": marcador,
+        "markersize": est.get("markersize") or v("marker_size", 6),
+        "markercolor": est.get("markercolor") or v("marker_color") or cor,
+        "linetype": est.get("linetype") or "-",
+        "linesize": est.get("linesize") or 1.5,
+        "label": est.get("label") or entrada.get("ynome", ""),
+    }
+
+def aplicar_estilo_plot(setup, entrada):
+    """Aplica cor/linha/marcador (e o texto do valor, se 'set marker text on')."""
+    linha = entrada["linha"]
+    e = estilo_efetivo(setup, entrada)
+    linha.set_color(e["color"])
+    linha.set_linestyle(e["linetype"])
+    linha.set_linewidth(e["linesize"])
+    linha.set_marker(e["marker"])
+    linha.set_markersize(e["markersize"])
+    linha.set_markerfacecolor(e["markercolor"])
+    linha.set_markeredgecolor(e["markercolor"])
+    linha.set_label(e["label"])
+    for t in entrada.get("textos", []):
+        try:
+            t.remove()
+        except Exception:
+            pass
+    entrada["textos"] = []
+    if valor_painel(setup, entrada.get("painel"), "marker_text", False) and linha.axes is not None:
+        xs, ys = linha.get_xdata(), linha.get_ydata()
+        valores = xs if entrada.get("tipo") == "perfil" else ys
+        for xi, yi, vi in zip(xs, ys, valores):
+            try:
+                entrada["textos"].append(linha.axes.annotate(
+                    "{0:.4g}".format(float(vi)), (xi, yi), textcoords="offset points",
+                    xytext=(0, 6), ha="center", fontsize=8))
+            except Exception:
+                pass
+
+_POSICOES_LEGENDA = {"L": "L", "R": "R", "U": "U", "D": "D",
+                     "LEFT": "L", "ESQUERDA": "L", "RIGHT": "R", "DIREITA": "R",
+                     "UP": "U", "ACIMA": "U", "CIMA": "U", "DOWN": "D", "ABAIXO": "D", "BAIXO": "D"}
+
+def _chave_painel(ax):
+    """(linha, coluna) do painel (set pages) a que o eixo pertence."""
+    try:
+        ss = ax.get_subplotspec()
+        return (ss.rowspan.start + 1, ss.colspan.start + 1)
+    except Exception:
+        return (1, 1)
+
+def _chave_painel_atual():
+    try:
+        if plt.get_fignums():
+            return _chave_painel(plt.gca())
+    except Exception:
+        pass
+    return (1, 1)
+
+def definir_estado_legenda(setup, **kw):
+    """Guarda on/pos/title da legenda do PAINEL ATUAL (cada painel tem a sua)
+    e espelha em setup['legend_on'|'legend_pos'|'legend_title']."""
+    est = setup.setdefault("legend_paineis", {}).setdefault(_chave_painel_atual(), {})
+    est.update(kw)
+    for k, v in kw.items():
+        setup["legend_" + {"on": "on", "pos": "pos", "title": "title"}[k]] = v
+
+def estado_legenda(setup, ax=None):
+    chave = _chave_painel(ax) if ax is not None else _chave_painel_atual()
+    return (setup.get("legend_paineis") or {}).get(chave, {})
+
+def atualizar_legenda(setup, ax=None):
+    """Legenda do painel 'ax' (cada painel tem a sua: ligada, posicao e titulo
+    por painel - 'set legend on|off', 'set legend position', 'draw legend
+    title' valem para o painel selecionado). A caixa fica FORA do grafico, do
+    lado L (esquerda - padrao), R (direita), U (acima) ou D (abaixo); o
+    proprio eixo e encolhido para dar lugar a ela, sem mexer nos demais
+    paineis. Sem legenda ligada (ou sem curvas), remove."""
+    try:
+        ax = ax if ax is not None else plt.gca()
+        fig = ax.figure
+        leg = ax.get_legend()
+        if leg is not None:
+            leg.remove()
+        if getattr(ax, "_gm_pos_alterada", False):
+            try:
+                ax.set_position(ax.get_subplotspec().get_position(fig))
+            except Exception:
+                pass
+            ax._gm_pos_alterada = False
+        est = estado_legenda(setup, ax)
+        plots = plots_ativos(setup, ax)
+        if not est.get("on") or not plots:
+            return
+        pos = est.get("pos", "L")
+        painel = _chave_painel(ax)
+        cor = valor_painel(setup, painel, "legend_color")
+        renderer = fig.canvas.get_renderer()
+        inv = fig.transFigure.inverted()
+        tb = ax.get_tightbbox(renderer).transformed(inv)       # eixo + rotulos + titulo
+        p0 = ax.get_position()
+        x0, x1 = max(tb.x0, 0.005), min(tb.x1, 0.995)
+        y0, y1 = max(tb.y0, 0.005), min(tb.y1, 0.995)
+        xc, yc = (p0.x0 + p0.x1) / 2, (p0.y0 + p0.y1) / 2
+        loc, ancora = {"L": ("center left", (x0, yc)), "R": ("center right", (x1, yc)),
+                       "U": ("upper center", (xc, y1)), "D": ("lower center", (xc, y0))}[pos]
+        kw = {"loc": loc, "bbox_to_anchor": ancora, "bbox_transform": fig.transFigure,
+              "fontsize": 8, "framealpha": 1.0}
+        if pos in ("U", "D"):
+            kw["ncol"] = min(len(plots), 6)
+        titulo = est.get("title")
+        if titulo:
+            kw["title"] = titulo
+            kw["title_fontsize"] = valor_painel(setup, painel, "legend_title_size", 10)
+        if cor:
+            kw["labelcolor"] = cor
+        leg = ax.legend([e["linha"] for e in plots], [estilo_efetivo(setup, e)["label"] for e in plots], **kw)
+        quadro = leg.get_frame()
+        if cor:
+            quadro.set_edgecolor(cor)
+            if titulo:
+                leg.get_title().set_color(cor)
+        lw_leg = valor_painel(setup, painel, "legend_line")
+        if lw_leg:
+            quadro.set_linewidth(lw_leg)
+        lt_leg = valor_painel(setup, painel, "legend_linetype")
+        if lt_leg not in (None, ""):
+            quadro.set_linestyle(lt_leg)
+        # encolhe o eixo para abrir espaco para a caixa
+        bb = leg.get_window_extent(renderer).transformed(inv)
+        w, h, pad = bb.width, bb.height, 0.01
+        if pos == "L":
+            nova = [p0.x0 + w + pad, p0.y0, max(p0.width - w - pad, 0.3 * p0.width), p0.height]
+        elif pos == "R":
+            nova = [p0.x0, p0.y0, max(p0.width - w - pad, 0.3 * p0.width), p0.height]
+        elif pos == "U":
+            nova = [p0.x0, p0.y0, p0.width, max(p0.height - h - pad, 0.3 * p0.height)]
+        else:
+            nova = [p0.x0, p0.y0 + h + pad, p0.width, max(p0.height - h - pad, 0.3 * p0.height)]
+        ax.set_position(nova)
+        ax._gm_pos_alterada = True
+    except Exception:
+        pass
+
+def atualizar_legendas_figura(setup, fig):
+    """Refaz a legenda de cada painel da figura (as posicoes dos eixos podem
+    ter sido recalculadas por subplots_adjust)."""
+    for a in list(fig.axes):
+        if a.get_legend() is not None or getattr(a, "_gm_pos_alterada", False) or plots_ativos(setup, a):
+            atualizar_legenda(setup, a)
+
+def reaplicar_marcadores(setup):
+    """Re-estiliza, na hora, todas as curvas ainda na tela (e a legenda)."""
+    try:
+        ax_atual = plt.gca() if plt.get_fignums() else None
+    except Exception:
+        ax_atual = None
+    vivos = plots_ativos(setup, ax_atual) if ax_atual is not None else []
+    for e in vivos:
+        aplicar_estilo_plot(setup, e)       # so as curvas do painel selecionado
+    if vivos:
+        atualizar_legendas_figura(setup, ax_atual.figure)
+        ax_atual.figure.canvas.draw_idle()
+
+def registrar_linha(linha, tipo, x, y, xnome, ynome, setup=None):
+    """Registra a curva recem-plotada: guarda os dados (para 'write csv') e,
+    em setup['plots'], a numera (plot1, plot2, ... - recomeca apos 'c')."""
+    _ULTIMA_LINHA.clear()
+    _ULTIMA_LINHA.update({"linha": linha, "tipo": tipo, "x": list(x), "y": list(y),
+                          "xnome": xnome, "ynome": ynome})
+    if setup is not None:
+        mesmos = plots_ativos(setup, linha.axes)
+        n = max([e["n"] for e in mesmos], default=0) + 1
+        entrada = {"n": n, "tipo": tipo, "linha": linha, "xnome": xnome, "ynome": ynome,
+                   "painel": _chave_painel(linha.axes),
+                   "x": list(x), "y": list(y), "textos": []}
+        setup["plots"].append(entrada)
+        aplicar_estilo_plot(setup, entrada)
+
+def listar_plots(setup):
+    """Tabela de 'show plots': Plot #, Variable, Color, Marker (e 'Page' quando
+    ha curvas em mais de um painel; a numeracao plot1, plot2... e por painel)."""
+    ents = plots_ativos(setup)
+    if not ents:
+        return []
+    multi = len({e.get("painel") for e in ents}) > 1
+    linhas = []
+    for e in ents:
+        s = estilo_efetivo(setup, e)
+        cor = s["color"]
+        if cor in _CORES_ANSI:
+            cor = _NOMES_ANSI[_CORES_ANSI.index(cor)]
+        l = [str(e["n"]), str(e.get("ynome", "")), str(cor), s["marker"] or "none"]
+        if multi:
+            l = ["{0},{1}".format(*e["painel"])] + l
+        linhas.append(tuple(l))
+    cab = ("Plot #", "Variable", "Color", "Marker")
+    if multi:
+        cab = ("Page",) + cab
+    nc = len(cab)
+    larg = [max(len(cab[k]), max(len(l[k]) for l in linhas)) for k in range(nc)]
+    fmt = "  ".join("{%d:<%d}" % (k, larg[k]) for k in range(nc))
+    out = [fmt.format(*cab), "-" * (sum(larg) + 2 * (nc - 1))]
+    out += [fmt.format(*l) for l in linhas]
+    return out
+
+def salvar_csv(caminho, setup=None):
+    """Comando 'write csv': grava TODAS as curvas (graficos de linha) ainda na
+    tela, no eixo ativo. 1a coluna = eixo comum (tempo numa serie; nivel/altura
+    num perfil) e uma coluna por curva (nome = texto da legenda); curvas com
+    valores diferentes na 1a coluna sao alinhadas (celula vazia onde nao ha
+    valor). Curvas de tipos diferentes (ex.: serie e perfil) saem em blocos
+    separados por uma linha em branco. Retorna True/False."""
+    import csv
+    ultima = _ULTIMA_LINHA.get("linha")
+    entradas = []
+    if setup is not None and _linha_viva(ultima):
+        entradas = plots_ativos(setup, ultima.axes)
+    if not entradas:
+        if not _linha_viva(ultima):
+            print("Erro: nao ha grafico de linha na tela (serie temporal, curva de 'sel' ou perfil vertical) para gravar em CSV.")
+            return False
+        entradas = [{"n": 1, "xnome": _ULTIMA_LINHA["xnome"], "ynome": _ULTIMA_LINHA["ynome"],
+                     "x": _ULTIMA_LINHA["x"], "y": _ULTIMA_LINHA["y"]}]
+    # agrupa por tipo de 1a coluna (xnome), preservando a ordem das curvas
+    grupos = {}
+    for e in entradas:
+        grupos.setdefault(e["xnome"], []).append(e)
+
+    def _nome(e, usados):
+        nome = estilo_efetivo(setup, e)["label"] if setup is not None and "linha" in e else e["ynome"]
+        if nome in usados:
+            nome = "{0} #{1}".format(nome, e["n"])
+        usados.add(nome)
+        return nome
+
+    def _chave_ordem(chaves):
+        try:
+            return sorted(chaves, key=float)         # niveis numericos
+        except (TypeError, ValueError):
+            return chaves                              # rotulos de tempo: ordem de aparicao
+
+    try:
+        with open(caminho, "w", newline="") as f:
+            w = csv.writer(f)
+            nlin_total = 0
+            colunas = []
+            for k, (xnome, grp) in enumerate(grupos.items()):
+                if k:
+                    w.writerow([])
+                usados = set()
+                nomes = [_nome(e, usados) for e in grp]
+                chaves = []
+                vistos = set()
+                for e in grp:
+                    for a in e["x"]:
+                        if a not in vistos:
+                            vistos.add(a)
+                            chaves.append(a)
+                chaves = _chave_ordem(chaves)
+                mapas = [dict(zip(e["x"], e["y"])) for e in grp]
+                w.writerow([xnome] + nomes)
+                for a in chaves:
+                    w.writerow([a] + [(repr(float(m[a])) if a in m else "") for m in mapas])
+                nlin_total += len(chaves)
+                colunas += [xnome] + nomes
+    except OSError as e:
+        print("Erro: nao foi possivel gravar '{0}': {1}".format(caminho, e))
+        return False
+    print("CSV gravado em '{0}' ({1} linhas, {2} curva(s); colunas: {3}).".format(
+        caminho, nlin_total, len(entradas), ", ".join(colunas)))
+    return True
 
 def _niveis_cor(setup):
     """
@@ -565,55 +1007,9 @@ def _interpolar(setup, valores, pontos_destino):
     reaproveitando a triangulacao ja calculada (ver _obter_triangulacao) em
     vez de reconstrui-la a cada chamada.
     """
-    if setup.get("_grade_estruturada"):
-        tri, indices = _triangulacao_local(setup, pontos_destino)
-        if tri is None:
-            return np.full(len(pontos_destino), np.nan)
-        interpolador = LinearNDInterpolator(tri, np.asarray(valores)[indices])
-        return interpolador(pontos_destino)
     tri = _obter_triangulacao(setup)
     interpolador = LinearNDInterpolator(tri, valores)
     return interpolador(pontos_destino)
-
-def _triangulacao_local(setup, pontos_destino):
-    """
-    Grade estruturada (ROMS): em vez de triangular a grade INTEIRA (centenas
-    de milhares de pontos - lento, e o cache em disco do MONAN nao ajuda
-    quando o mapa e pequeno), triangula so os pontos RHO dentro da caixa
-    que envolve os pontos de destino (um corte, uma grade de streamlines),
-    com uma margem de algumas celulas. Guardada em cache por caixa - um
-    corte vertical reaproveita a mesma triangulacao em todos os niveis.
-    Retorna (Delaunay, indices_dos_pontos_usados) ou (None, None).
-    """
-    g = setup["_grade_estruturada"]
-    passo = g.get("_passo")
-    if passo is None:
-        with np.errstate(all="ignore"):
-            dx = np.nanmedian(np.hypot(np.diff(g["lon2d"], axis=1), np.diff(g["lat2d"], axis=1)))
-            dy = np.nanmedian(np.hypot(np.diff(g["lon2d"], axis=0), np.diff(g["lat2d"], axis=0)))
-        passo = float(np.nanmax([dx, dy, 1e-6]))
-        g["_passo"] = passo
-    margem = 3.0 * passo
-    pd = np.asarray(pontos_destino, dtype=float)
-    caixa = (round(float(np.nanmin(pd[:, 0])) - margem, 6), round(float(np.nanmax(pd[:, 0])) + margem, 6),
-             round(float(np.nanmin(pd[:, 1])) - margem, 6), round(float(np.nanmax(pd[:, 1])) + margem, 6))
-    cache = setup.setdefault("_tri_local", {})
-    if caixa in cache:
-        return cache[caixa]
-    lon = np.asarray(setup["longitudes"])
-    lat = np.asarray(setup["latitudes"])
-    dentro = (lon >= caixa[0]) & (lon <= caixa[1]) & (lat >= caixa[2]) & (lat <= caixa[3])
-    indices = np.nonzero(dentro)[0]
-    resultado = (None, None)
-    if indices.size >= 3:
-        try:
-            resultado = (Delaunay(np.column_stack((lon[indices], lat[indices]))), indices)
-        except Exception:
-            resultado = (None, None)
-    if len(cache) >= 6:
-        cache.pop(next(iter(cache)))
-    cache[caixa] = resultado
-    return resultado
 
 def _grade_regular_interpolada(setup, ax, data):
     """
@@ -801,7 +1197,7 @@ def _plotar_perfil_dados(setup, vertical_profile, closest_index):
     elif zgrid_arr is not None and np.mean(np.isfinite(zgrid_arr[closest_index, lev:levf_dados])) >= 0.5:
         # Sem t_iso_levels, mas com zgrid: altura geometrica, menor embaixo, maior em cima
         y_vals = zgrid_arr[closest_index, lev:levf_dados]
-        ylabel = 'Profundidade z (m)' if _eh_roms(setup) else 'Altura (m)'
+        ylabel = 'Altura (m)'
     else:
         if zgrid_arr is not None:
             print("Aviso: zgrid majoritariamente invalido para o ponto selecionado (shape={0}); usando indice de nivel no eixo Y.".format(zgrid_arr.shape))
@@ -809,14 +1205,16 @@ def _plotar_perfil_dados(setup, vertical_profile, closest_index):
         y_vals = np.array(levels[lev:levf_dados])
         ylabel = 'Levels'
 
-    plt.scatter(vertical_profile,y_vals)
-    plt.plot(vertical_profile,y_vals, color='blue', linestyle='-',label=label)
+    linha, = plt.plot(vertical_profile,y_vals, linestyle='-', label=label)
     plt.xlabel(label)
     plt.ylabel(ylabel)
     _aplicar_rotulos_eixos(setup, plt.gca())
     if nv["invertido"] and ylabel == nv["rotulo"]:
         plt.gca().invert_yaxis()
+    aplicar_limites_eixos(setup, plt.gca())
     aplicar_grade(setup)
+    registrar_linha(linha, "perfil", y_vals, vertical_profile, ylabel, label or "valor", setup)
+    atualizar_legendas_figura(setup, plt.gcf())
     return 1
 
 def save_fig(fig_name, setup):
@@ -930,22 +1328,7 @@ def _plotar_corte_dados(setup, data, cbar=None):
         altura = np.full((n_lev, len(eixo_x)), np.nan)
         for k in range(n_lev):
             altura[k, :] = _interpolar(setup, zgrid_arr[:, lev+k], pontos_destino)
-        if _grade_estruturada(setup) is not None:
-            # ROMS: colunas em terra (sem profundidade) ficam na superficie
-            # (z = 0), so para o contourf aceitar a grade 2D - o dado ali
-            # e NaN e aparece hachurado. Pontos isolados sem z (borda da
-            # interpolacao junto a costa) recebem o z do nivel vizinho.
-            colunas_validas = np.isfinite(altura).any(axis=0)
-            for k in range(n_lev):
-                validos = np.isfinite(altura[k, :])
-                faltando = ~validos & colunas_validas
-                if np.any(faltando):
-                    altura[k, faltando] = (np.interp(eixo_x[faltando], eixo_x[validos], altura[k, validos])
-                                           if validos.any() else 0.0)
-            altura[:, ~colunas_validas] = 0.0
-            frac_valida = 1.0 if colunas_validas.any() else 0.0
-        else:
-            frac_valida = np.mean(np.isfinite(altura))
+        frac_valida = np.mean(np.isfinite(altura))
         if frac_valida < 0.5:
             print("Aviso: interpolacao do zgrid majoritariamente invalida ({0:.0f}% dos pontos); usando indice de nivel no eixo Y.".format(frac_valida*100))
             altura = None
@@ -964,7 +1347,7 @@ def _plotar_corte_dados(setup, data, cbar=None):
                         colors='none', hatches=['//'])
         ax.set_xlim(np.nanmin(eixo_x_mesh), np.nanmax(eixo_x_mesh))
         ax.set_ylim(np.nanmin(altura), np.nanmax(altura))
-        plt.ylabel('Profundidade z (m)' if _eh_roms(setup) else 'Altura (m)')
+        plt.ylabel('Altura (m)')
     else:
         y = levels[lev:levf]
         cs = ax.contourf(eixo_x, y, corte, levels=_niveis_cor(setup), cmap=cmap)
@@ -991,118 +1374,6 @@ def _plotar_corte_dados(setup, data, cbar=None):
         plt.title(Title)
 
     return ax, cbar
-
-def _grade_estruturada(setup):
-    """
-    Geometria da grade ESTRUTURADA (curvilinea), quando o arquivo aberto
-    tem uma - hoje, saidas do ROMS (ver roms.py/files.py): dict com
-    'shape' (eta, xi) dos pontos RHO, 'lon2d'/'lat2d' (centros) e
-    'lon_psi'/'lat_psi' (cantos das celulas). None para a malha nao
-    estruturada do MONAN/MPAS.
-    """
-    g = setup.get("_grade_estruturada") if isinstance(setup, dict) else None
-    return g if g else None
-
-def _eh_roms(setup):
-    """True se o arquivo aberto e de um modelo OCEANICO (ROMS, MOM6) - eixo
-    vertical = profundidade."""
-    g = _grade_estruturada(setup)
-    return g is not None and g.get("modelo") in ("ROMS", "MOM6")
-
-def _mascara_costura(g):
-    """
-    Pontos (eta, xi) vizinhos de um "salto" de longitude maior que 180
-    graus - a linha de data (+-180) numa grade global, e o emaranhado de
-    longitudes da regiao tripolar no Artico (MOM6). Um contourf/pcolormesh
-    ligando esses vizinhos desenharia uma faixa atravessando o mapa
-    inteiro; mascarando um dos dois pontos, o quadrilatero some. Calculada
-    uma vez por grade; None se nao houver salto (ROMS/WRF regionais).
-    """
-    if "_costura" not in g:
-        lon = g["lon2d"]
-        m = np.zeros(lon.shape, dtype=bool)
-        with np.errstate(invalid="ignore"):
-            m[:, :-1] |= np.abs(np.diff(lon, axis=1)) > 180.0
-            m[:-1, :] |= np.abs(np.diff(lon, axis=0)) > 180.0
-            m[:-1, :-1] |= np.abs(lon[1:, 1:] - lon[:-1, :-1]) > 180.0
-            m[:-1, 1:] |= np.abs(lon[1:, :-1] - lon[:-1, 1:]) > 180.0
-        g["_costura"] = m if m.any() else None
-        # o mesmo para as celulas do 'grfill' (cantos lon_psi)
-        lp = g["lon_psi"]
-        cantos = np.stack([lp[:-1, :-1], lp[1:, :-1], lp[:-1, 1:], lp[1:, 1:]])
-        with np.errstate(invalid="ignore"):
-            mc = (np.nanmax(cantos, axis=0) - np.nanmin(cantos, axis=0)) > 180.0
-        g["_costura_celulas"] = mc if mc.any() else None
-    return g["_costura"]
-
-def _campo_2d(setup, data):
-    """(nCells,) -> (eta, xi), com NaN e a costura de longitude mascarados,
-    na grade estruturada."""
-    g = _grade_estruturada(setup)
-    campo = np.ma.masked_invalid(np.asarray(data, dtype=float).reshape(g["shape"]))
-    costura = _mascara_costura(g)
-    if costura is not None:
-        campo = np.ma.masked_where(costura, campo)
-    return campo
-
-def plot_celulas_estruturadas(setup, data):
-    """
-    'gxout grfill' (e 'voronoi'/'hex', que numa grade estruturada dao o
-    mesmo resultado): pinta cada celula RHO com o seu valor, usando os
-    cantos REAIS da celula (pontos PSI) - a grade curvilinea exata do
-    modelo, sem interpolacao. So entram as celulas com os quatro cantos
-    conhecidos ('recorte' da grade): no ROMS/WRF, sem a primeira/ultima
-    linha e coluna; no MOM6 simetrico, todas.
-    """
-    g = _grade_estruturada(setup)
-    campo = np.ma.masked_invalid(np.asarray(data, dtype=float).reshape(g["shape"]))
-    campo = campo[g.get("recorte", (slice(1, -1), slice(1, -1)))]
-    _mascara_costura(g)
-    if g.get("_costura_celulas") is not None and g["_costura_celulas"].shape == campo.shape:
-        campo = np.ma.masked_where(g["_costura_celulas"], campo)
-    if np.all(np.ma.getmaskarray(campo)):
-        print("Aviso: nenhum valor valido (ou dentro do corte - set cut) nesta selecao.")
-        return None
-    ax = plt.gca()
-    niveis = _niveis_cor(setup)
-    norm = None
-    if isinstance(niveis, (list, tuple, np.ndarray)) and len(niveis) > 1:
-        norm = BoundaryNorm(niveis, ncolors=plt.get_cmap(setup["cmap"]).N)
-    im = ax.pcolormesh(g["lon_psi"], g["lat_psi"], campo, cmap=setup["cmap"],
-                       norm=norm, shading="flat")
-    ax.set_xlim(setup["lon_min"], setup["lon_max"])
-    ax.set_ylim(setup["lat_min"], setup["lat_max"])
-    return im
-
-def _amostrar_vetores(setup, u, v, n_setas=45):
-    """
-    Na grade estruturada, desenhar uma seta por ponto (centenas de milhares)
-    e ilegivel e lento: escolhe um passo (stride) em eta/xi para que caibam
-    ~'n_setas' setas na maior direcao da AREA VISIVEL (set lat/lon) e
-    descarta pontos sem dado (terra). Na malha do MONAN, devolve tudo como
-    antes. Retorna (lon, lat, u, v) 1-D.
-    """
-    lon = np.asarray(setup["longitudes"])
-    lat = np.asarray(setup["latitudes"])
-    u = np.asarray(u, dtype=float)
-    v = np.asarray(v, dtype=float)
-    g = _grade_estruturada(setup)
-    if g is None:
-        return lon, lat, u, v
-    forma = g["shape"]
-    lon2, lat2 = g["lon2d"], g["lat2d"]
-    u2, v2 = u.reshape(forma), v.reshape(forma)
-    dentro = ((lon2 >= min(setup["lon_min"], setup["lon_max"])) & (lon2 <= max(setup["lon_min"], setup["lon_max"])) &
-              (lat2 >= min(setup["lat_min"], setup["lat_max"])) & (lat2 <= max(setup["lat_min"], setup["lat_max"])))
-    linhas = np.nonzero(dentro.any(axis=1))[0]
-    colunas = np.nonzero(dentro.any(axis=0))[0]
-    if linhas.size == 0 or colunas.size == 0:
-        return lon[:0], lat[:0], u[:0], v[:0]
-    passo = max(1, int(np.ceil(max(linhas.size, colunas.size) / float(n_setas))))
-    sl = (slice(linhas[0], linhas[-1] + 1, passo), slice(colunas[0], colunas[-1] + 1, passo))
-    lo, la, uu, vv = lon2[sl].ravel(), lat2[sl].ravel(), u2[sl].ravel(), v2[sl].ravel()
-    ok = np.isfinite(uu) & np.isfinite(vv) & dentro[sl].ravel()
-    return lo[ok], la[ok], uu[ok], vv[ok]
 
 def _obter_arvore_celulas(setup):
     """
@@ -1587,33 +1858,7 @@ def plot_var(setup, var, cbar=None):
     plt.xlim(lon_min, lon_max)  # Limitar o eixo X (longitude)
     plt.ylim(lat_min, lat_max)  # Limitar o eixo Y (latitude)
 
-    estruturada = _grade_estruturada(setup) is not None
-
-    if estruturada and gxout in ("shaded", "contour"):
-        # Grade estruturada (ROMS): contourf/contour direto sobre as
-        # coordenadas 2D dos pontos RHO - sem triangulacao/interpolacao.
-        if np.all(np.isnan(data)):
-            print("Aviso: nenhum valor valido (ou dentro do corte - set cut) nesta selecao.")
-        else:
-            g = _grade_estruturada(setup)
-            campo = _campo_2d(setup, data)
-            if gxout == "shaded":
-                cs = ax.contourf(g["lon2d"], g["lat2d"], campo, levels=_niveis_cor(setup), cmap=cmap)
-                cbar = plt.colorbar(cs, ax=ax, label=label, **_kwargs_colorbar(setup))
-                _aplicar_rotulo_cbar(setup, cbar)
-            else:
-                cs = ax.contour(g["lon2d"], g["lat2d"], campo, levels=_niveis_cor(setup),
-                                **_kwargs_contour_linhas(setup, cmap))
-                textos = plt.clabel(cs, inline=True, fontsize=setup.get("contour_font_size", 10))
-                _aplicar_estilo_contorno_labels(setup, textos)
-            ax.set_xlim(lon_min, lon_max)
-            ax.set_ylim(lat_min, lat_max)
-    elif estruturada and gxout in ("grfill", "voronoi", "hex"):
-        coll = plot_celulas_estruturadas(setup, data)
-        if coll is not None:
-            cbar = plt.colorbar(coll, ax=ax, label=label, **_kwargs_colorbar(setup))
-            _aplicar_rotulo_cbar(setup, cbar)
-    elif gxout == "shaded":
+    if gxout == "shaded":
         # Preenchido, interpolando para uma grade regular (reaproveitando a
         # triangulacao em cache) e usando o contourf de GRADE REGULAR do
         # matplotlib, bem mais rapido que o tricontourf para malhas grandes.
@@ -1639,7 +1884,7 @@ def plot_var(setup, var, cbar=None):
                                  **_kwargs_contour_linhas(setup, cmap))
                 textos = plt.clabel(cs, inline=True, fontsize=setup.get("contour_font_size", 10))
                 _aplicar_estilo_contorno_labels(setup, textos)
-    elif gxout in ("voronoi", "grfill"):
+    elif gxout == "voronoi":
         # Rasteriza por nearest-neighbor (celula mais proxima de cada
         # pixel) - rapido mesmo em malhas grandes, mas sai como "pixels"
         # quadrados, nao os hexagonos/pentagonos reais da malha.
@@ -1707,21 +1952,7 @@ def plot_vector_field(setup, var_u, var_v):
     if lat_min != lat_max:
         ax.set_ylim(lat_min, lat_max)
 
-    if _grade_estruturada(setup) is not None:
-        # Grade estruturada (ROMS/WRF): setas amostradas e escala
-        # automatica (correntes do ROMS ~ 1 m/s, bem menores que vento - a
-        # escala fixa do MONAN as sumiria).
-        lo, la, uu, vv = _amostrar_vetores(setup, u, v)
-        q = ax.quiver(lo, la, uu, vv, color='k')
-        try:
-            ref = float(np.nanpercentile(np.hypot(uu, vv), 90)) if uu.size else 0.0
-            if ref > 0:
-                ref = float("{0:.1g}".format(ref))
-                ax.quiverkey(q, 0.06, 0.04, ref, "{0:g} m/s".format(ref), labelpos='E', coordinates='axes')
-        except Exception:
-            pass
-    else:
-        ax.quiver(longitudes, latitudes, u, v, scale=350, color='k')
+    ax.quiver(longitudes, latitudes, u, v, scale=350, color='k')
     plt.xlabel('Longitude')
     plt.ylabel('Latitude')
     _aplicar_rotulos_eixos(setup, plt.gca())
@@ -1759,8 +1990,7 @@ def plot_barbs(setup, var1, var2):
     if lat_min != lat_max:
         ax.set_ylim(lat_min, lat_max)
 
-    lo, la, uu, vv = _amostrar_vetores(setup, u, v, n_setas=30)
-    ax.barbs(lo, la, uu, vv, length=6)
+    ax.barbs(longitudes, latitudes, u, v, length=6)
     plt.xlabel('Longitude')
     plt.ylabel('Latitude')
     _aplicar_rotulos_eixos(setup, plt.gca())
@@ -1781,12 +2011,8 @@ def plot_streams(setup, u, v):
     lat = setup["latitudes"]
     lon = setup["longitudes"]
     
-    if len(u.shape) == 2:
-        u_data = u[time_sel, :]
-        v_data = v[time_sel, :]
-    else:
-        u_data = u[time_sel, :, lev]
-        v_data = v[time_sel, :, lev]
+    u_data = u[time_sel, :]
+    v_data = v[time_sel, :]
 
     if not _tamanho_malha_ok("u;v", len(u_data), len(lon)):
         return None
@@ -1799,21 +2025,8 @@ def plot_streams(setup, u, v):
     # Interpola u e v para a grade regular (reaproveitando a triangulacao
     # da malha, em cache - ver _obter_triangulacao)
     pontos_destino = np.column_stack((lon_mesh.ravel(), lat_mesh.ravel()))
-    if _grade_estruturada(setup) is not None:
-        # ROMS: a grade alvo (100x50) e bem mais grossa que a do modelo -
-        # o ponto RHO mais proximo basta, e evita triangular a grade toda.
-        # Fora da grade (mais longe que ~2 celulas) ou em terra: NaN.
-        arvore = _obter_arvore_celulas(setup)
-        dist, idx = arvore.query(pontos_destino)
-        g = _grade_estruturada(setup)
-        if g.get("_passo") is None:
-            _triangulacao_local(setup, pontos_destino[:1])
-        longe = dist > 2.0 * g["_passo"]
-        u_interp = np.where(longe, np.nan, np.asarray(u_data, dtype=float)[idx]).reshape(lon_mesh.shape)
-        v_interp = np.where(longe, np.nan, np.asarray(v_data, dtype=float)[idx]).reshape(lon_mesh.shape)
-    else:
-        u_interp = _interpolar(setup, u_data, pontos_destino).reshape(lon_mesh.shape)
-        v_interp = _interpolar(setup, v_data, pontos_destino).reshape(lon_mesh.shape)
+    u_interp = _interpolar(setup, u_data, pontos_destino).reshape(lon_mesh.shape)
+    v_interp = _interpolar(setup, v_data, pontos_destino).reshape(lon_mesh.shape)
     
     # Configuração do plot
     ax = plt.gca()
@@ -1911,9 +2124,24 @@ def _eixo_x_tempo(dados):
     except Exception:
         return list(range(len(dados))), False, rotulos
 
+def _formatar_datas_eixo(ax, fig):
+    """Rotaciona os rotulos de data SO do eixo 'ax'. (fig.autofmt_xdate()
+    esconde os rotulos e o titulo do eixo X de TODOS os outros paineis da
+    figura - ruim com 'set pages'.)"""
+    ax.tick_params(axis="x", labelrotation=30)
+    plt.setp(ax.get_xticklabels(which="major"), rotation=30, ha="right")
+    try:
+        fig.subplots_adjust(bottom=max(fig.subplotpars.bottom, 0.2))
+        if ax.get_subplotspec().get_gridspec().nrows > 1:
+            # varias linhas de paineis: afasta-os para os rotulos girados nao
+            # invadirem o painel de baixo
+            fig.subplots_adjust(hspace=max(fig.subplotpars.hspace, 0.7))
+    except Exception:
+        pass
+
 def _formatar_eixo_x_tempo(ax, fig, x_vals, usa_datetime, rotulos):
     if usa_datetime:
-        fig.autofmt_xdate()
+        _formatar_datas_eixo(ax, fig)
     else:
         ax.set_xticks(x_vals)
         ax.set_xticklabels(rotulos, rotation=45, ha='right')
@@ -1984,7 +2212,7 @@ def plot_serie_temporal(setup, var_name, dados, cbar=None):
             y_vals.append(float(valor))
         y_vals = _aplicar_corte(np.array(y_vals), cut)
 
-        ax.plot(x_vals, y_vals, marker='o', linestyle='-', color=setup.get("lc", "black"))
+        linha, = ax.plot(x_vals, y_vals, linestyle='-')
         _formatar_eixo_x_tempo(ax, fig, x_vals, usa_datetime, rotulos)
         ax.set_xlabel('Tempo')
         ax.set_ylabel(label)
@@ -1992,6 +2220,8 @@ def plot_serie_temporal(setup, var_name, dados, cbar=None):
         if Title:
             ax.set_title(Title)
         aplicar_grade(setup, ax)
+        registrar_linha(linha, "serie", rotulos, y_vals, "tempo", label or "valor", setup)
+        atualizar_legendas_figura(setup, fig)
         return ax, cbar
 
     # Exatamente uma faixa (lat, lon ou nivel): diagrama tempo x faixa,
@@ -2061,7 +2291,7 @@ def plot_serie_temporal(setup, var_name, dados, cbar=None):
 
     if usa_datetime:
         ax.xaxis_date()
-        fig.autofmt_xdate()
+        _formatar_datas_eixo(ax, fig)
     else:
         ax.set_xticks(x_num)
         ax.set_xticklabels(rotulos, rotation=45, ha='right')
@@ -2149,6 +2379,33 @@ def plot_serie_mapa_3d(setup, var_name, dados):
 
     setup["title"] = Title_base
     return resultado
+
+def plot_curva_sel(setup, rotulo_y, dados, valores, descricao_regiao, cbar=None):
+    """
+    Curva valor x tempo de uma estatistica sobre a regiao de 'sel' ('d
+    <estatistica> sel <variavel>' / 'd acum <estatistica> sel <variavel>' -
+    secao 2.6 do manual). 'dados' (lista de {"index","DataDado",...}, na
+    ordem do tempo) so fornece o eixo X; 'valores' e o vetor (n_tempos,)
+    ja calculado por estatistics.calcular_serie_sel.
+    """
+    _ativar_figura_2d(setup)
+    ax = plt.gca()
+    fig = ax.get_figure()
+
+    x_vals, usa_datetime, rotulos = _eixo_x_tempo(dados)
+    linha, = ax.plot(x_vals, valores, linestyle='-')
+    _formatar_eixo_x_tempo(ax, fig, x_vals, usa_datetime, rotulos)
+    ax.set_xlabel('Tempo')
+    ax.set_ylabel(rotulo_y)
+    _aplicar_rotulos_eixos(setup, ax)
+    if setup.get("title"):
+        ax.set_title(setup["title"], **_kwargs_texto(setup, "title"))
+    elif descricao_regiao:
+        ax.set_title(descricao_regiao, fontsize=10)
+    aplicar_grade(setup, ax)
+    registrar_linha(linha, "curva_sel", rotulos, valores, "tempo", rotulo_y, setup)
+    atualizar_legendas_figura(setup, fig)
+    return ax, cbar
 
 def plot_serie(setup, var_name, dados, cbar=None):
     """

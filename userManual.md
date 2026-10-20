@@ -101,8 +101,13 @@ começam com `Aviso:` são avisos informativos (ex.: ao abrir um arquivo sem
 | `load limits <arquivo.csv>` | Carrega uma área fechada (polígono) a partir de um arquivo de pontos lat/lon, marca quais células da malha aberta caem dentro dela e plota um mapa de conferência — ver seção 2.2. |
 | `sum`/`mean`/`min`/`max`/`p10`..`p90` `all\|inlimits\|point <variavel>` | Imprime uma estatística (soma, média, mínimo, máximo ou percentil) da variável — em todas as células da malha, só nas de dentro da última área de `load limits`, ou (`point`) reduzindo também sobre a faixa de níveis selecionada, mesmo sem um ponto/corte fixado; agregando todos os arquivos do intervalo de `set t`, quando houver mais de um — ver seção 2.3. |
 | `d sum\|mean\|min\|max\|p10..p90 all\|inlimits\|point <variavel>` | Como acima, mas plota o resultado **ponto a ponto** (um mapa, perfil ou corte), em vez de reduzir a um único número — ver seção 2.3. |
+| `sel` / `sel lat <ini> <fim>` / `sel lon <ini> <fin>` / `sel t <ini> [<fim>]` | Define a **região e o período** usados pelas estatísticas ao longo do tempo (`sel`, **não** `set`). Sem argumentos, mostra a seleção atual — ver seção 2.6. |
+| `sum`/`mean`/`min`/`max`/`p10`..`p90 sel <variavel>` e `acum <estatistica> sel <variavel>` | Estatística da variável **na região do `sel`, instante a instante** (uma linha por arquivo); com `acum`, sobre o campo **acumulado** no tempo. `d ...` plota a curva — ver seção 2.6. |
+| `write csv <arquivo>` | Grava em CSV (separado por vírgula, com cabeçalho) **todas as curvas** (gráficos de linha) ainda na tela: série temporal (`d <var>` em ponto com `set t <ini> <fim>`), curva de `d <estat> sel <var>` ou perfil vertical. Colunas: 1ª = eixo comum (tempo numa série, nível/altura num perfil) e uma coluna por curva, com o nome da legenda. Se faltar extensão, acrescenta `.csv`. Sem gráfico de linha na tela (ou após `c`) dá erro. Ver seção 2.7. |
+| `help` / `help <termo>` | Lista sucinta de **todos os comandos**, agrupados, cada um com um comentário curto. `help <termo>` mostra só o que se relaciona ao termo (`help set`, `help marker`, `help sel`, `help show`…). Funciona sem arquivo aberto. Um guia impresso equivalente está em `refcard.md` (A4 paisagem, 6 painéis). |
+| `debug` / `debug <on\|off>` | Liga/desliga as mensagens na tela. `on` (padrão): tudo aparece, como sempre. `off`: os comandos ficam **silenciosos** (confirmações, avisos, detalhes de `open`/`set`/`d`...); continuam aparecendo os **erros** e a saída dos comandos cuja finalidade é imprimir (`show`, `let`/`sel` sem argumentos, estatísticas escalares como `sum sel t2m`). Sem argumento, mostra o estado. Vale para a sessão (sobrevive a `reinit`); útil em scripts (`run`) e aberturas de milhares de arquivos. |
 | `reinit` | Fecha **todos** os arquivos abertos na sessão, apaga toda a configuração associada a eles (inclusive os caches de triangulação em memória) e volta ao estado inicial, pronto para um novo `open`. Também limpa a janela de gráficos. |
-| `reset` | Volta a seleção de **latitude/longitude/nível/corte (`set cut`)/arquivo (`set t`)** para a condição inicial (toda a malha, nível padrão da configuração, corte desligado, arquivo 1, série/animação desligada) e **limpa** título, rótulo de linha/legenda, rótulo da colorbar, o mapa de fundo automático (`draw map`) e o gráfico atual — mas **mantém os arquivos abertos** (ao contrário de `reinit`). Ver detalhes abaixo. |
+| `reset` | Volta a seleção de **latitude/longitude/nível/corte (`set cut`)/arquivo (`set t`)/região do `sel`** para a condição inicial (toda a malha, nível padrão da configuração, corte desligado, arquivo 1, série/animação desligada) e **limpa** título, rótulo de linha/legenda, rótulo da colorbar, o mapa de fundo automático (`draw map`) e o gráfico atual — mas **mantém os arquivos abertos** (ao contrário de `reinit`). Ver detalhes abaixo. |
 | `run <script>` | Executa, em sequência, os comandos contidos no arquivo de script informado (um comando por linha). |
 | `c` | Limpa o gráfico ativo no momento. Se o `d3` foi o último a plotar, limpa a **janela 3D** (recriando o eixo); se foi o `d`, limpa a janela 2D (só o painel atual, se `set pages` estiver ativo). |
 | `gxprint <arquivo_saida>` | Salva a figura atual em disco (PNG, PDF, etc.), usando `fig_dpi`/`fig_inches`/`fig_transparency` do `setup`. |
@@ -211,6 +216,17 @@ Num  Arquivo                                        Timestamp
   (`set lev`, `set gxout`, `title`, etc.) — elas continuam valendo; só o(s)
   arquivo(s) adicional(is) entram na lista.
 - `reinit` fecha todos os arquivos abertos e reinicia a sessão do zero.
+
+### Muitos arquivos abertos (centenas ou milhares)
+
+Os arquivos a partir do 2º são abertos **sob demanda**: depois de lidos os
+metadados no `open`, ficam fechados e são reabertos quando um comando precisa
+deles; no máximo 128 ficam abertos ao mesmo tempo (`_MAX_ABERTOS` em
+`files.py`; os menos usados fecham primeiro). Isso evita estourar o limite de
+descritores de arquivo do sistema (erro `bit out of range 0 - FD_SETSIZE`)
+em `open dir/*.nc` com milhares de arquivos. O arquivo 1 e a malha ficam
+sempre abertos. Séries sobre muitos arquivos ficam mais lentas (reabertura),
+mas funcionam.
 
 ### Referenciando o arquivo de uma variável (sufixo `.N`)
 
@@ -724,6 +740,227 @@ variáveis do arquivo:
 - `show variables` lista também as variáveis do `let`. `reset` as mantém;
   `reinit` as apaga.
 
+## 2.5 Arquivos em grade regular (latitude × longitude)
+
+Além da malha de Voronoi do MPAS/MONAN, o `open` aceita arquivos já
+interpolados para uma **grade regular lat/lon** (como as saídas
+pós-processadas `MONAN_DIAG_G_POS_*`). O programa identifica o formato
+**pelo conteúdo do arquivo** — não pelo nome:
+
+- não tem `nCells`, `latCell` nem `lonCell`;
+- tem uma variável-coordenada 1-D de **latitude** e outra de **longitude**
+  (dimensão com o mesmo nome da variável), reconhecidas por `standard_name`
+  (`latitude`/`longitude`), unidades em graus (`degree_north`/`degree_east`)
+  ou, na falta delas, pelo nome (`latitude`, `lat`, `longitude`, `lon`…).
+
+```
+> open MONAN_DIAG_G_POS_GFS_2023010100_2023123015.00.00.x163842L18.nc
+Grade regular detectada: 361 latitudes x 721 longitudes = 260281 pontos (tratados como celulas).
+Niveis de pressao lidos da coordenada 'level' (18 niveis).
+Tempo lido da variavel 'Time': 2023-12-30_15:00:00
+```
+
+Como funciona: cada ponto da grade vira uma "célula" (ordem latitude-maior)
+e as variáveis passam a ter o formato `(Time, nCells)` ou `(Time, nCells,
+nível)` — o nível vertical sempre por último, mesmo em variáveis como
+`acc_etrani(Time, level, latitude, longitude)`. O arquivo não é alterado.
+Todo o resto funciona igual ao da malha de Voronoi: `d`, `d3`, perfil,
+corte, séries de tempo, `let`, estatísticas, `set lat/lon/lev` etc.
+
+Detalhes:
+- **Níveis**: uma dimensão genérica como `level` cujo variável-coordenada
+  tem unidade de pressão (`Pa`, `hPa`, `mb`) ou `standard_name =
+  air_pressure` é tratada como **pressão** (eixo em hPa, invertido) — ver
+  seção 8.2.
+- **Tempo**: sem `xtime`, a data vem da variável `Time` quando ela tem
+  unidades CF (`hours since AAAA-MM-DD hh:mm:ss`; também `seconds`,
+  `minutes`, `days`).
+- **Variáveis sem tempo** (ex.: `ter(latitude, longitude)`) aparecem como
+  `(1, nCells)` e plotam normalmente.
+- **Vários arquivos**: valem as regras da seção 2.1 — todos precisam ter a
+  mesma grade (latitudes e longitudes idênticas).
+- **Longitudes** em 0–360 são normalizadas para (−180, 180], como na malha
+  do MPAS.
+- `show info` informa o tipo de grade (regular ou Voronoi).
+- **Desempenho**: a interpolação usa a triangulação de Delaunay dos pontos
+  (seção 10), calculada uma vez por grade (≈4 s para 361×721) e guardada em
+  cache. `gxout hex` (polígonos das células) não está disponível, pois a
+  grade regular não traz a conectividade do MPAS — use `shaded`, `contour`
+  ou `voronoi`.
+- Grades **curvilíneas** (latitude/longitude 2-D) não são tratadas como
+  regulares.
+
+## 2.6 Estatística ao longo do tempo numa região (`sel`, `acum`)
+
+Os comandos `sel` (atenção: é `sel`, **não** `set`) definem uma **região
+geográfica** e um **período**; combinados com uma função estatística
+(seção 2.3) e a palavra `sel`, produzem uma **curva da estatística no
+tempo** — um valor por arquivo/instante aberto.
+
+| Comando | Efeito |
+|---|---|
+| `sel` | Mostra a seleção atual (e quantas células ela contém). |
+| `sel lat <ini> <fin>` | Faixa de latitude (−90 a 90, `ini <= fin`). |
+| `sel lon <ini> <fin>` | Faixa de longitude. Aceita 0–360 ou −180–180; se `ini > fin` a faixa **cruza o meridiano** (ex. `sel lon 350 10` = −10 a 10; `sel lon 170 -170` cruza a linha de data). |
+| `sel t <ini> [<fim>]` | Arquivos (pelo número de `show files`) incluídos na curva. Sem `sel t`, todos os abertos. |
+| `sel lat\|lon\|t clear` | Limpa só aquela parte. |
+| `sel clear` (ou `off`, `reset`) | Limpa toda a seleção. |
+
+O `reset` também limpa o `sel`. Cada parte não definida significa "tudo"
+(todo o domínio / todos os arquivos abertos). O `sel` é **independente** do
+`set lat`/`set lon`/`set t`, que continuam controlando o que `d` plota
+como mapa.
+
+### Estatística no tempo: `<função> sel <variável>`
+
+```
+> sel lat 10 30
+> sel lon 10 30
+> sum sel t2m
+Soma de t2m (lat 10 a 30, lon 10 a 30, t: todos os arquivos abertos; 25 celula(s)):
+  arquivo   1  2024-01-01T0   50.0
+  arquivo   2  2024-01-01T6   100.0
+  arquivo   3  2024-01-01T12  150.0
+> d sum sel t2m          # plota a curva (eixo x = data/hora)
+> d mean sel t2m-273.15  # aceita expressão e variáveis do let
+```
+
+- Funções: `sum`, `mean`, `min`, `max`, `p10`..`p90` (as mesmas da seção 2.3).
+- Sem `d`: imprime a tabela. Com `d`: plota a curva, com o eixo x em
+  data/hora (como as séries da seção 2.1), o eixo y `"<Função> de <var>"`
+  e a região no título.
+- Variável 3D: usa o nível de `set lev`; com faixa (`set lev 0 2`), reduz
+  também sobre os níveis da faixa.
+- A variável pode ser nome, `nome.N`, expressão ou variável do `let`.
+- Erros: região sem nenhuma célula, `sel t` fora dos arquivos abertos,
+  variável inexistente. Com apenas um instante, avisa que não há curva.
+
+### Acumulação no tempo: `acum`
+
+`acum` é um **pré-comando**: antes de aplicar a estatística, acumula
+(soma ao longo do tempo) o campo **célula a célula**, ignorando `NaN`; só
+depois reduz a região.
+
+```
+> acum sum sel t2m
+Soma de t2m (acumulado no tempo) (lat 10 a 30, lon 10 a 30, t: todos os arquivos abertos; 25 celula(s)):
+  arquivo   1  2024-01-01T0   50.0
+  arquivo   2  2024-01-01T6   150.0
+  arquivo   3  2024-01-01T12  300.0
+> d acum sum sel chuva   # curva da chuva acumulada na região
+```
+
+`acum` exige `sel` no comando (`d acum t2m` dá erro de uso).
+
+### `show info` e `show sel`
+
+`show info` agora mostra, além do arquivo e das variáveis, os blocos
+**"Configuração atual (set)"** (lat, lon, lev, t, gxout, cmap, clevs, cut,
+map, grade…) e **"Seleção atual (sel)"** (`sel lat`, `sel lon`, `sel t` e
+nº de células na região). `show sel` mostra apenas o segundo bloco.
+
+---
+## 2.7 Exportando gráficos de linha (`write csv`)
+
+```
+> sel lat 10 30
+> sel lon 10 30
+> d sum sel t2m
+> d mean sel t2m
+> write csv estatisticas
+CSV gravado em 'estatisticas.csv' (3 linhas, 2 curva(s); colunas: tempo, Soma de t2m, Media de t2m).
+```
+
+Conteúdo de `estatisticas.csv`:
+
+```
+tempo,Soma de t2m,Media de t2m
+2024-01-01T0,50.0,2.0
+2024-01-01T6,100.0,4.0
+2024-01-01T12,150.0,6.0
+```
+
+- **Todas as curvas** do gráfico ativo são gravadas (plot1, plot2… — seção 2.8), uma coluna para cada, na ordem em que foram plotadas. O cabeçalho usa o texto da legenda (`set plot <n> label`); nomes repetidos recebem o sufixo `#<n>`.
+- **Série temporal / curva de `sel`:** 1ª coluna = tempo (eixo X).
+- **Perfil vertical:** 1ª coluna = nível ou altura (eixo Y, na unidade do eixo). Perfis com níveis diferentes são **alinhados** pela 1ª coluna (ordenada), com célula vazia onde a curva não tem o nível.
+- Curvas de **tipos diferentes** no mesmo gráfico (ex.: série e perfil) saem em **blocos** separados por uma linha em branco, cada um com seu cabeçalho.
+- Os valores gravados são os do gráfico (com `set cut` aplicado).
+- Só vale para gráficos de linha **ainda na tela**: depois de `c`, ou com um mapa/corte/Hovmöller, o comando dá erro.
+
+---
+## 2.8 Várias curvas: plot1, plot2…, cores, marcadores e legenda
+
+Cada **gráfico de linha** (série temporal em ponto, curva de `d <estat> sel <var>` ou perfil vertical) recebe, na ordem em que é plotado, o número **plot1, plot2, plot3…**, guardado em `setup['plots']`. Sem `c` entre dois `d`, as curvas se acumulam no mesmo gráfico; **`c` (ou `reset`) recomeça a contagem em plot1**.
+
+**Sequência automática**
+- **Cores** — as 8 cores ANSI padrão (`ESC[1;30m` a `ESC[1;37m`): preto, vermelho, verde, amarelo, azul, magenta, ciano, branco; depois da 8ª recomeça. (O branco aparece pouco sobre fundo branco — ajuste com `set plot <n> color`.)
+- **Marcadores** — `o s D * ^ v < > p h + x`, e recomeça na 13ª curva.
+
+```
+> sel lat 10 30
+> sel lon 10 30
+> d sum sel t2m        # plot1: preto, círculo
+> d mean sel t2m       # plot2: vermelho, quadrado
+> d max sel t2m        # plot3: verde, losango
+> show plots
+```
+
+**Ajuste por curva** — `set plot <n> ...` (vale para a curva na tela e, se ainda não existe, para quando for plotada):
+
+```
+set plot 2 color blue          cor da linha (e do marcador)
+set plot 2 marker D            tipo do marcador (auto = sequência)
+set plot 2 markercolor green   cor do marcador
+set plot 2 markersize 10
+set plot 2 linetype tracejada  cheia tracejada traco-ponto pontilhada nenhuma …
+set plot 2 linesize 2.5
+set plot 2 label Controle      texto na legenda
+set plot 2 default             volta ao automático
+```
+
+Prioridade: `set plot <n>` > `set marker ...` (global: `set marker type D` força o tipo em **todas** as curvas; `set marker off` apaga todos) > sequência automática. `set plot_line` é legado e não afeta as curvas numeradas.
+
+**Legenda** — **cada painel tem a sua** (`set pages`): `set legend on|off`, `set legend position` e `draw legend title` valem para o **painel selecionado** (`set page <lin> <col>`); os demais painéis não mudam. A caixa fica **fora** do gráfico (por padrão à esquerda) e só o eixo do próprio painel encolhe para dar lugar a ela, então legendas de painéis diferentes nunca se sobrepõem. As opções de estilo (`color`, `line`, `linetype`, `title size`) valem para todas. `set pages` recomeça as legendas.
+
+```
+set legend on                     liga (off desliga)
+set legend position R             L esquerda, R direita, U acima, D abaixo
+draw legend title Minhas curvas   título da caixa
+set legend title size 12          tamanho do título
+set legend color red              texto, título e borda
+set legend line 2                 espessura da borda
+set legend linetype pontilhada    tipo da borda
+```
+
+Cada entrada é **só o nome da variável** (ou o `label` definido por `set plot <n> label`). `draw legend` com curvas na tela equivale a `set legend on`.
+
+**`show plots`** mostra, no prompt, uma tabela com as curvas na tela:
+
+```
+> show plots
+Plot #  Variable      Color  Marker
+-----------------------------------
+1       Soma de t2m   black  o
+2       Media de t2m  red    s
+```
+
+(`Color` usa o nome ANSI da sequência automática, ou o que você definiu em `set plot <n> color`.) `write csv` grava **todas** as curvas (seção 2.7).
+
+---
+### Aparência por painel (`set pages` / `set page`)
+
+Com **mais de um painel** (`set pages <lin> <col>`), os comandos de **aparência** valem **só para o painel selecionado** (`set page <lin> <col>`); os demais painéis não mudam:
+
+- marcadores e curvas: `set marker ...`, `set plot <n> ...`;
+- legenda: `set legend ...`, `draw legend title`;
+- eixos: `set xrange|yrange|xdiv|ydiv|xtics|ytics`;
+- grade: `set grid color|size|type`;
+- textos: `draw title`, `draw xlabel|ylabel`, `set title|xlabel|ylabel font|color|size|style`.
+
+Ao trocar de painel, a configuração do que sai é guardada e a do que entra é carregada; um painel ainda não configurado parte dos valores que valiam quando o `set pages` foi dado (então dá para ajustar o estilo **antes** de dividir a janela e ele vale para todos). Os comandos de **dados** (`set lat|lon|lev|t|cut|cmap|clevs|gxout`, `sel`, `let`) continuam globais — valem para o próximo `d` em qualquer painel. `set background` é da janela inteira. Com um painel só, tudo é global, como sempre. `show plots` ganha a coluna `Page` quando há curvas em mais de um painel (a numeração plot1, plot2… é **por painel**).
+
+---
+
 ## 3. Sintaxe do comando `d` / `display` (2D)
 
 | Forma | Efeito |
@@ -798,6 +1035,8 @@ globais muito amplos.
 |---|---|
 | `show info` | Nome do arquivo NetCDF (e da grade, se houver), dimensões (inclusive **cada tipo de nível vertical** do arquivo, com dimensão, nº de níveis e fonte dos valores) e a lista completa de variáveis, com nº de níveis, **tipo de nível entre colchetes** (`[pressao]`, `[solo]`, `[altura]`), descrição e unidade — sempre referente ao **arquivo 1**. Se houver mais de um arquivo aberto, avisa e aponta para `show files`. |
 | `show files` | Tabela com **todos** os arquivos abertos na sessão: número, nome do arquivo e timestamp (data/hora, quando disponível) — ver seção 2.1. Se nenhum arquivo estiver aberto, informa isso. |
+| `show plots` | Tabela das curvas (plot1, plot2…) na tela: `Plot #`, `Variable`, `Color`, `Marker` — seção 2.8. |
+| `show timestamp [<n>]` | Timestamp do arquivo **n** (número de `show files`), ex.: `show timestamp 5` → `Arquivo 5 (nome.nc): 2023-12-30T15`. Sem `n`, o do arquivo selecionado por `set t`. Erro se `n` não for um arquivo aberto. |
 | `show times` | Tabela (número + timestamp) só com o(s) tempo(s) **atualmente selecionado(s)** por `set t` (seção 2.1/6): todos os arquivos do intervalo, um por linha, se o modo de série/animação estiver ligado (`set t <inicio> <fim>`); senão, uma única linha, o arquivo/tempo pontual selecionado (`set t <n>`, padrão o arquivo 1). |
 | `show latitudes` / `show longitudes` | Lista de coordenadas da malha, ordenada. |
 | `show levels [pressao\|altura\|solo]` | Lista os níveis de **cada tipo** de coordenada vertical do arquivo, com o índice a usar em `set lev`: pressão em hPa (`t_iso_levels`), níveis do modelo (`nVertLevels`; a altura em m vem do `zgrid`, por célula) e camadas do solo (`nSoilLevels`, profundidade em m — ver seção 8.2). Com o filtro, mostra só um tipo. |
@@ -809,6 +1048,7 @@ globais muito amplos.
 | `show map_color` / `show map_line` | Cor/espessura da linha do mapa de fundo. |
 | `show lat` / `show lon` | Intervalo de latitude/longitude atualmente selecionado. |
 | `show cmap` | Colormap atual. |
+| `show sel` | Seleção atual do `sel` (lat, lon, t) e nº de células na região — seção 2.6. O `show info` também mostra os `set` e `sel` atuais. |
 | `show setup` | Imprime o dicionário `setup` inteiro (debug). |
 | `show limits` | Resumo da área de limites carregada por `load limits` (seção 2.2): arquivo, número de pontos do polígono e quantas células da malha caem dentro dela. Avisa se nenhuma área foi carregada ainda. |
 | `show fonts` | Lista, em ordem alfabética, as fontes TrueType/OpenType instaladas no sistema e reconhecidas pelo matplotlib — use um destes nomes em `set label font <nome>`/`set title font <nome>`/`set xlabel font <nome>`/`set ylabel font <nome>` (seção 6). |
@@ -824,10 +1064,25 @@ faltando avisa e **mantém a configuração anterior**, sem travar.
 |---|---|
 | `set lev <n>` | Nível único. É um **índice**, aceito até o maior número de níveis entre os tipos do arquivo (ex.: 0–17 com pressão de 18 níveis e solo de 6). Imprime o nível em cada tipo que o tem: pressão em hPa, profundidade do solo em m, altura média (`zgrid`) ou só o índice. Ao plotar, o índice é conferido contra os níveis **da variável** (ex.: `set lev 10` seguido de `d tslb` avisa que o solo só tem 6 níveis, 0 a 5). |
 | `set lev <n1> <n2>` | Intervalo de níveis, **ambos inclusivos** (corte vertical, perfil, `d3`) — `<n1>` e `<n2>` são índices de nível válidos, de `0` a `n_niveis-1` (a mesma faixa aceita por `set lev <n>`), e o nível `<n2>` **entra** na seleção. `<n1>` não pode ser maior que `<n2>`. Um corte vertical/`d3` precisa de pelo menos 2 níveis na faixa; um perfil (seção 8) aceita também uma faixa de 1 nível só (equivalente a `set lev <n1>`, com `<n1> == <n2>`). |
-| `set lat <valor>` / `set lat <min> <max>` | Latitude fixa num ponto, ou intervalo (domínio do mapa). |
-| `set lon <valor>` / `set lon <min> <max>` | Longitude fixa num ponto, ou intervalo. |
+| `set lat <valor>` / `set lat <min> <max>` / `set lat` | Latitude fixa num ponto, ou intervalo (domínio do mapa). Sem argumentos, volta ao domínio completo de latitude. |
+| `set lon <valor>` / `set lon <min> <max>` / `set lon` | Longitude fixa num ponto, ou intervalo. Sem argumentos, volta ao domínio completo de longitude. |
 | `set gxout <tipo>` | `shaded`/`contour`/`voronoi`/`hex` (2D, variáveis escalares — também vale `shaded` no `d3`); `vect` (padrão)/`stream`/`barb` (vento, `d u;v` ou `d mag(...)`). |
 | `set cut <minimo> <maximo>` | Só plota valores dentro de `[minimo, maximo]`; fora disso fica transparente. Vale para `d` (mapa, corte, perfil) e `d3`. `set cut` sem valores desliga. |
+| `set xrange <min> <max>` | Fixa os limites do eixo X de todos os gráficos com eixos (mapa, perfil, corte, séries, curvas do `sel`...), no gráfico atual e nos seguintes. Aceita números (ex. `set xrange -60 -30`) ou, num eixo de tempo, datas `AAAA-MM-DDTHH` (ex. `set xrange 2024-01-01T00 2024-01-02T00`). `set xrange off` (ou sem valores) volta ao automático. `min` deve ser menor que `max`; valor inválido avisa e mantém o anterior. Não é alterado por `reset`. |
+| `set yrange <min> <max>` | Como `set xrange`, para o eixo Y (só números). Em eixos invertidos (pressão) o sentido é preservado. `set yrange off` volta ao automático. |
+| `set xdiv <valor>` / `set ydiv <valor>` | Tamanho de **cada divisão** do eixo X / Y (espaçamento dos marcadores e, com `set grid on`, das linhas da grade). Ex.: `set xdiv 5` → marcas de 5 em 5 graus. Em eixo de **tempo**, `xdiv` é dado em **horas** (`set xdiv 6`). Valor positivo; `off` volta ao automático. Não se aplica a eixos de tempo com rótulos fixos por arquivo (sem datas). |
+| `set xtics <on\|off>` / `set ytics <on\|off>` | Liga/desliga as marcações (traços e valores) dos eixos X / Y, no gráfico atual e nos seguintes. Padrão `on`. Não é alterado por `reset`. |
+| `set marker <on\|off>` | Liga/desliga os **marcadores** dos gráficos de linha (série temporal em ponto, curva de `d <estat> sel <var>` e perfil vertical). Padrão `on`. |
+| `set marker type <tipo>` | Forma do marcador: qualquer código do matplotlib — `o` círculo, `s` quadrado, `D` diamante, `d` diamante fino, `*` estrela, `^` `v` `<` `>` triângulos, `p` pentágono, `h` `H` hexágonos, `+` `x` `X` `P`, `.` `,` `\|` `_`, `1`..`4` — ou apelidos (`circulo`, `quadrado`, `diamante`, `estrela`, `triangulo`; `S` = `s`). `auto` (padrão) volta à sequência por curva (seção 2.8). Também liga os marcadores. Tipo inválido avisa e mantém o anterior. |
+| `set marker size <tamanho>` | Tamanho do marcador em pontos (número positivo; padrão `6`). |
+| `set marker color <cor>` | Cor do marcador (nome do matplotlib ou `#RRGGBB`); `set marker color default` usa a cor da linha. |
+| `set marker text <on\|off>` | Escreve, junto de cada marcador, o **valor** do ponto (3–4 algarismos significativos): nas séries e curvas, o valor do eixo Y; no perfil vertical, o valor da variável (eixo X). Padrão `off`. |
+| `set plot <n> color <cor>` / `markercolor <cor>` / `marker <tipo\|auto>` / `markersize <n>` / `linetype <tipo>` / `linesize <n>` / `label <texto>` / `default` | Estilo da curva número `<n>` (**plot1, plot2, …** — seção 2.8): cor da linha, cor/tipo/tamanho do marcador, tipo e espessura da linha (mesmos tipos de `set grid type`), texto na legenda; `default` volta ao automático. Vale na hora para a curva na tela e, se ainda não existir, para quando for plotada. |
+| `set legend <on\|off>` | Liga/desliga a **caixa de legenda do painel selecionado** (uma entrada por curva — seção 2.8). Cada painel de `set pages` tem a sua legenda. |
+| `set legend position <L\|R\|U\|D>` | Posição da caixa de legenda **do painel selecionado**: `L` esquerda (padrão), `R` direita, `U` acima, `D` abaixo do gráfico (também aceita `esquerda`/`direita`/`acima`/`abaixo`). A margem correspondente se abre sozinha; em `U`/`D` as entradas ficam lado a lado. |
+| `set legend title size <n>` | Tamanho da fonte do título da legenda (padrão 10). O texto do título é `draw legend title <texto>`. |
+| `set legend color <cor>` | Cor do texto, do título e da **borda** da caixa (`default` volta ao automático). |
+| `set legend line <espessura>` / `set legend linetype <tipo>` | Espessura e tipo (cheia, tracejada, traço-ponto, pontilhada…, como em `set grid type`) da **borda** da caixa. |
 | `set clevs <v0> <v1> ... <vn>` | Fronteiras exatas dos intervalos de cor/contorno (ex.: `0 100 200 ... 1500`). Usadas em todo tipo de plotagem com barra de cores, inclusive `d3`. Lista vazia volta ao padrão automático (20 níveis). |
 | `set cmap <nome>` | Colormap do matplotlib. |
 | `set pages <linhas> <colunas>` | Grade de painéis da janela 2D (ex.: `set pages 1 2`). Limpa a janela e seleciona o primeiro painel. |
@@ -1068,6 +1323,14 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 | `levels` / `eixo_pressao` | Nível *padrão* do arquivo (pressão se houver `t_iso_levels`; senão níveis do modelo), usado só quando a variável é desconhecida. O tipo de nível de cada variável vem de `utils.descritor_nivel` (seção 8.2). |
 | `_nivel_atual` | Descritor do nível da variável do comando em andamento (tipo, valores, rótulo, sentido do eixo), registrado por `exec_func.py` ao resolver a variável. |
 | `lat_min`, `lat_max`, `lon_min`, `lon_max` | Domínio geográfico selecionado. |
+| `plots` / `plot_estilos` | Lista das curvas numeradas na tela (`{n, tipo, linha, x, y,…}`) e `{n: {color, marker, markersize, markercolor, linetype, linesize, label}}` de `set plot <n> ...` (seção 2.8). |
+| `legend_paineis` | `{(linha, coluna): {on, pos, title}}` — legenda de cada painel (seção 2.8); `legend_on`/`legend_pos`/`legend_title` espelham o painel selecionado. |
+| `legend_on`, `legend_pos`, `legend_title`, `legend_title_size`, `legend_color`, `legend_line`, `legend_linetype` | Estado de `set legend ...` / `draw legend title` (seção 2.8). |
+| `marker`, `marker_type`, `marker_size`, `marker_color`, `marker_text` | Estilo dos marcadores dos gráficos de linha (`set marker ...`; padrões `True`, `"auto"`, `6.0`, `None` = cor da linha, `False`). |
+| `xtics` / `ytics` | `True`/`False` — `set xtics|ytics on|off` (padrão `True`). |
+| `yrange` / `xdiv` / `ydiv` | `None` ou `(min, max)` / valor — `set yrange`, `set xdiv`, `set ydiv` (seção 6). |
+| `xrange` | `None` ou `(min, max)` — limites do eixo X de `set xrange`. |
+| `sel` | `{"lat": None\|(ini, fin), "lon": None\|(ini, fin), "t": None\|(ini, fim)}` — região/período do comando `sel` (seção 2.6). Limpo por `reset`. |
 | `lev`, `levf` | Índice de nível (único ou intervalo) selecionado. |
 | `cut` | `None`, ou `(minimo, maximo)` — ver `set cut`. |
 | `time`, `time_variable`, `time_units`, `time_str`, `DataDado` | Informações de tempo (com valores de reserva se ausentes). |
@@ -1117,7 +1380,11 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
   `main()`).
 - `main()` — ponto de entrada de `grads-monan-setup` (reinicializa a config).
 
+### `help_func.py`
+- `AJUDA` / `cmd_help(cmd_split)` — comando `help [termo]`: tabela (grupo → sintaxe, comentário) e filtro por termo. **Ao criar um comando novo, acrescente-o em `AJUDA`** (há um teste que confere que todo comando do `cli.py` aparece na ajuda) e em `refcard.md`.
+
 ### `exec_func.py`
+- `exec_cmd(...)` (wrapper) / `_exec_cmd_core(...)` / `_cmd_debug` / `_FiltroSaida` / `_DEBUG` — `debug on|off`: com `off`, a saída do comando passa por `_FiltroSaida`, que só deixa passar linhas de erro/uso (`_MARCAS_SEMPRE`), salvo nos comandos que imprimem resultado (`_comando_imprime_resultado`). Os comandos de dentro de `run` seguem a mesma regra, linha a linha.
 - `exec_cmd(...)` — despachante central de todos os comandos do prompt.
 - `run_file(...)` — executa um script de comandos linha a linha.
 - `_resolver_variavel(setup, token)` — resolve um token de variável com sufixo opcional `.N` (seção 2.1): localiza o arquivo aberto correspondente e a variável nele, com mensagens de erro/sugestões (`difflib`) quando o arquivo não está aberto ou a variável não existe. Sem sufixo `.N`, usa `setup['arquivo_sel']` (padrão `1`, alterado por `set t <n>`) em vez de sempre o arquivo 1.
@@ -1134,29 +1401,9 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 - Despacho espacial de `d sum`/`mean`/`min`/`max`/`p10`..`p90` `all`/`inlimits`/`point <variavel_ou_expressao>` (seção 2.3; dentro do dispatch de `d`/`display`): reúne os dados via `_dados_estatistica`, chama `calcular_campo` (`estatistics.py`) — que também retorna o **modo** (mapa/ponto/corte/mapa_niveis, conforme a seleção atual de lat/lon/nível e o complemento `point`) — e plota o resultado com `plot_estatistica_campo` (`plot_func.py`); no modo `mapa_niveis`, `calcular_campo` já recusou e retornou `None`, então nada é plotado.
 
 ### `files.py` (antigo `files_nc.py`)
-- `file_open(fileName, setup_toml, gridFile=None, setup_anterior=None)` — abre o arquivo (e a grade, se necessária). Se `setup_anterior` for passado (já há um arquivo aberto na sessão), valida a malha do novo arquivo contra a assinatura já registrada (seção 2.1): rejeita com `(None, None)` se forem diferentes (preservando `setup_anterior` intacto), ou adiciona o novo arquivo a `setup["files"]` com o próximo índice sequencial, se forem iguais. Sem `setup_anterior` (primeiro `open`), monta o `setup` do zero, como antes — inclusive guardando a referência ao `dataset` da malha (`setup["_malha_dataset"]`), usada sob demanda por `gxout hex` (seção 8.1) para ler a conectividade completa. Resiliente à ausência de `nCells`, malha, `xtime`/`initial_time`, `t_iso_levels`.
+- `DatasetPreguicoso(caminho, dataset_aberto)` — envoltório dos arquivos 2..N: reabre o NetCDF sob demanda e mantém no máximo `_MAX_ABERTOS` abertos (pool LRU `_POOL_ABERTOS`); expõe `variables`, `dimensions`, `close` e delega os demais atributos.
+- `file_open(fileName, setup_toml, gridFile=None, setup_anterior=None)` — abre o arquivo (e a grade, se necessária). Se `setup_anterior` for passado (já há um arquivo aberto na sessão), valida a malha do novo arquivo contra a assinatura já registrada (seção 2.1): rejeita com `(None, None)` se forem diferentes (preservando `setup_anterior` intacto), ou adiciona o novo arquivo a `setup["files"]` com o próximo índice sequencial, se forem iguais. Sem `setup_anterior` (primeiro `open`), monta o `setup` do zero, como antes — inclusive guardando a referência ao `dataset` da malha (`setup["_malha_dataset"]`), usada sob demanda por `gxout hex` (seção 8.1) para ler a conectividade completa. Detecta arquivos em grade regular (`grade_regular.py`, seção 2.5), lê o tempo de `Time` quando não há `xtime` e usa a coordenada de pressão (`level`) como nível padrão quando não há `t_iso_levels`. Resiliente à ausência de `nCells`, malha, `xtime`/`initial_time`, `t_iso_levels`.
 - `carregar_limites(setup, caminho_csv)` — comando `load limits <arquivo.csv>` (seção 2.2): lê o arquivo de pontos (lat/lon, um por linha), calcula a máscara de células da malha dentro do polígono formado por eles e guarda tudo em `setup["limits_*"]`, pronto para as futuras funções estatísticas dentro da área. Retorna `True`/`False`; em caso de falha, preserva os limites já carregados anteriormente (se houver).
-
-### `roms.py`
-- `eh_roms(dataset)` — `True` se o arquivo tem as dimensões `eta_rho`/`xi_rho` (grade C do ROMS).
-- `abrir_roms(dataset, nome_arquivo, arquivo_grade=None)` — monta o `DatasetRoms` (seção 14): lê a geometria da grade (arquivo separado ou o próprio arquivo de saída; na falta de `lon_rho`, o `grd_file` do atributo global) e devolve `(DatasetRoms, grade_usada)`.
-- `DatasetRoms` — expõe `.variables` (só as variáveis de grade, no formato `(Time, nCells[, nVertLevels])`, mais as virtuais `zgrid`, `u_east`/`v_north`, `ubar_east`/`vbar_north`) e `.dimensions` (`Time`, `nCells`, `nVertLevels`, `nVertLevelsP1`); parâmetros escalares ficam em `.parametros`.
-- `VariavelRoms` (também `VariavelGradeC`, usada por WRF e MOM6) — leitura preguiçosa, **um tempo de cada vez** (`tempo(k)`, com cache pequeno): leva U/V/PSI/q para o ponto de massa (`para_rho`), aplica a máscara, achata a grade 2D e ordena os níveis.
-- `VisaoTempo` / `VariavelTempo` — um tempo de um arquivo de grade C apresentado como arquivo de um tempo só (seção 17).
-- `GradeRoms` — lon/lat de RHO e PSI, máscara, ângulo (radianos), `h` e parâmetros da coordenada s; `profundidade_z(zeta)` calcula *z* com `Vtransform` 1 ou 2.
-- `tempos_roms(dataset)` — datas de `ocean_time`.
-
-### `wrf.py`
-- `eh_wrf(dataset)` — `True` se o arquivo tem as dimensões `south_north`/`west_east`.
-- `abrir_wrf(dataset, nome_arquivo, arquivo_grade=None)` — monta o `DatasetWrf` (seção 15) a partir de `XLAT`/`XLONG` do wrfout ou de um geo_em/wrfinput.
-- `DatasetWrf` — mesmas convenções do `DatasetRoms` (usa a mesma `VariavelGradeC`), sem inversão dos níveis e sem máscara; cria `U_east`/`V_north`, `U10_east`/`V10_north`, `pressure`, `theta`, `tk`, `zgrid` e `zs`.
-- `tempos_wrf(dataset)` — datas de `Times` (ou `XTIME`).
-
-### `mom6.py`
-- `eh_mom6(dataset)` — `True` se o arquivo tem as dimensões `xh`/`yh` (ou `xq`/`yq`).
-- `abrir_mom6(dataset, nome_arquivo, arquivo_grade=None)` — monta o `DatasetMom6` (seção 16) com a grade do `ocean_static.nc` (informado, ou citado em `associated_files`) ou, na falta dele, com a grade nominal `xh × yh`.
-- `GradeMom6` — `geolon`/`geolat`, cantos, `wet`, `deptho`, ângulo; detecta grade simétrica/não simétrica e periodicidade em x, e "rola" as colunas para a costura de longitude ficar na borda.
-- `tempos_mom6(dataset)` — datas de `time`, inclusive no calendário `noleap`.
 
 ### `estatistics.py`
 - `calcular_valor(setup, nome_funcao, arrays, mask, rotulo, modo_point=False)` — forma **escalar** de todas as estatísticas (`sum`/`mean`/`min`/`max`/`p10`..`p90`, seção 2.3): empilha `arrays` (ver `_empilhar`) e reduz a **um único número**, sobre todos os tempos selecionados e, conforme o modo espacial atual (mapa/ponto/corte/mapa_niveis — ver `_modo_espacial`/`_fatia`): todas as células (ou só as de `mask`) no nível único (modo mapa) ou na faixa de níveis (modo corte, ou mapa com `modo_point=True` e faixa genuína — modo `mapa_niveis`), ou toda a faixa de níveis na célula mais próxima (modo ponto — `mask` aí só confere se esse ponto está dentro da área). Imprime o resultado e o retorna (`float`), ou `None` em caso de erro/aviso (variável com formato inesperado, máscara não batendo com a malha atual, nenhuma célula disponível, ou ponto fora da área de limites).
@@ -1171,15 +1418,24 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 - `sum_all`/`sum_inlimits`/`mean_all`/`mean_inlimits` — atalhos nomeados equivalentes a `calcular_valor` com o nome da função já fixado (úteis para chamar diretamente, ex. em testes).
 - `NOMES_ESTATISTICA_ESCALAR`, `NOMES_ESTATISTICA_ESPACIAL` — tuplas com os nomes de comando reconhecidos por `exec_func.py` (todas as estatísticas têm tanto a forma escalar quanto a espacial, incluindo `sum`).
 
+- `mascara_sel(setup)` / `descricao_sel(setup)` / `nova_selecao()` — máscara booleana de células na região do `sel` (com cruzamento de meridiano), texto da região e seleção vazia. `calcular_serie_sel(setup, nome_funcao, dados, rotulo, acumular=False)` — para cada arquivo, fatia `[time_sel][máscara]` (e os níveis de `set lev`), acumula célula a célula (`acum`, ignorando `NaN`) e aplica a estatística; retorna `(valores, {n_cel, niveis})` ou `None`.
+
 ### `set_func.py`
 - `cmd_set(...)` / `_cmd_set_dispatch(...)` — comando `set` (tabela da seção 6), com validação numérica segura. `set lev <n1> <n2>` valida `<n1>`/`<n2>` como índices de nível **inclusivos** (0 a `n_niveis-1`, com `<n1> <= <n2>`) e guarda internamente `setup["levf"] = <n2> + 1` — o limite EXCLUSIVO usado por toda fatia de nível do resto do código (`var[..., lev:levf]` — ver `levf_efetivo` em `utils.py`); sem esse `+1`, incluir o último nível pedido exigiria um índice inválido.
+- `cmd_sel(cmd_split, setup, cmd_user)` / `_faixa_lon_sel(a, b)` — comando `sel` (seção 2.6): valida e guarda `setup['sel']`; normaliza longitudes (0–360 → −180–180, preservando o cruzamento do meridiano).
+- `set xtics|ytics on|off` guarda `setup['xtics'|'ytics']`; a aplicação é feita por `aplicar_limites_eixos` (`tick_params`).
+- `_valor_xrange(txt)` — interpreta número ou data para `set xrange|yrange`; `_reaplicar_limites_atuais` aplica na hora ao gráfico atual. A aplicação em si é `aplicar_limites_eixos(setup, ax)` (`plot_func.py`; xrange/yrange/xdiv/ydiv, chamada por `_aplicar_rotulos_eixos` ao final de toda plotagem); `restaurar_divisoes_eixos` atende `set xdiv|ydiv off`.
 - `_print_level_info(setup, l, lf=None)` — informação do nível (ou faixa) ao usar `set lev`, em cada tipo de nível do arquivo (pressão, solo, altura).
 - `_set_estilo_texto(setup, alvo, cmd_split, cmd_user)` — implementa `set label|title|xlabel|ylabel font/color/size/style` (`alvo` é `"label"`, `"title"`, `"xlabel"` ou `"ylabel"`; os dois últimos reaplicam o estilo na hora ao gráfico atual), guardando o resultado em `setup['<alvo>_font']`/`_color`/`_size`/`_style`. `font` verifica a existência da fonte no sistema (`_fonte_existe`, de `plot_func.py`) antes de aceitar.
 - `_set_contour(setup, cmd_split, cmd_user)` — implementa `set contour line size/<bw|color>` e `set contour font/<color|size|style>` (linhas e rótulos inline do `gxout contour`), guardando o resultado em `setup['contour_line_size']`/`_line_mode`/`_font`/`_font_color`/`_font_size`/`_font_style`.
 
+- `_estatistica_sel(setup, cmd_user, cmd_split, inicio, plotar, ax, cbar)` — `<função> sel <var>`, `acum <função> sel <var>` e `d ...` (seção 2.6): detecta o prefixo `acum`, reúne os dados com `_dados_sel`, chama `calcular_serie_sel` e imprime a tabela ou plota com `plot_curva_sel`. `_dados_sel(setup, expr)` — lista `{index, DataDado, array}` dos arquivos do `sel t`, avaliando variável/expressão/`let` com `_avaliar_expressao_serie`. `sel` e `acum` são nomes reservados para `let`.
+
 ### `show_func.py`
 - `cmd_show(setup, cmd_split)` / `_mostrar_info_arquivo(setup)` — comando `show` (tabela da seção 5).
+- `_mostrar_sets(setup)` / `_mostrar_sels(setup)` — blocos "Configuração atual (set)" e "Seleção atual (sel)" do `show info`; `_mostrar_sels` também atende `show sel` (seção 2.6).
 - `_mostrar_niveis(setup, filtro)` / `_mostrar_lev(setup)` — `show levels [tipo]` e `show lev`: níveis de cada tipo de coordenada vertical (seção 8.2).
+- `_mostrar_timestamp(setup, cmd_split)` — `show timestamp [n]`.
 - `_mostrar_arquivos(setup)` — `show files`: tabela com os arquivos abertos na sessão (seção 2.1).
 - `_mostrar_tempos(setup)` — `show times`: mesma tabela de `_mostrar_arquivos`, restrita ao(s) tempo(s) atualmente selecionado(s) por `set t` (o intervalo inteiro no modo série, ou só o arquivo pontual de `setup['arquivo_sel']` fora dele) — seção 2.1/5.
 - `_mostrar_fontes()` — `show fonts`: lista as fontes do sistema (ver `_listar_fontes` em `plot_func.py`) — seção 5/6.
@@ -1194,6 +1450,11 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 - `_SIMBOLOS_MARK` — tabela símbolo → `marker`/`fillstyle`.
 
 ### `plot_func.py`
+- `resolver_tipo_marcador(txt)` / `_kwargs_marcador(setup)` / `aplicar_marcador_linha(setup, linha)` / `reaplicar_marcadores(setup)` — `set marker ...`: o estilo é aplicado na criação de cada linha (série, curva de `sel`, perfil — que agora usa os marcadores da própria linha, não mais um `scatter`) e reaplicado na hora ao último gráfico de linha na tela.
+- `_formatar_datas_eixo(ax, fig)` — gira os rótulos de data **só do eixo plotado** (antes usava `fig.autofmt_xdate()`, que apagava os rótulos e o título do eixo X dos demais painéis de `set pages`); em grade com mais de uma linha de painéis abre o espaçamento vertical (`hspace`).
+- `CHAVES_PAINEL` / `valor_painel(setup, painel, chave)` / `iniciar_paineis` / `trocar_painel` — configuração de aparência **por painel**: `set pages` guarda a base (`setup['painel_base']`), `set page` salva o painel que sai em `setup['painel_cfg'][(lin, col)]` e carrega o que entra; `estilo_efetivo`/`atualizar_legenda` leem o valor do painel de cada curva.
+- `registrar_linha(..., setup)` numera a curva (plot1, plot2… — `plots_ativos`), `estilo_efetivo` (set plot > set marker > sequência `_CORES_ANSI`/`_MARCADORES_SEQ`), `aplicar_estilo_plot`, `atualizar_legenda(setup, ax)` (legenda **por painel**, em L/R/U/D, fora do eixo, que é encolhido só no próprio painel; estado em `setup['legend_paineis'][(linha, coluna)]` = `{on, pos, title}`, via `definir_estado_legenda`/`estado_legenda`), `atualizar_legendas_figura` (refaz todas depois de qualquer ajuste de layout), `listar_plots` (tabela de `show plots`). Seção 2.8.
+- `registrar_linha(...)` / `salvar_csv(caminho, setup)` — `write csv` (seção 2.7): cada gráfico de linha (série em ponto, curva de `sel`, perfil vertical) registra seus dados em `setup['plots']`; `salvar_csv` grava, numa tabela só, todas as curvas vivas do eixo ativo (alinhadas pela 1ª coluna; blocos separados se os tipos diferem).
 **Plotagem 2D:**
 - `plot_var(setup, var, cbar=None)` — despacha mapa/corte/perfil (seção 8) e `shaded`/`contour`/`voronoi`. No mapa horizontal, redesenha o mapa de fundo (`plot_map`) automaticamente se `setup["draw_map_on"]` estiver ligado (seção 7/2.1), e reaplica título (`_aplicar_titulo`) e rótulo da colorbar (`_aplicar_rotulo_cbar`), se definidos.
 - `plot_perfil(setup, var)` / `plot_corte(setup, var, cbar=None)` — resolvem a fatia bruta (`var[...]`) da variável comum e delegam o desenho a `_plotar_perfil_dados`/`_plotar_corte_dados`.
@@ -1203,6 +1464,7 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 - `_obter_poligonos_celulas(setup)` — polígonos de cada célula para `gxout hex`, em cache de memória (`setup["_poligonos_celulas"]`); construído uma única vez por sessão via `construir_poligonos_celulas` (utils.py), a partir de `setup["_malha_dataset"]`.
 - `plot_limites(setup)` — `load limits <arquivo.csv>` (seção 2.2): plota o contorno do polígono lido e destaca os centros de célula dentro dele (`setup["limits_mask"]`), com os demais em cinza claro para contexto.
 - `plot_estatistica_campo(setup, campo, modo, cbar=None)` — `d mean|min|max|p10..p90 all|inlimits <variavel>` (seção 2.3): plota `campo`, já reduzido por `calcular_campo` (`estatistics.py`), no formato indicado por `modo` ("mapa"/"ponto"/"corte" — mesma decisão que `plot_var` tomaria para a própria variável, seção 8): mapa (`(nCells,)`, embrulhado como `(1, nCells)` e passado a `plot_var` com `time_sel` forçado a 0 só durante a chamada), perfil (`(nLevels,)`, via `_plotar_perfil_dados`) ou corte (`(nCells, nLevels)`, via `_plotar_corte_dados`).
+- `plot_curva_sel(setup, rotulo_y, dados, valores, descricao_regiao, cbar=None)` — curva da estatística no tempo de `<função> sel <var>` (seção 2.6): eixo x em data/hora (`_eixo_x_tempo`), eixo y `rotulo_y`, região no título; respeita fundo, grade e estilos de `xlabel`/`ylabel`.
 - `_indice_mais_proximo_estatistica(setup)` — índice da célula mais próxima do ponto de lat/lon selecionado, usado por `plot_estatistica_campo` no modo "ponto" (mesma fórmula de `_indice_mais_proximo` em `estatistics.py`).
 - `plot_wind`, `plot_vector_field`, `plot_barbs`, `plot_streams` — vento (`vect`/`barb`/`stream`); `plot_wind` também redesenha o mapa e reaplica o título automaticamente se definidos.
 - `plot_marks(setup)` — mecanismo antigo de `set mark` (legado).
@@ -1248,6 +1510,12 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 - `plot_map(setup, ax)` — mapa de fundo 2D.
 - `plot_map_3d(setup, ax3d)` — mapa de fundo projetado na superfície 3D (`d3` + `draw map`).
 
+### `grade_regular.py`
+- `detectar_grade_regular(dataset)` — decide, pelo conteúdo, se o arquivo está em grade regular lat/lon (seção 2.5); devolve as coordenadas ou `None`.
+- `adaptar_se_regular(dataset)` — devolve o próprio dataset (malha do MPAS) ou um `DatasetGradeRegular`.
+- `DatasetGradeRegular` — mesma interface do `Dataset` do netCDF4, com a dimensão `nCells`, as variáveis virtuais `latCell`/`lonCell` (radianos) e as demais variáveis reorganizadas.
+- `VariavelGradeRegular` — visão de uma variável `(…, latitude, longitude)` como `(Time, nCells[, nível])`; leitura sob demanda (um índice de tempo inteiro lê só aquele instante).
+
 ### `utils.py`
 - `normalize_lon(lon)` — normaliza longitude para (-180, 180].
 - `mag(u, v)` — magnitude vetorial.
@@ -1264,282 +1532,11 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 ## 13. Requisitos de arquivo
 
 - **Sempre necessário**: as variáveis a serem plotadas.
-- **Malha**: `nCells` e `latCell`/`lonCell`, embutidos ou num arquivo de grade externo (seção 10 do manual anterior mantém-se válida: vários cenários de ausência são tratados sem travar).
+- **Malha**: `nCells` e `latCell`/`lonCell` (**ou** uma grade regular com coordenadas 1-D de latitude e longitude — seção 2.5), embutidos ou num arquivo de grade externo (seção 10 do manual anterior mantém-se válida: vários cenários de ausência são tratados sem travar).
 - **Tempo** (opcional, com valores de reserva): `xtime`, `initial_time`.
 - **Níveis de pressão** (opcional): `t_iso_levels` (Pa).
 - **Níveis de solo** (opcional): dimensão `nSoilLevels` com `zs` (profundidade dos centros) ou `dzs` (espessura das camadas). Sem isso, usa o índice.
 - Sem nenhum deles, usa índice de nível do modelo.
 - **Altura real** (opcional, corte/perfil/`d3` por altura): `zgrid`.
 - **`voronoi`/`shaded`/`contour`/corte/`streamlines`**: só precisam de `latCell`/`lonCell` — não é necessária a conectividade completa (`verticesOnCell` etc.).
-- **MOM6** (seção 16): dimensões `xh`/`yh`; para a grade tripolar real, `ocean_static.nc` com `geolon`/`geolat`; `time`; níveis `z_l`/`z_i`.
-- **WRF** (seção 15): dimensões `south_north`/`west_east` e `XLAT`/`XLONG`; `Times`; para altura, `PH`/`PHB`; para solo, `ZS`.
-- **ROMS** (seção 14): dimensões `eta_rho`/`xi_rho` e `lon_rho`/`lat_rho` (no arquivo ou numa grade separada); `ocean_time`; para profundidade, `Vtransform`, `s_rho`, `Cs_r`, `hc` e `h`.
 - **`hex`** (seção 8.1): precisa da conectividade completa da malha — `verticesOnCell`, `nEdgesOnCell`, `latVertex`, `lonVertex` — presente no arquivo de grade padrão do MPAS/MONAN (`x1.<nCells>.grid.nc`), mas tipicamente ausente em saídas de diagnóstico/pós-processadas. Sem essa conectividade, o programa avisa e sugere `voronoi` em vez de travar.
-
-## 14. Saídas do modelo oceânico ROMS (grade Arakawa C)
-
-Além da malha de Voronoi do MONAN/MPAS, o programa abre saídas do **ROMS**
-(ex.: `ocean_avg.nc`, `ocean_his.nc` do COAWST), cuja grade é **curvilínea e
-estruturada**, com as variáveis **defasadas** na grade C de Arakawa:
-
-| Ponto | Dimensões | Variáveis típicas |
-| --- | --- | --- |
-| RHO (centro da célula) | `eta_rho`, `xi_rho` | `temp`, `salt`, `rho`, `zeta`, `h`, `omega` |
-| U (face oeste/leste) | `eta_u`, `xi_u` | `u`, `ubar`, `Huon`, `u_temp`... |
-| V (face sul/norte) | `eta_v`, `xi_v` | `v`, `vbar`, `Hvom`, `v_temp`... |
-| PSI (canto da célula) | `eta_psi`, `xi_psi` | (vorticidade, se houver) |
-
-O arquivo é reconhecido automaticamente pelas dimensões `eta_rho`/`xi_rho`.
-
-### 14.1 Abrindo
-
-```
-open ocean_avg.nc                      # grade lida do próprio arquivo de saída
-open ocean_avg.nc swa6_grd.nc          # grade num arquivo separado
-open ocean_avg_*.nc swa6_grd.nc        # vários arquivos (série no tempo)
-```
-
-- Se o arquivo de saída já traz `lon_rho`/`lat_rho`/`mask_rho`/`angle`/`h`
-  (o padrão do ROMS), o arquivo de grade é opcional. Quando informado, a
-  geometria (lon/lat, máscara, ângulo, batimetria) vem dele; os parâmetros
-  da coordenada vertical (`Vtransform`, `s_rho`, `Cs_r`, `hc`) vêm sempre do
-  arquivo de dados.
-- Se o arquivo de saída **não** tiver `lon_rho`/`lat_rho` e nenhuma grade for
-  informada, o programa procura o arquivo do atributo global `grd_file` no
-  mesmo diretório.
-- O ângulo `angle` é sempre usado em radianos. Arquivos de grade costumam
-  rotulá-lo como `degree` mesmo guardando radianos (o ROMS lê radianos); o
-  programa decide pelos valores (|angle| > 2π só pode ser grau).
-- O tempo vem de `ocean_time` (ex.: `seconds since 1970-01-01 00:00:00`).
-
-### 14.2 Como a grade C é tratada
-
-Internamente, cada ponto **RHO** vira uma "célula" (o resto do programa vê
-`nCells = eta_rho × xi_rho`), e:
-
-- variáveis em **U**, **V** ou **PSI** são levadas para os pontos RHO pela
-  média dos dois (ou quatro) vizinhos — nas bordas do domínio, onde só há um
-  vizinho, o valor da borda é repetido;
-- pontos de **terra** (`mask_rho = 0`) e o `_FillValue` viram "sem dado";
-- **`u_east`/`v_north`** (e `ubar_east`/`vbar_north`) são criadas
-  automaticamente: são `u`/`v` (já em RHO) **rotacionadas** da direção da
-  grade (ξ, η) para leste/norte com o `angle` da grade. **Use estas para
-  vetores, barbelas e linhas de corrente** — `u`/`v` puros estão na direção
-  da grade, que pode ser bem diferente de leste/norte numa grade rotacionada:
-
-```
-set lev 0
-set gxout shaded
-d sqrt(u_east**2+v_north**2)
-set gxout vect
-d u_east;v_north
-```
-
-- variáveis de parâmetros escalares (`dt`, `rdrg`, `Cs_r`...) e as
-  coordenadas dos pontos defasados (`lon_u`, `mask_v`...) não aparecem em
-  `show info`.
-
-### 14.3 Níveis verticais (coordenada s)
-
-- `set lev 0` é a **superfície**; o último índice (ex.: `set lev 29` com 30
-  níveis) é o **fundo** — a ordem é invertida em relação ao ROMS (onde
-  k = 1 é o fundo), para ficar natural num oceano.
-- Variáveis em `s_rho` usam a dimensão `nVertLevels`; em `s_w` (ex.:
-  `omega`), `nVertLevelsP1`.
-- A variável virtual **`zgrid`** traz a profundidade *z* (m, negativa) de cada
-  nível *s* em cada ponto, calculada com `Vtransform` 1 ou 2, `Cs_r`, `s_rho`,
-  `hc`, `h` e `zeta` do primeiro tempo. Ela é usada em:
-  - `show levels` / `set lev`: mostram a profundidade **média** de cada nível
-    (o nível *s* acompanha o fundo, então a profundidade real varia de ponto
-    a ponto);
-  - cortes verticais (`set lat <valor>` ou `set lon <valor>` + `set lev 0 29`)
-    e perfis (`set lat`/`set lon` num ponto): o eixo Y é a profundidade real.
-    Colunas em terra aparecem hachuradas.
-
-### 14.4 `gxout` na grade estruturada
-
-| `gxout` | No ROMS |
-| --- | --- |
-| `shaded` / `contour` | `contourf`/`contour` direto nas coordenadas 2D dos pontos RHO, sem triangulação — rápido mesmo na grade cheia. |
-| `grfill` (também `voronoi`/`hex`) | Pinta cada célula com o seu valor, usando os **cantos reais** da célula (pontos PSI): a grade curvilínea exata do modelo, sem interpolação. |
-| `vect` / `barb` | Setas/barbelas amostradas (~45 por lado da área visível), com escala automática e seta de referência em m/s. |
-| `stream` | Linhas de corrente sobre uma grade regular amostrada do ponto RHO mais próximo. |
-
-Os cortes verticais triangulam apenas os pontos em volta da linha do corte
-(em vez da grade inteira), então também ficam rápidos na grade completa.
-
-### 14.5 Limitações conhecidas
-
-- O `zgrid` usa a `zeta` do primeiro tempo do arquivo (diferença de
-  centímetros na profundidade dos níveis).
-- Grades que cruzam a linha de data (±180°) não são tratadas.
-- Arquivos ROMS e MONAN não podem ser abertos na mesma sessão (malhas
-  diferentes — use `reinit`).
-
-## 15. Saídas do modelo atmosférico WRF (grade Arakawa C)
-
-Arquivos `wrfout_*` do WRF são reconhecidos pelas dimensões
-`south_north`/`west_east` e tratados com a mesma maquinaria do ROMS
-(seção 14): os pontos de **massa** viram as "células" e as variáveis
-defasadas são levadas para eles.
-
-| Ponto | Dimensões | Variáveis típicas |
-| --- | --- | --- |
-| Massa | `south_north`, `west_east` | `T`, `P`, `PB`, `QVAPOR`, `T2`, `U10`, `V10`, `HGT`, `RAINNC`... |
-| U | `south_north`, `west_east_stag` | `U`, `MAPFAC_U` |
-| V | `south_north_stag`, `west_east` | `V`, `MAPFAC_V` |
-
-Diferente do ROMS, no WRF a grade defasada tem uma coluna/linha **a mais**
-que a de massa (`west_east_stag` = `west_east` + 1): cada ponto de massa
-recebe a média exata das suas duas faces, sem repetição de borda.
-
-### 15.1 Abrindo
-
-```
-open wrfout_d01_2021-07-01_12:00:00               # grade do próprio wrfout (XLAT/XLONG)
-open wrfout_d01_*                                  # vários arquivos (série no tempo)
-open wrfout_d01_... geo_em.d01.nc                  # grade separada (só se o wrfout não tiver XLAT/XLONG)
-```
-
-O tempo vem de `Times` (ou de `XTIME`, na falta dele). Num wrfout com vários
-horários, cada horário vira uma entrada de `show files`, e `set t <n>`
-escolhe o horário (seção 17).
-
-### 15.2 Níveis
-
-- `bottom_top` → `nVertLevels` (níveis de massa); `bottom_top_stag` →
-  `nVertLevelsP1` (interfaces: `W`, `PH`, `PHB`...); `soil_layers_stag` →
-  `nSoilLevels` (solo).
-- A ordem do WRF é mantida: **nível 0 = o mais baixo**, junto à superfície
-  (a mesma convenção do MONAN).
-- `zgrid` (virtual) = altura geopotencial `(PH+PHB)/g` nas interfaces, do
-  primeiro tempo. É usada por `set lev` (altura média do nível), cortes
-  verticais e perfis, que acompanham o terreno.
-- `zs` (virtual) = profundidade das camadas de solo (de `ZS`), usada por
-  `show levels solo` e `set lev` em variáveis como `TSLB` e `SMOIS`.
-
-### 15.3 Variáveis derivadas (virtuais)
-
-| Variável | Conteúdo |
-| --- | --- |
-| `U_east`, `V_north` | `U`/`V` em pontos de massa, rotacionados para leste/norte com `SINALPHA`/`COSALPHA` |
-| `U10_east`, `V10_north` | o mesmo para `U10`/`V10` |
-| `pressure` | pressão total `P+PB`, em hPa |
-| `theta` | temperatura potencial `T+300`, em K |
-| `tk` | temperatura do ar, em K |
-
-Em projeção Mercator a rotação é nula, mas em Lambert ou estereográfica
-polar ela é necessária, por isso use sempre `U_east;V_north` para vetores:
-
-```
-set lev 0
-set gxout shaded
-d T2-273.15
-set gxout barb
-d U10_east;V10_north
-```
-
-Os comandos de `gxout` (`shaded`, `contour`, `grfill`, `vect`, `barb`,
-`stream`) funcionam como descrito na seção 14.4.
-
-### 15.4 Limitações conhecidas
-
-- Não há interpolação para níveis de pressão (`set lev 850` em hPa): os
-  níveis são os níveis eta do modelo. Para um campo numa superfície de
-  pressão, interpole antes (ex.: com `wrf-python`/`p_interp`).
-- `zgrid` usa o primeiro tempo do arquivo.
-- WRF e MONAN/ROMS não podem ser abertos na mesma sessão (use `reinit`).
-
-## 16. Saídas do modelo oceânico MOM6 (grade tripolar, Arakawa C)
-
-Arquivos de diagnóstico do MOM6 (ex.: `tempsalt.nc`, `ocean_daily.nc`,
-`ocean_month.nc`) são reconhecidos pelas dimensões `xh`/`yh` e tratados com
-a mesma maquinaria do ROMS e do WRF (seções 14 e 15).
-
-### 16.1 Abrindo — e por que o `ocean_static.nc` importa
-
-```
-open tempsalt.nc ocean_static.nc     # grade real (recomendado)
-open tempsalt.nc                      # procura o estático citado em 'associated_files'
-open ocean_daily_*.nc ocean_static.nc # vários arquivos
-```
-
-Os arquivos de diagnóstico só trazem as coordenadas **nominais** 1-D `xh`
-e `yh`. Numa grade **tripolar** global, elas não são a posição real ao norte
-de ~65°N, onde a grade se dobra sobre dois polos sobre a terra. A posição
-real fica no arquivo estático (`ocean_static.nc`), com `geolon`/`geolat`
-(centros), `geolon_c`/`geolat_c` (cantos), `wet` (máscara), `deptho`
-(profundidade) e `sin_rot`/`cos_rot` (rotação da grade).
-
-- Sem estático informado, o programa procura o arquivo citado no atributo
-  global `associated_files` (ex.: `area_t: ocean_static.nc`) no mesmo
-  diretório.
-- Sem nenhum, usa a grade nominal `xh × yh` e avisa. Isso é correto para
-  grades regulares e para tudo ao sul de ~65°N numa grade tripolar.
-
-### 16.2 Tratamento da grade
-
-| Ponto | Dimensões | Variáveis típicas |
-| --- | --- | --- |
-| h (centro) | `yh`, `xh` | `temp`, `salt`, `SSH`, `thetao`, `so`, `mlotst` |
-| u (face leste) | `yh`, `xq` | `uo`, `u`, `taux` |
-| v (face norte) | `yq`, `xh` | `vo`, `v`, `tauy` |
-| q (canto) | `yq`, `xq` | vorticidade |
-
-- Grade **simétrica** (`xq` = `xh` + 1): média das duas faces. Grade
-  **não simétrica** (`xq` = `xh`): face leste/norte de cada célula, e num
-  domínio global a primeira coluna usa a última como face oeste
-  (periodicidade em x).
-- **`uo_east`/`vo_north`** (e `u_east`/`v_north`, `taux_east`/`tauy_north`)
-  são criadas quando os pares existem: correntes rotacionadas para
-  leste/norte com `sin_rot`/`cos_rot` (ou com o ângulo calculado das
-  coordenadas). Use-as para vetores.
-- **Costura de longitude:** em geral `geolon` vai de −300 a 60. Normalizada
-  para (−180, 180], cada linha teria um salto de 360°; as colunas são
-  "roladas" para o salto ficar na borda do mapa. Na região tripolar do
-  Ártico ainda há saltos, e os pontos vizinhos a eles são mascarados nos
-  mapas, para não aparecer uma faixa atravessando o globo (fica uma linha
-  fina sem cor ao longo da costura).
-- Pontos de terra (`wet = 0`) e o `_FillValue` (1e20) viram "sem dado".
-
-### 16.3 Níveis
-
-- `z_l` (centro da camada) → `nVertLevels`; `z_i` (interfaces) →
-  `nVertLevelsP1`. Também valem `zl`/`zi` e `rho2_l`/`rho2_i`.
-- **`set lev 0` é a superfície** (a ordem do próprio MOM6).
-- `zgrid` (virtual) = −`z_l` em todos os pontos. `show levels` e `set lev`
-  mostram a profundidade de cada camada, e cortes e perfis usam
-  profundidade no eixo Y; o fundo e a terra aparecem hachurados.
-
-### 16.4 Tempo
-
-O tempo vem de `time` (ex.: `days since 2026-03-29 00:00:00`), com suporte
-aos calendários `gregorian`/`julian` e `noleap`/`365_day`, comum no MOM6.
-
-## 17. Arquivos com vários tempos (ROMS, WRF, MOM6)
-
-Num arquivo de grade C com vários tempos, **cada tempo vira uma entrada
-própria** em `show files`, como se fosse um arquivo de um tempo só. Assim
-`set t` funciona como entre vários arquivos do MONAN:
-
-```
-open tempsalt.nc ocean_static.nc   # 767 tempos -> entradas 1 a 767
-show files                         # lista as entradas, com a data de cada uma
-set t 300                          # escolhe o tempo 300
-d temp
-set lat -23
-set lon -40
-set t 1 767                        # série temporal no ponto
-d SSH
-```
-
-- Os dados são lidos **um tempo de cada vez**, sob demanda: um arquivo
-  maior que a memória (ex.: `temp` com 767 × 75 × 155 × 180 valores, ~6 GB)
-  abre normalmente.
-- Abrindo vários arquivos (`open ocean_daily_*.nc`), as entradas seguem em
-  sequência: os tempos do primeiro arquivo, depois os do segundo, e assim
-  por diante.
-- Séries e estatísticas sobre um intervalo longo de tempos (`set t 1 767`)
-  leem cada tempo uma vez, mas guardam o resultado de todos. Para uma
-  variável 3D num intervalo longo, isso pode ocupar bastante memória; num
-  ponto, numa área ou com uma variável 2D, o custo é pequeno.

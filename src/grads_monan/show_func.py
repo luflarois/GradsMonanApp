@@ -10,8 +10,9 @@
 import os
 import matplotlib.pyplot as plt
 
-from .plot_func import _listar_fontes
+from .plot_func import listar_plots, _listar_fontes
 from .utils import descritor_nivel, descritores_disponiveis, formatar_nivel, levf_efetivo
+from .estatistics import descricao_sel, mascara_sel
 
 def show_legend():
     plt.legend()
@@ -30,6 +31,75 @@ def _mostrar_fontes():
     for nome in fontes:
         print(nome)
 
+def _mostrar_sels(setup):
+    """Bloco 'sel' de 'show info' / 'show sel': regiao e intervalo de tempo
+    das estatisticas ao longo do tempo (secao 2.6 do manual)."""
+    print("Selecao atual (sel) - usada por '<estatistica> sel <variavel>':")
+    sel = setup.get("sel") or {}
+    if sel.get("lat"):
+        print("  sel lat: {0:g} a {1:g}".format(*sel["lat"]))
+    else:
+        print("  sel lat: nao definido (todo o dominio)")
+    if sel.get("lon"):
+        print("  sel lon: {0:g} a {1:g}".format(*sel["lon"]))
+    else:
+        print("  sel lon: nao definido (todo o dominio)")
+    if sel.get("t"):
+        print("  sel t:   arquivos {0} a {1}".format(*sel["t"]))
+    else:
+        print("  sel t:   nao definido (todos os arquivos abertos)")
+    try:
+        mascara = mascara_sel(setup)
+        print("  celulas na regiao: {0} de {1}".format(int(mascara.sum()), len(mascara)))
+    except Exception:
+        pass
+
+def _mostrar_sets(setup):
+    """Bloco 'set' de 'show info': valores atuais dos principais comandos
+    'set' (secao 6 do manual)."""
+    print("Configuracao atual (set):")
+    print("  set lat:    {0:g} a {1:g}".format(setup["lat_min"], setup["lat_max"]))
+    print("  set lon:    {0:g} a {1:g}".format(setup["lon_min"], setup["lon_max"]))
+    lev, levf = setup["lev"], setup["levf"]
+    ultimo = max(lev, levf_efetivo(lev, levf) - 1)
+    txt = "{0}".format(lev) if ultimo == lev else "{0} a {1}".format(lev, ultimo)
+    print("  set lev:    {0}".format(txt))
+    for d in descritores_disponiveis(setup):
+        if ultimo < d["n"] and d["tipo"] in ("pressao", "solo"):
+            v = formatar_nivel(d, lev) if ultimo == lev else "{0} ate {1}".format(formatar_nivel(d, lev), formatar_nivel(d, ultimo))
+            print("              {0}: {1}".format(d["nome_tipo"], v))
+    ini, fim = setup.get("time_ini"), setup.get("time_fim")
+    if ini is not None and fim is not None and len(setup.get("files") or []) > 1:
+        print("  set t:      serie/animacao, arquivos {0} a {1} (set tint {2:g} s)".format(ini, fim, setup.get("tint", 1.0)))
+    else:
+        print("  set t:      arquivo {0} (instante {1} dentro do arquivo)".format(setup.get("arquivo_sel", 1), setup.get("time_sel", 0)))
+    print("  set gxout:  {0}".format(setup.get("gxout")))
+    print("  set cmap:   {0}".format(setup.get("cmap")))
+    clevs = setup.get("clevs")
+    print("  set clevs:  {0}".format(" ".join("{0:g}".format(c) for c in clevs) if clevs else "automatico"))
+    cut = setup.get("cut")
+    xr = setup.get("xrange")
+    print("  set xrange: {0}".format("{0} a {1}".format(*xr) if xr else "automatico"))
+    yr = setup.get("yrange")
+    print("  set yrange: {0}".format("{0} a {1}".format(*yr) if yr else "automatico"))
+    print("  set xdiv:   {0}".format("{0:g}".format(setup["xdiv"]) if setup.get("xdiv") else "automatico"))
+    print("  set ydiv:   {0}".format("{0:g}".format(setup["ydiv"]) if setup.get("ydiv") else "automatico"))
+    print("  set xtics:  {0}".format("on" if setup.get("xtics", True) else "off"))
+    print("  set ytics:  {0}".format("on" if setup.get("ytics", True) else "off"))
+    print("  set marker: {0} (tipo {1}, tamanho {2:g}, cor {3}, texto {4})".format(
+        "on" if setup.get("marker", True) else "off", setup.get("marker_type", "o"),
+        setup.get("marker_size", 6.0), setup.get("marker_color") or "da linha",
+        "on" if setup.get("marker_text", False) else "off"))
+    print("  set cut:    {0}".format("{0:g} a {1:g}".format(*cut) if cut else "desligado"))
+    print("  set map:    {0} (cor {1}, espessura {2})".format(setup.get("map"), setup.get("map_color"), setup.get("map_line")))
+    if setup.get("background"):
+        print("  set background: {0}".format(setup["background"]))
+    estilo_grade = [str(setup[k]) for k in ("grid_color", "grid_size", "grid_type") if setup.get(k) not in (None, "")]
+    if estilo_grade:
+        print("  set grid:   {0}".format(", ".join(estilo_grade)))
+    if setup.get("bar_position"):
+        print("  set bar position: {0}".format(setup["bar_position"]))
+
 def _mostrar_info_arquivo(setup):
     """
     Comando 'show info': mostra informacoes do arquivo NetCDF aberto (e da
@@ -43,23 +113,14 @@ def _mostrar_info_arquivo(setup):
 
     variables = setup["variables"]
 
-    print("Dimensoes:")
-    g = setup.get("_grade_estruturada")
-    if g:
-        if g.get("modelo") == "MOM6":
-            print("  Grade MOM6 (Arakawa C): {0} x {1} pontos h (yh x xh) = {2} pontos".format(
-                g["shape"][0], g["shape"][1], len(setup.get("latitudes", []))))
-            print("  (u/v/q defasados sao levados para os pontos h; 'uo_east'/'vo_north' = correntes rotacionadas para leste/norte)")
-        elif g.get("modelo") == "WRF":
-            print("  Grade WRF (Arakawa C): {0} x {1} pontos de massa (south_north x west_east) = {2} pontos".format(
-                g["shape"][0], g["shape"][1], len(setup.get("latitudes", []))))
-            print("  (U/V defasados sao levados para os pontos de massa; 'U_east'/'V_north' e 'U10_east'/'V10_north' = vento rotacionado para leste/norte)")
-        else:
-            print("  Grade {0} (Arakawa C, curvilinea): {1} x {2} pontos RHO (eta_rho x xi_rho) = {3} pontos".format(
-                g.get("modelo", ""), g["shape"][0], g["shape"][1], len(setup.get("latitudes", []))))
-            print("  (variaveis em pontos U/V/PSI sao levadas para RHO; 'u_east'/'v_north' = correntes rotacionadas para leste/norte)")
+    ds = (setup.get("files") or [{}])[0].get("dataset")
+    if getattr(ds, "grade_regular", False):
+        print("Tipo de grade: regular lat/lon ({0} latitudes x {1} longitudes)".format(ds.nlat, ds.nlon))
     else:
-        print("  Numero de celulas (nCells): {0}".format(len(setup.get("latitudes", []))))
+        print("Tipo de grade: malha nao estruturada (Voronoi, MPAS/MONAN)")
+
+    print("Dimensoes:")
+    print("  Numero de celulas (nCells): {0}".format(len(setup.get("latitudes", []))))
     niveis = descritores_disponiveis(setup)
     if niveis:
         print("  Niveis verticais:")
@@ -71,6 +132,12 @@ def _mostrar_info_arquivo(setup):
     n_tempos = len(setup.get("time", []))
     if n_tempos:
         print("  Numero de tempos: {0}".format(n_tempos))
+
+    print("")
+    _mostrar_sets(setup)
+    print("")
+    _mostrar_sels(setup)
+    print("")
 
     print("Numero de variaveis: {0}".format(len(variables)))
     for vname in sorted(variables.keys()):
@@ -122,7 +189,7 @@ def _mostrar_niveis(setup, filtro=None):
         print("[{0}] dimensao '{1}', {2} niveis (indices 0 a {3}) - valores de: {4}".format(
             d["nome_tipo"], d["dim"], d["n"], d["n"] - 1, d["fonte"]))
         for i in range(d["n"]):
-            print("  {0} - {1}".format(i, formatar_nivel(d, i) if (d["tipo"] in ("pressao", "solo") or d.get("unidade") == "m") else
+            print("  {0} - {1}".format(i, formatar_nivel(d, i) if d["tipo"] in ("pressao", "solo") else
                                        ("indice {0}".format(i) if d["fonte"] != "zgrid" else "indice {0} (altura em m: zgrid, varia por celula)".format(i))))
 
 def _mostrar_lev(setup):
@@ -169,6 +236,30 @@ def _mostrar_arquivos(setup):
         timestamp = info.get("DataDado") or "desconhecida"
         print(linha_fmt.format(info["index"], info["fileName"], timestamp,
                                 w0=largura_num, w1=largura_nome, w2=largura_tempo))
+
+def _mostrar_timestamp(setup, cmd_split):
+    """Comando 'show timestamp [n]': timestamp do arquivo n (sem n, o
+    arquivo selecionado por 'set t')."""
+    arquivos = setup.get("files") or []
+    if not arquivos:
+        print("Nenhum arquivo aberto.")
+        return
+    if len(cmd_split) > 3:
+        print("Uso: show timestamp [<numero do arquivo>]")
+        return
+    if len(cmd_split) == 3:
+        try:
+            n = int(cmd_split[2])
+        except ValueError:
+            print("Erro: o numero do arquivo deve ser um inteiro (1 a {0}).".format(len(arquivos)))
+            return
+    else:
+        n = setup.get("arquivo_sel", 1)
+    info = next((i for i in arquivos if i["index"] == n), None)
+    if info is None:
+        print("Erro: arquivo {0} nao esta aberto (abertos: 1 a {1}; veja 'show files').".format(n, len(arquivos)))
+        return
+    print("Arquivo {0} ({1}): {2}".format(n, info["fileName"], info.get("DataDado") or "desconhecida"))
 
 def _mostrar_tempos(setup):
     """
@@ -232,6 +323,19 @@ def cmd_show(setup, cmd_split):
         return
     if cmd_split[1] == "files":
         _mostrar_arquivos(setup)
+        return
+    if cmd_split[1] == "sel":
+        _mostrar_sels(setup)
+        return
+    if cmd_split[1] == "plots":
+        linhas = listar_plots(setup)
+        if not linhas:
+            print("Nenhuma curva (grafico de linha) na tela.")
+        for l in linhas:
+            print(l)
+        return
+    if cmd_split[1] == "timestamp":
+        _mostrar_timestamp(setup, cmd_split)
         return
     if cmd_split[1] == "times":
         _mostrar_tempos(setup)
