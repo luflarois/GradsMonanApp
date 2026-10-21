@@ -10,7 +10,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .plot_func import iniciar_paineis, trocar_painel, _POSICOES_LEGENDA, definir_estado_legenda, atualizar_legendas_figura, reaplicar_marcadores, resolver_tipo_marcador, aplicar_limites_eixos, restaurar_divisoes_eixos, atualizar_titulo_janela, _fonte_existe, _aplicar_rotulos_eixos, aplicar_fundo, restaurar_fundo, aplicar_grade, reaplicar_estilo_grade, resolver_tipo_linha
+from .plot_func import chave_minmax, iniciar_paineis, trocar_painel, _POSICOES_LEGENDA, definir_estado_legenda, atualizar_legendas_figura, reaplicar_marcadores, resolver_tipo_marcador, aplicar_limites_eixos, restaurar_divisoes_eixos, atualizar_titulo_janela, _fonte_existe, _aplicar_rotulos_eixos, aplicar_fundo, restaurar_fundo, aplicar_grade, reaplicar_estilo_grade, resolver_tipo_linha
 from matplotlib.colors import is_color_like
 from .utils import descritores_disponiveis, formatar_nivel, normalize_lon
 from .estatistics import nova_selecao, descricao_sel
@@ -365,6 +365,19 @@ def cmd_sel(cmd_split, setup, cmd_user):
         sel["t"] = (a, b)
     print("Selecao (sel): " + descricao_sel(setup))
     return setup
+
+def _indice_tempo(token, arquivos):
+    """Indice (1-based) de um argumento de 'set t': numero, 'first' (primeiro
+    tempo/arquivo) ou 'last' (ultimo aberto). Levanta ValueError se invalido."""
+    t = token.strip().lower()
+    if t in ("first", "last"):
+        if not arquivos:
+            raise ValueError("'{0}' requer arquivos abertos.".format(t))
+        return 1 if t == "first" else len(arquivos)
+    try:
+        return int(t)
+    except ValueError:
+        raise ValueError("indice de tempo invalido: '{0}' (use um inteiro, 'first' ou 'last').".format(token))
 
 def cmd_set(cmd_split, setup, cmd_user):
     """
@@ -929,9 +942,14 @@ def _cmd_set_dispatch(cmd_split, setup, cmd_user):
         # serie (mensagem "apenas uma dentre latitude, longitude e
         # nivel..."), quando o usuario so queria um corte/mapa normal no
         # arquivo/tempo escolhido - bug corrigido em 24Sep2026.
+        arquivos = setup.get("files") or []
+        try:
+            idx = [_indice_tempo(t, arquivos) for t in cmd_split[2:4]]
+        except ValueError as e:
+            print("Erro: {0}".format(e))
+            return setup
         if len(cmd_split) == 3:
-            n = int(cmd_split[2])
-            arquivos = setup.get("files") or []
+            n = idx[0]
             if arquivos:
                 total = len(arquivos)
                 if n < 1 or n > total:
@@ -944,9 +962,7 @@ def _cmd_set_dispatch(cmd_split, setup, cmd_user):
             atualizar_titulo_janela(setup)
             return setup
         elif len(cmd_split) == 4:
-            i1 = int(cmd_split[2])
-            i2 = int(cmd_split[3])
-            arquivos = setup.get("files") or []
+            i1, i2 = idx
             if arquivos:
                 n = len(arquivos)
                 if i1 < 1 or i1 > n or i2 < 1 or i2 > n:
@@ -960,8 +976,46 @@ def _cmd_set_dispatch(cmd_split, setup, cmd_user):
             atualizar_titulo_janela(setup)
             return setup
         else:
-            print("Uso: set t <indice>  ou  set t <arquivo_inicial> <arquivo_final>")
+            print("Uso: set t <indice|first|last>  ou  set t <ini|first> <fim|last>")
             return setup
+    elif cmd_split[1] == "minmax":
+        # set minmax                      -> remove todos (volta ao automatico)
+        # set minmax <var>                -> remove o da variavel
+        # set minmax <var> <min> <max> [<passo>]
+        #   fixa a escala de cores de <var> em 'd' / 'd3' / 'write animation'
+        #   (sem passo: 20 intervalos entre min e max).
+        mm = setup.setdefault("minmax", {})
+        if len(cmd_split) == 2:
+            mm.clear()
+            print("minmax: escalas de cor voltaram ao automatico.")
+            return setup
+        chave = chave_minmax(cmd_split[2])
+        if len(cmd_split) == 3:
+            if mm.pop(chave, None) is None:
+                print("minmax: '{0}' nao tinha escala fixa.".format(cmd_split[2]))
+            else:
+                print("minmax: '{0}' voltou ao automatico.".format(cmd_split[2]))
+            return setup
+        if len(cmd_split) not in (5, 6):
+            print("Uso: set minmax [<variavel> [<min> <max> [<intervalo>]]]")
+            return setup
+        try:
+            vmin, vmax = float(cmd_split[3]), float(cmd_split[4])
+            passo = float(cmd_split[5]) if len(cmd_split) == 6 else None
+        except ValueError:
+            print("Erro: min, max e intervalo devem ser numeros.")
+            return setup
+        if not vmax > vmin:
+            print("Erro: o maximo ({0:g}) deve ser maior que o minimo ({1:g}).".format(vmax, vmin))
+            return setup
+        if passo is not None and (passo <= 0 or (vmax - vmin) / passo > 500):
+            print("Erro: o intervalo deve ser positivo e gerar no maximo 500 faixas.")
+            return setup
+        mm[chave] = (vmin, vmax, passo)
+        print("minmax: {0} de {1:g} a {2:g}, {3}.".format(
+            cmd_split[2], vmin, vmax,
+            "intervalo {0:g}".format(passo) if passo else "intervalo padrao ({0:g}, 20 faixas)".format((vmax - vmin) / 20)))
+        return setup
     elif cmd_split[1] == "tint":
         # Intervalo (em segundos) entre quadros na animacao da serie
         # temporal entre arquivos (ver 'set t <ini> <fim>' e 'd'/'d3').

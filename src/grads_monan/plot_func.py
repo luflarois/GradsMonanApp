@@ -8,6 +8,8 @@
 """ This script plot data from NetCDF data generated From MONAN MODEL"""  
 # ---------------------------------------------------------------------------
 import os
+import sys
+import re
 import pickle
 import hashlib
 from datetime import datetime
@@ -866,10 +868,51 @@ def _niveis_cor(setup):
     (ex: clevs 0 100 200 ... cria faixas 0-100, 100-200, ...).
     Caso contrario, usa o padrao de 20 niveis automaticos.
     """
+    mm = minmax_da_variavel(setup)
+    if mm is not None:
+        return niveis_minmax(*mm)
     clevs = setup.get("clevs")
     if clevs:
         return clevs
     return 20
+
+def chave_minmax(token):
+    """Chave normalizada de 'set minmax': sem espacos, sem sufixo '.N' e minuscula."""
+    return re.sub(r'\.\d+$', '', "".join(str(token).split())).lower()
+
+def definir_variaveis_plot(setup, texto):
+    """
+    Guarda os nomes candidatos da variavel que vai ser plotada ('d ...',
+    'd3 ...', 'write animation ...'): o texto inteiro e cada palavra, ja
+    normalizados - usados por 'minmax_da_variavel' para achar o
+    'set minmax <variavel>' correspondente.
+    """
+    cand = {chave_minmax(texto)}
+    for t in re.split(r'[\s;,()]+', texto):
+        if t:
+            cand.add(chave_minmax(t))
+    setup["_vars_plot"] = cand
+
+def minmax_da_variavel(setup):
+    """(min, max, passo|None) de 'set minmax' para a variavel em plotagem, ou None."""
+    mm = setup.get("minmax")
+    if not mm:
+        return None
+    for c in setup.get("_vars_plot") or ():
+        if c in mm:
+            return mm[c]
+    return None
+
+def niveis_minmax(vmin, vmax, passo):
+    """Niveis de cor de vmin a vmax a cada 'passo' (sem passo: 20 intervalos)."""
+    if not passo:
+        return [float(x) for x in np.linspace(vmin, vmax, 21)]
+    n = int(np.floor((vmax - vmin) / passo + 1e-9))
+    niveis = [round(vmin + i * passo, 10) for i in range(n + 1)]
+    if niveis[-1] < vmax - 1e-9 * max(1.0, abs(vmax)):
+        niveis.append(float(vmax))
+    return niveis
+
 
 def _tamanho_malha_ok(label, tamanho_dado, tamanho_malha):
     """
@@ -2306,6 +2349,55 @@ def plot_serie_temporal(setup, var_name, dados, cbar=None):
 
     return ax, cbar
 
+class AnimacaoInterrompida(Exception):
+    """Ctrl+C durante 'write animation' (nada e gravado)."""
+
+# Onde a barra de progresso e escrita: o terminal real (sys.__stdout__),
+# direto - assim ela aparece mesmo com 'debug off' e nao entra na saida
+# capturada para decidir o prompt (E>/?>). So aparece em terminal
+# interativo (isatty) ou quando _PROGRESSO_FORCAR e True (testes).
+_PROGRESSO_FORCAR = False
+_PROGRESSO_SAIDA = None
+
+class BarraProgresso(object):
+    """Barra '0%..100%' de uma animacao, atualizada na mesma linha (\\r)."""
+    LARGURA = 30
+
+    def __init__(self, total, rotulo="Animacao"):
+        self.total = max(int(total), 1)
+        self.rotulo = rotulo
+        self.saida = _PROGRESSO_SAIDA or sys.__stdout__
+        try:
+            self.ativa = bool(_PROGRESSO_FORCAR or self.saida.isatty())
+        except Exception:
+            self.ativa = False
+        self.linhas = []          # historico (para testes)
+        self.atualizar(0)
+
+    def texto(self, feitos):
+        pct = int(round(100.0 * feitos / self.total))
+        cheio = int(round(self.LARGURA * feitos / self.total))
+        return "{0} [{1}{2}] {3:3d}% ({4}/{5})  Ctrl+C para parar".format(
+            self.rotulo, "#" * cheio, "-" * (self.LARGURA - cheio), pct, feitos, self.total)
+
+    def atualizar(self, feitos):
+        t = self.texto(feitos)
+        self.linhas.append(t)
+        if self.ativa:
+            try:
+                self.saida.write("\r" + t + "\x1b[K")
+                self.saida.flush()
+            except Exception:
+                pass
+
+    def fim(self):
+        if self.ativa:
+            try:
+                self.saida.write("\n")
+                self.saida.flush()
+            except Exception:
+                pass
+
 def plot_serie_mapa(setup, var_name, dados, cbar=None):
     """
     Comando 'd <variavel>' (mapa horizontal - nem latitude nem longitude
@@ -2322,25 +2414,33 @@ def plot_serie_mapa(setup, var_name, dados, cbar=None):
     fig = ax.get_figure()
     intervalo = setup.get("tint", 1.0)
     Title_base = setup.get("title") or ""
+    barra = BarraProgresso(len(dados), "Animacao")
 
-    for d in dados:
-        if cbar is not None:
+    try:
+        for i, d in enumerate(dados, 1):
+            if cbar is not None:
+                try:
+                    cbar.remove()
+                except Exception:
+                    pass
+                cbar = None
+            ax.cla()
+            rotulo_tempo = d.get("DataDado") or "arquivo {0}".format(d["index"])
+            setup["title"] = (Title_base + "  [" + str(rotulo_tempo) + "]").strip()
+            ax, cbar = plot_var(setup, d["array"], cbar)
+            barra.atualizar(i)
             try:
-                cbar.remove()
+                fig.canvas.draw_idle()
+                plt.pause(max(float(intervalo), 0.001))
             except Exception:
                 pass
-            cbar = None
-        ax.cla()
-        rotulo_tempo = d.get("DataDado") or "arquivo {0}".format(d["index"])
-        setup["title"] = (Title_base + "  [" + str(rotulo_tempo) + "]").strip()
-        ax, cbar = plot_var(setup, d["array"], cbar)
-        try:
-            fig.canvas.draw_idle()
-            plt.pause(max(float(intervalo), 0.001))
-        except Exception:
-            pass
-
-    setup["title"] = Title_base
+    except KeyboardInterrupt:
+        barra.fim()
+        print("Animacao interrompida (Ctrl+C) no quadro {0} de {1}.".format(len(barra.linhas) - 1, len(dados)))
+    else:
+        barra.fim()
+    finally:
+        setup["title"] = Title_base
     return ax, cbar
 
 def plot_serie_mapa_3d(setup, var_name, dados):
@@ -2355,29 +2455,37 @@ def plot_serie_mapa_3d(setup, var_name, dados):
     intervalo = setup.get("tint", 1.0)
     Title_base = setup.get("title") or ""
     resultado = None
+    barra = BarraProgresso(len(dados), "Animacao 3D")
 
-    for d in dados:
-        fig3d = setup.get("fig3d")
-        if fig3d is not None and plt.fignum_exists(fig3d.number):
-            # Limpa a janela 3D inteira (inclusive barra de cores do quadro
-            # anterior) e recria o eixo, para nao empilhar um quadro sobre
-            # o outro - mesma logica usada por clear_plots() para o 'c'.
-            fig3d.clf()
-            setup["ax3d"] = fig3d.add_subplot(111, projection='3d')
-
-        rotulo_tempo = d.get("DataDado") or "arquivo {0}".format(d["index"])
-        setup["title"] = (Title_base + "  [" + str(rotulo_tempo) + "]").strip()
-        resultado = plot_var_3d(setup, d["array"])
-
-        try:
+    try:
+        for i, d in enumerate(dados, 1):
             fig3d = setup.get("fig3d")
-            if fig3d is not None:
-                fig3d.canvas.draw_idle()
-            plt.pause(max(float(intervalo), 0.001))
-        except Exception:
-            pass
+            if fig3d is not None and plt.fignum_exists(fig3d.number):
+                # Limpa a janela 3D inteira (inclusive barra de cores do quadro
+                # anterior) e recria o eixo, para nao empilhar um quadro sobre
+                # o outro - mesma logica usada por clear_plots() para o 'c'.
+                fig3d.clf()
+                setup["ax3d"] = fig3d.add_subplot(111, projection='3d')
 
-    setup["title"] = Title_base
+            rotulo_tempo = d.get("DataDado") or "arquivo {0}".format(d["index"])
+            setup["title"] = (Title_base + "  [" + str(rotulo_tempo) + "]").strip()
+            resultado = plot_var_3d(setup, d["array"])
+            barra.atualizar(i)
+
+            try:
+                fig3d = setup.get("fig3d")
+                if fig3d is not None:
+                    fig3d.canvas.draw_idle()
+                plt.pause(max(float(intervalo), 0.001))
+            except Exception:
+                pass
+    except KeyboardInterrupt:
+        barra.fim()
+        print("Animacao interrompida (Ctrl+C) no quadro {0} de {1}.".format(len(barra.linhas) - 1, len(dados)))
+    else:
+        barra.fim()
+    finally:
+        setup["title"] = Title_base
     return resultado
 
 def plot_curva_sel(setup, rotulo_y, dados, valores, descricao_regiao, cbar=None):
@@ -2406,6 +2514,60 @@ def plot_curva_sel(setup, rotulo_y, dados, valores, descricao_regiao, cbar=None)
     registrar_linha(linha, "curva_sel", rotulos, valores, "tempo", rotulo_y, setup)
     atualizar_legendas_figura(setup, fig)
     return ax, cbar
+
+GXOUT_ANIMACAO = ("shaded", "contour", "voronoi", "hex")
+
+def gravar_animacao(setup, var_name, dados, caminho, intervalo, cbar=None):
+    """
+    'write animation <variavel> <arquivo.gif> [intervalo]': desenha, quadro a
+    quadro, o mapa de cada arquivo (tempo) do intervalo de 'set t <ini>
+    <fim>' - com o 'set gxout' atual (shaded, contour, voronoi ou hex), o
+    nivel, o 'set cmap', o titulo etc. - e grava os quadros num GIF animado,
+    com 'intervalo' segundos entre quadros. Diferente de 'plot_serie_mapa',
+    nao faz pausa na tela: cada quadro e capturado da propria figura 2D
+    (PNG em memoria -> Pillow). Ao final, o ultimo quadro fica na janela.
+    Devolve (ax, cbar, n_quadros).
+    """
+    from io import BytesIO
+    from PIL import Image
+
+    _ativar_figura_2d(setup)
+    ax = plt.gca()
+    fig = ax.get_figure()
+    Title_base = setup.get("title") or ""
+    quadros = []
+    barra = BarraProgresso(len(dados), "Gravando GIF")
+    try:
+        for i, d in enumerate(dados, 1):
+            if cbar is not None:
+                try:
+                    cbar.remove()
+                except Exception:
+                    pass
+                cbar = None
+            ax.cla()
+            rotulo_tempo = d.get("DataDado") or "arquivo {0}".format(d["index"])
+            setup["title"] = (Title_base + "  [" + str(rotulo_tempo) + "]").strip()
+            ax, cbar = plot_var(setup, d["array"], cbar)
+            buf = BytesIO()
+            fig.savefig(buf, format="png", dpi=fig.dpi, facecolor=fig.get_facecolor())
+            buf.seek(0)
+            quadros.append(Image.open(buf).convert("RGB"))
+            barra.atualizar(i)
+    except KeyboardInterrupt:
+        barra.fim()
+        raise AnimacaoInterrompida(len(quadros))
+    finally:
+        setup["title"] = Title_base
+    barra.fim()
+
+    if not quadros:
+        return ax, cbar, 0
+    quadros[0].save(
+        caminho, format="GIF", save_all=True, append_images=quadros[1:],
+        duration=max(int(round(float(intervalo) * 1000)), 20), loop=0,
+    )
+    return ax, cbar, len(quadros)
 
 def plot_serie(setup, var_name, dados, cbar=None):
     """

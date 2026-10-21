@@ -1,5 +1,7 @@
 # Manual do GradsMonanApp
 
+**Versão 1.1.0**
+
 Um clone do GrADS/COLA para abrir e plotar saídas do modelo **MONAN/MPAS**
 (grade de Voronoi não estruturada), incluindo interpolação, cortes
 verticais, perfis, vento, campos escalares em 2D e 3D — com desempenho
@@ -104,6 +106,7 @@ começam com `Aviso:` são avisos informativos (ex.: ao abrir um arquivo sem
 | `sel` / `sel lat <ini> <fim>` / `sel lon <ini> <fin>` / `sel t <ini> [<fim>]` | Define a **região e o período** usados pelas estatísticas ao longo do tempo (`sel`, **não** `set`). Sem argumentos, mostra a seleção atual — ver seção 2.6. |
 | `sum`/`mean`/`min`/`max`/`p10`..`p90 sel <variavel>` e `acum <estatistica> sel <variavel>` | Estatística da variável **na região do `sel`, instante a instante** (uma linha por arquivo); com `acum`, sobre o campo **acumulado** no tempo. `d ...` plota a curva — ver seção 2.6. |
 | `write csv <arquivo>` | Grava em CSV (separado por vírgula, com cabeçalho) **todas as curvas** (gráficos de linha) ainda na tela: série temporal (`d <var>` em ponto com `set t <ini> <fim>`), curva de `d <estat> sel <var>` ou perfil vertical. Colunas: 1ª = eixo comum (tempo numa série, nível/altura num perfil) e uma coluna por curva, com o nome da legenda. Se faltar extensão, acrescenta `.csv`. Sem gráfico de linha na tela (ou após `c`) dá erro. Ver seção 2.7. |
+| `write animation <variável> <arquivo.gif> [intervalo]` | Grava um **GIF animado** do mapa da variável em cada arquivo/tempo do intervalo de `set t <ini> <fim>`, usando o `set gxout` atual (`shaded`, `contour`, `voronoi` ou `hex`), o nível, `set cmap` etc. `intervalo` = segundos entre quadros; se omitido, usa o de `set tint` (padrão 1 s). Aceita expressões (`write animation t2m-273.15 t2m.gif 0.5`). Sem extensão, acrescenta `.gif`. Exige `set t` com intervalo, lat/lon não fixados num ponto. Ver seção 2.7. |
 | `help` / `help <termo>` | Lista sucinta de **todos os comandos**, agrupados, cada um com um comentário curto. `help <termo>` mostra só o que se relaciona ao termo (`help set`, `help marker`, `help sel`, `help show`…). Funciona sem arquivo aberto. Um guia impresso equivalente está em `refcard.md` (A4 paisagem, 6 painéis). |
 | `debug` / `debug <on\|off>` | Liga/desliga as mensagens na tela. `on` (padrão): tudo aparece, como sempre. `off`: os comandos ficam **silenciosos** (confirmações, avisos, detalhes de `open`/`set`/`d`...); continuam aparecendo os **erros** e a saída dos comandos cuja finalidade é imprimir (`show`, `let`/`sel` sem argumentos, estatísticas escalares como `sum sel t2m`). Sem argumento, mostra o estado. Vale para a sessão (sobrevive a `reinit`); útil em scripts (`run`) e aberturas de milhares de arquivos. |
 | `reinit` | Fecha **todos** os arquivos abertos na sessão, apaga toda a configuração associada a eles (inclusive os caches de triangulação em memória) e volta ao estado inicial, pronto para um novo `open`. Também limpa a janela de gráficos. |
@@ -340,6 +343,8 @@ ele plota depende de `set lat`/`set lon`/`set lev`:
 reais em lat/lon/nível de qualquer forma — regra normal do `d3`, seção 4):
 plota o quadro de cada arquivo do intervalo, em sequência, na mesma janela
 3D, aguardando `set tint` entre cada um.
+
+**Barra de progresso e interrupção:** durante a animação (e durante `write animation`) o terminal mostra uma barra de 0% a 100% na mesma linha, por exemplo `Animacao [###############---------------]  50% (12/24)  Ctrl+C para parar`. Pressione **Ctrl+C** para parar: a animação em tela fica no último quadro desenhado e avisa em que quadro parou; em `write animation` a gravação é cancelada e nenhum arquivo é escrito. A sessão continua normalmente. A barra aparece só em terminal interativo e mesmo com `debug off`.
 
 `set tint <segundos>` define o intervalo, em segundos, entre os quadros da
 animação (`d`/`d3` no modo mapa/3D acima). Padrão: 1 segundo. Fica
@@ -887,6 +892,18 @@ tempo,Soma de t2m,Media de t2m
 - Os valores gravados são os do gráfico (com `set cut` aplicado).
 - Só vale para gráficos de linha **ainda na tela**: depois de `c`, ou com um mapa/corte/Hovmöller, o comando dá erro.
 
+### Animação em GIF (`write animation`)
+
+```
+> set t 1 24
+> set gxout shaded
+> write animation t2m t2m.gif 0.5
+Animacao gravada em 't2m.gif': 24 quadros, 0.5 s entre quadros (gxout shaded).
+```
+
+Cada quadro é um mapa de um arquivo do intervalo de `set t <ini> <fim>`, com o timestamp no título (como na animação em tela). O terceiro argumento é o intervalo entre quadros em segundos; se omitido, vale `set tint` (padrão 1 s). Requer `set gxout shaded|contour|voronoi|hex`, mais de um arquivo aberto, e `set lat`/`set lon` não fixados num único valor (use `set lat` / `set lon` sem argumentos para voltar ao domínio completo). O GIF repete em laço.
+
+
 ---
 ## 2.8 Várias curvas: plot1, plot2…, cores, marcadores e legenda
 
@@ -1083,6 +1100,7 @@ faltando avisa e **mantém a configuração anterior**, sem travar.
 | `set legend title size <n>` | Tamanho da fonte do título da legenda (padrão 10). O texto do título é `draw legend title <texto>`. |
 | `set legend color <cor>` | Cor do texto, do título e da **borda** da caixa (`default` volta ao automático). |
 | `set legend line <espessura>` / `set legend linetype <tipo>` | Espessura e tipo (cheia, tracejada, traço-ponto, pontilhada…, como em `set grid type`) da **borda** da caixa. |
+| `set minmax <variável> <min> <max> [<intervalo>]` | Fixa a escala de cores **da variável** em `d`, `d3` e `write animation` (ex.: `set minmax t2m 280 320 5` → 280 K a 320 K, faixas de 5 K). Sem `<intervalo>`, usa 20 faixas iguais entre min e max. Vale para esse nome de variável (com ou sem `.N`; expressões sem espaços, como `t2m-273.15`, têm chave própria); tem prioridade sobre `set clevs` para ela. Valores fora de min–max ficam sem cor. `set minmax <variável>` remove a escala dela; `set minmax` sem argumentos remove todas (volta ao automático). `reset` não altera. Aparece em `show info`. |
 | `set clevs <v0> <v1> ... <vn>` | Fronteiras exatas dos intervalos de cor/contorno (ex.: `0 100 200 ... 1500`). Usadas em todo tipo de plotagem com barra de cores, inclusive `d3`. Lista vazia volta ao padrão automático (20 níveis). |
 | `set cmap <nome>` | Colormap do matplotlib. |
 | `set pages <linhas> <colunas>` | Grade de painéis da janela 2D (ex.: `set pages 1 2`). Limpa a janela e seleciona o primeiro painel. |
@@ -1118,8 +1136,8 @@ faltando avisa e **mantém a configuração anterior**, sem travar.
 | `set grid type <tipo>` | Tipo de linha da grade: `cheia` (`solid`, `-`), `tracejada` (`dashed`, `--`), `traco-ponto` (`dashdot`, `-.`), `pontilhada` (`dotted`, `:`), `nenhuma`; ou qualquer estilo nomeado do matplotlib (`loosely_dotted`, `densely_dotted`, `loosely_dashed`, `densely_dashed`, `loosely_dashdotted`, `dashdotted`, `densely_dashdotted`, `dashdotdotted`, `loosely_dashdotdotted`, `densely_dashdotdotted`); ou um padrão próprio `dash:<traço>,<espaço>[,...]` em pontos (ex. `dash:6,2,1,2`). Tipo inválido avisa e mantém o anterior. |
 
 Os três comandos `set grid color|size|type` guardam o estilo (vale também para a grade que o programa liga sozinho, como nos perfis verticais e séries de um ponto) e o aplicam na hora se a grade do gráfico atual já estiver ligada; com a grade desligada, só passam a valer no próximo `set grid on`.
-| `set time <n>` (ou `set t <n>`) | Seleciona o arquivo número `<n>` (entre os vários abertos) como o arquivo padrão para as próximas `d`/`d3`/estatísticas sem sufixo `.N` — ver seção 2.1. |
-| `set time <ini> <fim>` (ou `set t <ini> <fim>`) | Com mais de um arquivo aberto: intervalo de arquivos (pelo número de abertura) para a série temporal entre arquivos — ver seção 2.1. |
+| `set time <n>` (ou `set t <n>`) | (aceita também `first`/`last`) Seleciona o arquivo número `<n>` (entre os vários abertos) como o arquivo padrão para as próximas `d`/`d3`/estatísticas sem sufixo `.N` — ver seção 2.1. |
+| `set time <ini> <fim>` (ou `set t <ini> <fim>`) | Cada limite pode ser um número, `first` (primeiro tempo/arquivo) ou `last` (último aberto): `set t 2 last`, `set t first 5`, `set t first last`. Com mais de um arquivo aberto: intervalo de arquivos (pelo número de abertura) para a série temporal entre arquivos — ver seção 2.1. |
 | `set tint <segundos>` | Intervalo, em segundos, entre os quadros da animação da série temporal (`d`/`d3` no modo mapa/3D — seção 2.1). Padrão: 1 segundo. |
 | `set mark <x> <y> <cor> <tamanho> <legenda>` | Mecanismo antigo de acumular pontos de marcação. **Legado**: não é mais usado por `draw mark` (seção 7), que hoje é autossuficiente. |
 | `set fig_dpi <n>` / `set fig_inches <modo>` / `set fig_transparency <bool>` | Resolução/margens/transparência ao salvar (`gxprint`). |
@@ -1312,6 +1330,7 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 | `_malha_assinatura` | Assinatura (nº de células + hash `md5` de lat/lon) da malha da sessão, usada para validar que um novo `open` tem a mesma grade (uso interno — seção 2.1). |
 | `arquivo_sel` | Número do arquivo (entre os abertos) usado por padrão em `d`/`d3`/estatísticas sem sufixo `.N` — selecionado por `set t <n>` (um argumento), padrão `1` — ver seção 2.1. |
 | `time_ini`, `time_fim` | Intervalo de arquivos (pelo número de abertura) selecionado por `set t <ini> <fim>`, para a série temporal entre arquivos — ver seção 2.1. `None` se ainda não definido. |
+| `minmax` | Dicionário `{variável: (min, max, intervalo|None)}` de `set minmax` — vazio = automático. |
 | `tint` | Intervalo, em segundos, entre os quadros da animação da série temporal (`set tint`) — padrão 1.0. |
 | `draw_map_on` | `True` depois de `draw map` (até um `draw map off`): o mapa de fundo é redesenhado automaticamente em todo `d`/`d3` seguinte, inclusive quadro a quadro na animação — ver seção 2.1. |
 | `cbar_label` | Texto definido por `draw label <texto>` (ou `None`/ausente se nunca usado): reaplicado automaticamente toda vez que uma nova barra de cores é criada, inclusive quadro a quadro na animação — ver seção 2.1/7. |

@@ -24,7 +24,9 @@ show timestamp 5  timestamp do arquivo 5
 show times        tempos selecionados
 set t 3           arquivo padrão = 3
 set t 2 9         série/animação 2 a 9
+set t first last  1º ao último (ou 2 last)
 set tint 0.5      s entre quadros
+animação: barra 0–100 %; Ctrl+C para
 d t2m.4           variável do arquivo 4
 ```
 
@@ -53,6 +55,7 @@ d3 temp          3D (faixas em lat, lon, lev)
 c                limpa o gráfico
 gxprint f.png    salva (png, pdf, …)
 write csv f      grava todas as curvas em CSV
+write animation v f.gif [s]  GIF animado (set t i f)
 ```
 
 **O que `d` plota (lat × lon × lev)**
@@ -215,6 +218,8 @@ draw legend
 ```
 set cmap jet|viridis|…
 set clevs 0 10 20 30 40   fronteiras de cor
+set minmax t2m 280 320 5   escala fixa da var
+set minmax   (sem args) = automático
 set background black      fundo (default)
 set bar position U|D|L|R  barra de cores
 ```
