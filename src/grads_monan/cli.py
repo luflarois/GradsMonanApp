@@ -16,6 +16,7 @@ from . import __version__
 from .utils import custom_input, load_history, save_command_to_history
 from .exec_func import exec_cmd, eh_atribuicao
 from .setup_config import ensure_config
+from .history_func import ler_historico, eh_exec_historico, intervalo_exec, motivo_pular
 from .estatistics import NOMES_ESTATISTICA_ESCALAR
 
 # Todo comando de PRIMEIRO NIVEL reconhecido pelo programa (o primeiro
@@ -27,7 +28,7 @@ from .estatistics import NOMES_ESTATISTICA_ESCALAR
 _COMANDOS_CONHECIDOS = {
     "!", "exec", "q", "exit", "quit", "run", "open", "reinit",
     "gxprint", "show", "c", "reset", "load", "set", "draw", "d3", "display", "d",
-    "let", "undef", "sel", "acum", "debug", "write", "help",
+    "let", "undef", "sel", "acum", "debug", "write", "help", "history",
 } | set(NOMES_ESTATISTICA_ESCALAR)
 
 # Marcadores de texto (secao 1 do manual) usados para reconhecer, na saida
@@ -111,6 +112,53 @@ def _executar_com_status(cmd_user, cmd, cmd_split, setup, dataset, ax, cbar, set
     return setup, dataset, ax, cbar, _status_comando(tee.getvalue())
 
 
+def _executar_linha(cmd_user, setup, dataset, ax, cbar, setup_toml):
+    """Executa UMA linha de comando como o prompt faz (reconhecimento do
+    primeiro token + execucao com status). Devolve (setup, dataset, ax,
+    cbar, status) - status 'ok', 'erro' ou 'desconhecido'."""
+    cmd_split = cmd_user.split()
+    if not cmd_split:
+        return setup, dataset, ax, cbar, "ok"
+    cmd = cmd_split[0]
+    if cmd not in _COMANDOS_CONHECIDOS and not eh_atribuicao(cmd_user):
+        print("Comando nao reconhecido: '{0}'.".format(cmd))
+        return setup, dataset, ax, cbar, "desconhecido"
+    return _executar_com_status(cmd_user, cmd, cmd_split, setup, dataset, ax, cbar, setup_toml)
+
+
+def _exec_historico(cmd_split, setup, dataset, ax, cbar, setup_toml, history_file):
+    """'exec <ini> [<fin>]': reexecuta, em ordem, os comandos numerados do
+    historico ('show commands') de <ini> a <fin> (so <ini> se vier um unico
+    numero). Cada comando e mostrado antes de rodar; 'exec', 'history', 'show
+    commands' e 'q' dentro da faixa sao ignorados. Ctrl+C interrompe. Os
+    comandos reexecutados nao sao regravados no historico."""
+    linhas = ler_historico(history_file)
+    faixa = intervalo_exec(cmd_split, len(linhas))
+    if faixa is None:
+        return setup, dataset, ax, cbar, "erro"
+    ini, fin = faixa
+    feitos = erros = 0
+    for n in range(ini, fin + 1):
+        linha = linhas[n - 1]
+        print("[{0}] {1}".format(n, linha))
+        motivo = motivo_pular(linha)
+        if motivo:
+            print("    (ignorado: {0})".format(motivo))
+            continue
+        try:
+            setup, dataset, ax, cbar, status = _executar_linha(linha, setup, dataset, ax, cbar, setup_toml)
+        except KeyboardInterrupt:
+            print("exec interrompido (Ctrl+C) antes do comando {0}.".format(n))
+            break
+        feitos += 1
+        if status != "ok":
+            erros += 1
+        plt.draw()
+        plt.pause(0.001)
+    print("exec: {0} comando(s) executado(s), {1} com erro ou nao reconhecido(s).".format(feitos, erros))
+    return setup, dataset, ax, cbar, ("erro" if erros else "ok")
+
+
 _PROMPT_POR_STATUS = {"ok": "> ", "erro": "E> ", "desconhecido": "?> "}
 
 
@@ -154,16 +202,17 @@ def main():
         except IndexError:
             continue
 
-        if cmd not in _COMANDOS_CONHECIDOS and not eh_atribuicao(cmd_user):
-            print("Comando nao reconhecido: '{0}'.".format(cmd))
-            prompt_atual = "?> "
-            save_command_to_history(cmd_user, history_file)
-            continue
-
-        setup, dataset, ax, cbar, status = _executar_com_status(
-            cmd_user, cmd, cmd_split, setup, dataset, ax, cbar, setup_toml)
+        if eh_exec_historico(cmd_split):
+            # 'exec <ini> [<fin>]': reexecuta comandos do historico (secao 2.9)
+            setup, dataset, ax, cbar, status = _exec_historico(
+                cmd_split, setup, dataset, ax, cbar, setup_toml, history_file)
+        else:
+            setup, dataset, ax, cbar, status = _executar_linha(
+                cmd_user, setup, dataset, ax, cbar, setup_toml)
         prompt_atual = _PROMPT_POR_STATUS[status]
-        save_command_to_history(cmd_user, history_file)
+        if not (cmd == "history" and cmd_split[1:2] == ["clean"]):
+            # 'history clean' esvazia o arquivo: nao regrava a si mesmo nele
+            save_command_to_history(cmd_user, history_file)
         # Forca o redesenho/atualizacao da janela: algumas funcoes de plotagem
         # usam metodos do eixo (ax.contourf, ax.tricontourf, etc.) em vez das
         # funcoes de nivel 'pyplot' (plt.contourf), e essas nao disparam o

@@ -14,6 +14,10 @@ load limits p.csv   polígono p/ "inlimits"
 debug on|off  off = só erros e resultados
 help [cmd]    ajuda (ex.: help sel)
 ! cmd | exec cmd    comando do shell
+show commands     janela do histórico (1..n)
+exec 5 9 | exec 5   reexecuta nº 5 a 9 | só 5
+history backup f  copia o histórico
+history clean     backup n + limpa
 q | exit | quit     sai
 ```
 
@@ -55,7 +59,8 @@ d3 temp          3D (faixas em lat, lon, lev)
 c                limpa o gráfico
 gxprint f.png    salva (png, pdf, …)
 write csv f      grava todas as curvas em CSV
-write animation v f.gif [s]  GIF animado (set t i f)
+write animation v f.gif [s]
+                  GIF de set t i f
 ```
 
 **O que `d` plota (lat × lon × lev)**
@@ -175,17 +180,18 @@ set marker text on|off  valor em cada ponto
 **Curvas e legenda** (plot1, plot2…)
 ```
 cada gráfico de linha = plot1, plot2…
-  cores ANSI 30–37 + marcadores o s D * ^ v < > p h + x
-  em sequência; `c` recomeça em plot1
+  cores ANSI 30–37, marcadores
+  o s D * ^ v < > p h + x em
+  sequência; `c` recomeça em plot1
 set plot 2 color blue|marker D|markersize 9
 set plot 2 linetype tracejada|linesize 2
 set plot 2 label Controle   set plot 2 default
-set legend on|off           legenda do PAINEL atual
-set legend position L|R|U|D esq. dir. acima abaixo
+set legend on|off      legenda do painel
+set legend position L|R|U|D
 draw legend title Título
 set legend title size 12    color red
 set legend line 2           linetype pontilhada
-show plots   tabela Plot # / Variable / Color / Marker
+show plots   tabela Plot#/Variable/Color
 ```
 
 **Grade**

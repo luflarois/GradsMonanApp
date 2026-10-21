@@ -18,6 +18,7 @@ import matplotlib.pyplot as plt
 #My functions
 from .files import file_open, carregar_limites
 from .show_func import cmd_show, show_legend
+from .history_func import cmd_history, cmd_show_commands, eh_exec_historico
 from .plot_func import plot_wind, plot_var, plot_var_3d, clear_plots,save_fig, plot_serie, plot_serie_mapa_3d, plot_limites, plot_estatistica_campo, atualizar_titulo_janela, plot_curva_sel, salvar_csv, gravar_animacao, AnimacaoInterrompida, GXOUT_ANIMACAO, definir_variaveis_plot, atualizar_legendas_figura, definir_estado_legenda, estado_legenda, plots_ativos
 from .draw_func import draw_title, draw_mark, draw_map, draw_label, draw_axis_label
 from .set_func import cmd_set, cmd_sel
@@ -146,7 +147,7 @@ def _nomes_reservados():
     return set(_FUNCOES_EXPR) | {
         "!", "exec", "q", "exit", "quit", "run", "open", "reinit", "gxprint",
         "show", "c", "reset", "load", "set", "draw", "d3", "display", "d",
-        "let", "undef", "sel", "acum", "debug", "write", "help"} | set(NOMES_ESTATISTICA_ESCALAR)
+        "let", "undef", "sel", "acum", "debug", "write", "help", "history"} | set(NOMES_ESTATISTICA_ESCALAR)
 
 def _vars_usuario(setup):
     if not isinstance(setup, dict):
@@ -634,7 +635,9 @@ def _exec_cmd_core(cmd_user, cmd,cmd_split,setup, dataset, ax, cbar, setup_toml)
             _remover_variavel(setup, cmd_split[1])
         return setup, dataset, ax, cbar
 
-    if cmd == "!" or cmd == "exec":
+    if cmd == "exec" and eh_exec_historico(cmd_split):
+        print("Erro: 'exec <ini> [<fin>]' (reexecutar comandos do historico) so vale no prompt, nao dentro de 'run'.")
+    elif cmd == "!" or cmd == "exec":
         os.system(cmd_user[0:])
     elif cmd == "q" or cmd == "exit" or cmd == "quit":
         print("")
@@ -1090,6 +1093,12 @@ def exec_cmd(cmd_user, cmd, cmd_split, setup, dataset, ax, cbar, setup_toml):
         return setup, dataset, ax, cbar
     if cmd == "help":
         cmd_help(cmd_split)
+        return setup, dataset, ax, cbar
+    if cmd == "history":
+        cmd_history(cmd_split)
+        return setup, dataset, ax, cbar
+    if cmd == "show" and len(cmd_split) > 1 and cmd_split[1] == "commands":
+        cmd_show_commands()
         return setup, dataset, ax, cbar
     if _DEBUG["on"] or _comando_imprime_resultado(cmd, cmd_split):
         return _exec_cmd_core(cmd_user, cmd, cmd_split, setup, dataset, ax, cbar, setup_toml)
