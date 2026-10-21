@@ -121,7 +121,11 @@ começam com `Aviso:` são avisos informativos (ex.: ao abrir um arquivo sem
 | `undef <nome>` | Remove uma variável criada com `let`. |
 | `d <variavel>` / `display <variavel>` | Plota uma variável em **2D**, na janela principal — ver sintaxes na seção 3. |
 | `d3 <variavel>` | Plota uma variável em **3D**, numa janela separada — ver seção 4. |
-| `! <comando>` / `exec <comando>` | Executa um comando de shell do sistema operacional. |
+| `! <comando>` / `exec <comando>` | Executa um comando de shell do sistema operacional. (`exec` seguido **só de números** é outro comando — veja abaixo.) |
+| `show commands` | Abre uma **janela editável** com o histórico de comandos numerado (1 até o fim), cursor no último comando e botão **Close** — seção 2.9. |
+| `exec <ini> [<fin>]` | Reexecuta os comandos numerados do histórico, de `<ini>` a `<fin>` (ou só `<ini>`) — seção 2.9. |
+| `history backup <arquivo>` | Copia o histórico para `<arquivo>` (em `~/.config/grads_monan`) — seção 2.9. |
+| `history clean` | Salva o histórico em `history_backup<n>` e o esvazia — seção 2.9. |
 | `q` / `exit` / `quit` | Encerra o programa. |
 
 Qualquer comando (exceto `!`/`exec`, `open`, `reinit`, `run` e `q`/`exit`/`quit`)
@@ -977,6 +981,46 @@ Com **mais de um painel** (`set pages <lin> <col>`), os comandos de **aparência
 Ao trocar de painel, a configuração do que sai é guardada e a do que entra é carregada; um painel ainda não configurado parte dos valores que valiam quando o `set pages` foi dado (então dá para ajustar o estilo **antes** de dividir a janela e ele vale para todos). Os comandos de **dados** (`set lat|lon|lev|t|cut|cmap|clevs|gxout`, `sel`, `let`) continuam globais — valem para o próximo `d` em qualquer painel. `set background` é da janela inteira. Com um painel só, tudo é global, como sempre. `show plots` ganha a coluna `Page` quando há curvas em mais de um painel (a numeração plot1, plot2… é **por painel**).
 
 ---
+## 2.9 Histórico de comandos (`show commands`, `exec`, `history`)
+
+Todo comando dado no prompt é gravado, uma linha por comando, em
+`~/.config/grads_monan/grads_monan.history` (o mesmo arquivo das setas
+para cima/baixo). Quatro comandos trabalham com ele:
+
+```
+> show commands
+Janela do histórico aberta (42 comandos). Use 'exec <ini> [<fin>]' para reexecutar.
+> exec 12 15
+[12] open arq1.nc
+[13] set lat -30 10
+[14] set lon -80 -30
+[15] d t2m
+exec: 4 comando(s) executado(s), 0 com erro ou nao reconhecido(s).
+> exec 15
+> history backup sessao_ontem
+Historico salvo em '/home/voce/.config/grads_monan/sessao_ontem' (47 comandos).
+> history clean
+Historico salvo em '/home/voce/.config/grads_monan/history_backup3' (47 comandos) e limpo.
+```
+
+| Comando | O que faz |
+|---|---|
+| `show commands` | Abre uma **nova janela, editável**, com todos os comandos do histórico, **numerados de 1 até o fim** (um número por comando). O cursor já abre no **último** comando; o botão **Close** (ou a tecla `Esc`) fecha a janela. A janela roda à parte: o prompt continua livre, então dá para olhar os números e digitar `exec` ao mesmo tempo. O texto pode ser editado e copiado à vontade, mas as edições **não** alteram o histórico real. Sem `tkinter` ou sem ambiente gráfico, a lista numerada sai no próprio terminal. |
+| `exec <ini> <fin>` | Executa, em ordem, os comandos de número `<ini>` a `<fin>` (os mesmos números de `show commands`). Cada um é mostrado como `[n] comando` antes de rodar; no fim sai um resumo. |
+| `exec <n>` | Executa só o comando número `<n>`. |
+| `history backup <arquivo>` | Copia o histórico atual para `<arquivo>`. Nome simples → fica em `~/.config/grads_monan`; um caminho (com `/` ou absoluto) é usado como está. Não sobrescreve: se o arquivo já existe, dá erro. |
+| `history clean` | Copia o histórico para `~/.config/grads_monan/history_backup<n>` — `<n>` é o **maior número já existente nesse diretório + 1** (1 se não houver nenhum) — e depois **esvazia** o arquivo de histórico (e as setas do prompt). O próprio `history clean` não é gravado no histórico limpo. Com o histórico já vazio, avisa e não cria backup. |
+
+Detalhes do `exec`:
+
+- **`exec` de shell continua existindo.** `exec <ini> [<fin>]` só vale quando todos os argumentos são **números inteiros** (`exec 5`, `exec 5 9`); qualquer outra forma (`exec ls -l`) segue sendo o comando de shell da seção 2.
+- **Numeração:** conta as linhas **não vazias** do arquivo de histórico, em ordem; é a mesma de `show commands`. Números fora de `1..n`, `0` ou `<ini>` maior que `<fin>` dão erro e nada é executado.
+- **Não reexecuta** (aparece `(ignorado: ...)` e segue para o próximo): `exec <n>`, `history ...`, `show commands` e `q`/`exit`/`quit` — evita recursão e o encerramento inesperado do programa.
+- Um comando com erro ou não reconhecido **não interrompe** a faixa: ela segue até o fim e o resumo conta os que falharam. **Ctrl+C** interrompe antes do próximo comando. O prompt seguinte é `E> ` se algum falhou.
+- Os comandos reexecutados **não são gravados de novo** no histórico (só o `exec` em si).
+- Dentro de um script (`run`), `exec <ini> [<fin>]` dá erro: só vale no prompt.
+
+---
 
 ## 3. Sintaxe do comando `d` / `display` (2D)
 
@@ -1238,7 +1282,8 @@ Criada automaticamente na primeira execução (`grads-monan` ou
 | Arquivo | Conteúdo |
 |---|---|
 | `grads_monan.toml` | Configuração padrão de sessão (seção 9.1). |
-| `grads_monan.history` | Histórico de comandos do prompt (setas para cima/baixo). |
+| `grads_monan.history` | Histórico de comandos do prompt (setas para cima/baixo; `show commands`, `exec`, `history` — seção 2.9). |
+| `history_backup<n>` | Cópias criadas por `history clean` (seção 2.9). |
 | `Continents.*` | Shapefiles do mapa de fundo padrão. |
 | `delaunay_cache.pkl` | **Cache persistente** da triangulação de Delaunay da última malha usada — ver seção 10. |
 | `last_grid.info` | Arquivo texto legível com as **características** da malha desse cache (não o nome do arquivo — ver seção 10). |
@@ -1398,6 +1443,9 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
   `grads_monan.toml` se ainda não existirem (chamado automaticamente pelo
   `main()`).
 - `main()` — ponto de entrada de `grads-monan-setup` (reinicializa a config).
+
+### `history_func.py`
+- `ler_historico`, `texto_numerado`, `arquivo_historico`/`diretorio_config` — leitura do histórico (linhas não vazias; a numeração de `show commands` e de `exec` é a mesma). `eh_exec_historico`, `intervalo_exec`, `motivo_pular` — validação de `exec <ini> [<fin>]`. `cmd_history` (`history backup|clean`, `proximo_backup` = maior `history_backup<n>` + 1), `cmd_show_commands` e `abrir_janela`/`_main_janela` (janela `tkinter` em **processo separado**, `python -m grads_monan.history_func`, para não interferir no loop de eventos do matplotlib; cai no terminal se faltar `tkinter`/display). A execução em si de `exec` fica em `cli.py` (`_exec_historico`, usando `_executar_linha`, o mesmo caminho de uma linha digitada). Seção 2.9.
 
 ### `help_func.py`
 - `AJUDA` / `cmd_help(cmd_split)` — comando `help [termo]`: tabela (grupo → sintaxe, comentário) e filtro por termo. **Ao criar um comando novo, acrescente-o em `AJUDA`** (há um teste que confere que todo comando do `cli.py` aparece na ajuda) e em `refcard.md`.
