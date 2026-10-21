@@ -12,6 +12,7 @@ import io
 import toml
 import matplotlib.pyplot as plt
 
+from . import __version__
 from .utils import custom_input, load_history, save_command_to_history
 from .exec_func import exec_cmd, eh_atribuicao
 from .setup_config import ensure_config
@@ -119,7 +120,7 @@ def main():
     print("|                  GRADS-MONAN APP                   |")
     print("|        (a Grads/Cola clone for MONAN Model)        |")
     print("| Author: Luiz Flávio Rodrigues : luflarois@pm.me    |")
-    print("| Revision: 0.1.0                                    |")
+    print("| Revision: {0:<41}|".format(__version__))
     print("| Licence: \U0001F12F GPLv3 \U0001F12F                                 |")
     print("+----------------------------------------------------+\n")
 

@@ -77,6 +77,12 @@ def _mostrar_sets(setup):
     print("  set cmap:   {0}".format(setup.get("cmap")))
     clevs = setup.get("clevs")
     print("  set clevs:  {0}".format(" ".join("{0:g}".format(c) for c in clevs) if clevs else "automatico"))
+    mm = setup.get("minmax") or {}
+    if mm:
+        for k, (a, b, st) in mm.items():
+            print("  set minmax: {0} {1:g} a {2:g}, intervalo {3}".format(k, a, b, "{0:g}".format(st) if st else "padrao"))
+    else:
+        print("  set minmax: automatico")
     cut = setup.get("cut")
     xr = setup.get("xrange")
     print("  set xrange: {0}".format("{0} a {1}".format(*xr) if xr else "automatico"))

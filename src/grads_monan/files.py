@@ -413,6 +413,7 @@ def file_open(fileName, setup_toml, gridFile=None, setup_anterior=None):
                  "page_col"        : 1,
                  "cut"             : None,
                  "tint"            : 1.0,
+                 "minmax"          : {},
                  "draw_map_on"     : False,
                  "variables"       :variables,
                  "_malha_assinatura": malha_atual,

@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 #My functions
 from .files import file_open, carregar_limites
 from .show_func import cmd_show, show_legend
-from .plot_func import plot_wind, plot_var, plot_var_3d, clear_plots,save_fig, plot_serie, plot_serie_mapa_3d, plot_limites, plot_estatistica_campo, atualizar_titulo_janela, plot_curva_sel, salvar_csv, atualizar_legendas_figura, definir_estado_legenda, estado_legenda, plots_ativos
+from .plot_func import plot_wind, plot_var, plot_var_3d, clear_plots,save_fig, plot_serie, plot_serie_mapa_3d, plot_limites, plot_estatistica_campo, atualizar_titulo_janela, plot_curva_sel, salvar_csv, gravar_animacao, AnimacaoInterrompida, GXOUT_ANIMACAO, definir_variaveis_plot, atualizar_legendas_figura, definir_estado_legenda, estado_legenda, plots_ativos
 from .draw_func import draw_title, draw_mark, draw_map, draw_label, draw_axis_label
 from .set_func import cmd_set, cmd_sel
 from .help_func import cmd_help
@@ -444,6 +444,77 @@ def _dados_sel(setup, expr):
         dados.append({"index": info["index"], "DataDado": info.get("DataDado"), "array": arr})
     return dados
 
+def _escrever_animacao(setup, cmd_user, cmd_split, ax, cbar):
+    """
+    'write animation <variavel> <arquivo.gif> [intervalo]': grava um GIF
+    animado do mapa da variavel nos arquivos/tempos de 'set t <ini> <fim>',
+    com o 'set gxout' atual (shaded, contour, voronoi ou hex). 'intervalo'
+    e o tempo, em segundos, entre quadros; se omitido, usa o de 'set tint'
+    (padrao 1 segundo).
+    """
+    uso = "Uso: write animation <variavel> <arquivo.gif> [intervalo_em_segundos]"
+    if not setup.get("openFile"):
+        print("Erro: nenhum arquivo aberto. Use 'open <arquivo>' antes de 'write animation'.")
+        return ax, cbar
+    args = cmd_split[2:]
+    # O arquivo e o primeiro argumento terminado em .gif (a variavel pode ser
+    # uma expressao com espacos); sem nenhum, e o 2o argumento (+ '.gif').
+    pos = next((i for i, a in enumerate(args) if a.lower().endswith(".gif")), None)
+    if pos is None:
+        if len(args) < 2:
+            print(uso)
+            return ax, cbar
+        pos = 1
+        args[pos] = args[pos] + ".gif"
+    if pos < 1:
+        print(uso)
+        return ax, cbar
+    expr = " ".join(args[:pos]).strip()
+    caminho = args[pos].strip('"').strip("'")
+    extra = args[pos + 1:]
+    if len(extra) > 1:
+        print(uso)
+        return ax, cbar
+    intervalo = setup.get("tint", 1.0)
+    if extra:
+        try:
+            intervalo = float(extra[0])
+        except ValueError:
+            intervalo = -1
+        if intervalo <= 0:
+            print("Erro: o intervalo deve ser um numero positivo de segundos.")
+            return ax, cbar
+    if not _modo_serie_ativo(setup):
+        print("Erro: selecione um intervalo de tempos antes: 'set t <arquivo_inicial> <arquivo_final>' (mais de um arquivo aberto).")
+        return ax, cbar
+    if setup.get("gxout") not in GXOUT_ANIMACAO:
+        print("Erro: 'write animation' requer 'set gxout shaded', 'contour', 'voronoi' ou 'hex' (atual: {0}).".format(setup.get("gxout")))
+        return ax, cbar
+    if setup["lat_min"] == setup["lat_max"] or setup["lon_min"] == setup["lon_max"]:
+        print("Erro: a animacao e de mapa horizontal; nao fixe 'set lat'/'set lon' num valor unico (use 'set lat' / 'set lon' sem argumentos para o dominio completo).")
+        return ax, cbar
+    definir_variaveis_plot(setup, expr)
+    if re.search(r'[\+\-\*/()]', expr):
+        nome_var = expr
+        dados = _dados_serie_temporal_expr(setup, expr)
+    else:
+        nome_var = re.sub(r'\.\d+$', '', expr)
+        if nome_var != expr:
+            print("Aviso: sufixo de arquivo ('.N') ignorado no modo de serie temporal - usa o intervalo de 'set t'.")
+        dados = _dados_serie_temporal(setup, nome_var)
+    if dados is None:
+        return ax, cbar
+    try:
+        ax, cbar, n = gravar_animacao(setup, nome_var, dados, caminho, intervalo, cbar)
+    except AnimacaoInterrompida as e:
+        print("Gravacao interrompida (Ctrl+C) apos {0} quadro(s); nenhum arquivo foi gravado.".format(e.args[0] if e.args else 0))
+        return ax, cbar
+    except Exception as e:
+        print("Erro ao gravar a animacao '{0}': {1}".format(caminho, e))
+        return ax, cbar
+    print("Animacao gravada em '{0}': {1} quadros, {2:g} s entre quadros (gxout {3}).".format(caminho, n, intervalo, setup["gxout"]))
+    return ax, cbar
+
 def _estatistica_sel(setup, cmd_user, cmd_split, inicio, plotar, ax, cbar):
     """
     '<estatistica> sel <variavel>' e 'acum <estatistica> sel <variavel>'
@@ -744,8 +815,10 @@ def _exec_cmd_core(cmd_user, cmd,cmd_split,setup, dataset, ax, cbar, setup_toml)
                 if not os.path.splitext(nome)[1]:
                     nome += ".csv"
                 salvar_csv(nome, setup)
+            elif len(cmd_split) >= 2 and cmd_split[1] == "animation":
+                ax, cbar = _escrever_animacao(setup, cmd_user, cmd_split, ax, cbar)
             else:
-                print("Uso: write csv <nome do arquivo>")
+                print("Uso: write csv <nome do arquivo>  |  write animation <variavel> <arquivo.gif> [intervalo]")
         elif cmd == "sel":
             setup = cmd_sel(cmd_split, setup, cmd_user)
         elif cmd == "acum":
@@ -812,6 +885,7 @@ def _exec_cmd_core(cmd_user, cmd,cmd_split,setup, dataset, ax, cbar, setup_toml)
             if len(cmd_split) < 2:
                 print("Uso: d3 <variavel>")
                 return setup,dataset,ax, cbar
+            definir_variaveis_plot(setup, cmd_user.split(None, 1)[1])
 
             if _modo_serie_ativo(setup):
                 nome_var = re.sub(r'\.\d+$', '', cmd_split[1])
@@ -831,6 +905,7 @@ def _exec_cmd_core(cmd_user, cmd,cmd_split,setup, dataset, ax, cbar, setup_toml)
             if len(cmd_split) < 2:
                 print("Uso: d <variavel>  |  d mag(<var_u>,<var_v>)  |  d <var_u>;<var_v>")
                 return setup,dataset,ax, cbar
+            definir_variaveis_plot(setup, cmd_user.split(None, 1)[1])
 
             # 'd sum|mean|min|max|p10..p90 all|inlimits|point <variavel>':
             # plota o CAMPO espacial da estatistica (reducao so sobre os
