@@ -18,7 +18,7 @@ Installation and operation instructions are available in the [User Manual](userM
 <img width="1707" height="1199" alt="fig1" src="https://github.com/user-attachments/assets/a2d11bdb-d826-4e6e-bcd4-837f069e3cdb" />
 
 
-Please report any bugs you find so that they can be fixed, and new features are very welcome! 🄯
+Please report any **bugs** you find so that they can be fixed, and **new features** are very welcome! 🄯
 
 ---
 
