@@ -1,7 +1,7 @@
 # GradsMonanApp
 
 <p align="center">
-  <img src="docs/grads_monan_logo.png" alt="GradsMonanApp logo" width="280">
+  <img src="./docs/grads_monan_logo.png" alt="GradsMonanApp logo" width="280">
 </p>
 
 ---
