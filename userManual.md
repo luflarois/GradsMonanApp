@@ -343,8 +343,8 @@ ele plota depende de `set lat`/`set lon`/`set lev`:
 | Nem latitude nem longitude fixadas num ponto (mapa horizontal "normal") | **Animação**: plota o mapa de cada arquivo do intervalo, em sequência, na mesma janela, aguardando `set tint <segundos>` entre cada quadro (ver abaixo). O timestamp de cada arquivo aparece anexado ao título do gráfico, quadro a quadro. |
 | Mais de uma das três (lat, lon, nível) como faixa ao mesmo tempo — exceto o caso do mapa acima | Não suportado: avisa e não plota (ambíguo demais para um único gráfico). |
 
-`d3 <variavel>` no modo de série temporal sempre anima (precisa de faixas
-reais em lat/lon/nível de qualquer forma — regra normal do `d3`, seção 4):
+`d3 <variavel>` no modo de série temporal sempre anima (dimensão sem faixa usa
+todos os valores, como no `d3` normal — seção 4):
 plota o quadro de cada arquivo do intervalo, em sequência, na mesma janela
 3D, aguardando `set tint` entre cada um.
 
@@ -1051,7 +1051,7 @@ Assim como no `d`/`display`, `<variavel>` aceita o sufixo `.N` (seção 2.1)
 para escolher de qual arquivo aberto ler — ex.: `d3 t2m.2`. Sem sufixo,
 assume o arquivo 1.
 
-Exige **faixas reais** (não pontos únicos) nas três dimensões:
+Usa a caixa definida por faixas nas três dimensões:
 
 ```
 > set lat <min> <max>
@@ -1060,8 +1060,14 @@ Exige **faixas reais** (não pontos únicos) nas três dimensões:
 > d3 <variavel>
 ```
 
-Sem isso, avisa e não plota. Filtra as células da malha dentro dessa caixa
-lat×lon, e os níveis dentro do intervalo escolhido. O eixo Z segue a mesma
+**Dimensão que não é uma faixa** (ponto único — `set lat 20`, `set lev 5` — ou
+nível não informado) **usa todos os valores disponíveis**: todas as
+latitudes/longitudes do arquivo e todos os níveis da própria variável. Um
+aviso diz o que foi assumido (`d3: 'set lev' nao e uma faixa; usando todos os
+niveis (0 a 54).`; na animação, só no primeiro quadro) e o `set` do usuário
+**não é alterado** — continua valendo para os plots 2D. Assim, `d3 <variavel>`
+sozinho já plota o volume inteiro. Filtra as células da malha dentro da caixa
+lat×lon, e os níveis dentro do intervalo. O eixo Z segue a mesma
 coordenada vertical **da própria variável** (pressão, altura do modelo ou
 profundidade do solo — seção 8.2).
 
@@ -1076,8 +1082,22 @@ usada).
 | `shaded` | Uma superfície triangulada **por nível**, empilhada no eixo Z, colorida pelo valor da variável (não pela altura). |
 
 `set clevs` (faixas de cor discretas) e `set cut <min> <max>` (transparência
-fora do intervalo) funcionam igual ao 2D. Valores exatamente zero também
+fora do intervalo) funcionam igual ao 2D. No `shaded`, a cor de cada face vem dos próprios vértices visíveis depois do corte: com `set cut 40 150` nenhuma face com valores fora de 40–150 aparece (versões anteriores trocavam as cores das faces quando o corte escondia parte da superfície). Valores exatamente zero também
 ficam sempre transparentes no `d3`.
+
+### Continuidade vertical (`set vinterp`)
+
+Os dados têm só alguns níveis do modelo; desenhar uma superfície (ou nuvem de pontos) por nível deixa **vãos** entre as camadas. Por isso o `d3` **interpola linearmente na vertical**, célula a célula, inserindo camadas intermediárias entre cada par de níveis — tanto no valor da variável quanto na coordenada Z (altura, pressão ou índice). O resultado aparece como um volume contínuo.
+
+| Comando | Efeito |
+|---|---|
+| `set vinterp <n>` | `n` camadas interpoladas entre cada par de níveis (`0` a `20`). Com `L` níveis, o `d3` desenha `(L-1)*(n+1)+1` camadas. |
+| `set vinterp on` / `set vinterp` | Valor padrão: **3**. |
+| `set vinterp off` (ou `0`) | Sem interpolação: só os níveis do modelo (comportamento antigo). |
+
+Vale para `shaded` e para o *scatter* (mais pontos). Mais camadas = imagem mais contínua, porém mais pesada para girar com o mouse; por isso há um **teto** (400 superfícies no `shaded`, 3 milhões de pontos no *scatter*): se `n` passar disso, o programa avisa e usa o maior valor que cabe. Valores exatamente zero continuam transparentes, e a interpolação entre um zero e um valor positivo faz a borda esmaecer em vez de cortar abruptamente. `set vinterp` aparece em `show info`.
+
+No `shaded`, **todas as camadas usam a mesma escala de cores** (de `set clevs`/`set minmax`, se definidos; senão, do mínimo ao máximo dos valores visíveis de toda a seleção). Antes, cada superfície era normalizada pela própria faixa de valores, e as cores não eram comparáveis entre os níveis.
 
 `draw map`, quando a janela 3D é a ativa, desenha o mapa de fundo projetado
 na "superfície" da caixa (o nível mais próximo do solo), em vez do
@@ -1145,6 +1165,7 @@ faltando avisa e **mantém a configuração anterior**, sem travar.
 | `set legend color <cor>` | Cor do texto, do título e da **borda** da caixa (`default` volta ao automático). |
 | `set legend line <espessura>` / `set legend linetype <tipo>` | Espessura e tipo (cheia, tracejada, traço-ponto, pontilhada…, como em `set grid type`) da **borda** da caixa. |
 | `set minmax <variável> <min> <max> [<intervalo>]` | Fixa a escala de cores **da variável** em `d`, `d3` e `write animation` (ex.: `set minmax t2m 280 320 5` → 280 K a 320 K, faixas de 5 K). Sem `<intervalo>`, usa 20 faixas iguais entre min e max. Vale para esse nome de variável (com ou sem `.N`; expressões sem espaços, como `t2m-273.15`, têm chave própria); tem prioridade sobre `set clevs` para ela. Valores fora de min–max ficam sem cor. `set minmax <variável>` remove a escala dela; `set minmax` sem argumentos remove todas (volta ao automático). `reset` não altera. Aparece em `show info`. |
+| `set vinterp <n>\|on\|off` | Interpolação vertical do `d3`: `n` camadas intermediárias entre cada par de níveis (padrão 3; `off` = 0) — seção 4. |
 | `set clevs <v0> <v1> ... <vn>` | Fronteiras exatas dos intervalos de cor/contorno (ex.: `0 100 200 ... 1500`). Usadas em todo tipo de plotagem com barra de cores, inclusive `d3`. Lista vazia volta ao padrão automático (20 níveis). |
 | `set cmap <nome>` | Colormap do matplotlib. |
 | `set pages <linhas> <colunas>` | Grade de painéis da janela 2D (ex.: `set pages 1 2`). Limpa a janela e seleciona o primeiro painel. |
@@ -1517,6 +1538,7 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 - `_SIMBOLOS_MARK` — tabela símbolo → `marker`/`fillstyle`.
 
 ### `plot_func.py`
+- `interpolar_vertical(dados, zs, n)` / `_fator_vinterp` — interpolação linear na vertical do `d3` (`set vinterp`, `setup['vinterp']`, padrão `VINTERP_PADRAO` = 3), com tetos `_MAX_CAMADAS_3D`/`_MAX_PONTOS_3D`; no `shaded`, uma `Normalize` global comum a todas as camadas. Seção 4.
 - `resolver_tipo_marcador(txt)` / `_kwargs_marcador(setup)` / `aplicar_marcador_linha(setup, linha)` / `reaplicar_marcadores(setup)` — `set marker ...`: o estilo é aplicado na criação de cada linha (série, curva de `sel`, perfil — que agora usa os marcadores da própria linha, não mais um `scatter`) e reaplicado na hora ao último gráfico de linha na tela.
 - `_formatar_datas_eixo(ax, fig)` — gira os rótulos de data **só do eixo plotado** (antes usava `fig.autofmt_xdate()`, que apagava os rótulos e o título do eixo X dos demais painéis de `set pages`); em grade com mais de uma linha de painéis abre o espaçamento vertical (`hspace`).
 - `CHAVES_PAINEL` / `valor_painel(setup, painel, chave)` / `iniciar_paineis` / `trocar_painel` — configuração de aparência **por painel**: `set pages` guarda a base (`setup['painel_base']`), `set page` salva o painel que sai em `setup['painel_cfg'][(lin, col)]` e carrega o que entra; `estilo_efetivo`/`atualizar_legenda` leem o valor do painel de cada curva.
