@@ -55,7 +55,8 @@ d t2m-273.15     expressão
 d u;v            vento (set gxout vect)
 d temp           perfil, se lat e lon fixos
 d temp           corte, se só lat OU lon fixo
-d3 temp          3D (faixas em lat, lon, lev)
+d3 temp          3D (sem faixa = tudo)
+set vinterp 3    d3: camadas interpoladas (off=0)
 c                limpa o gráfico
 gxprint f.png    salva (png, pdf, …)
 write csv f      grava todas as curvas em CSV

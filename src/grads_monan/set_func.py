@@ -1016,6 +1016,30 @@ def _cmd_set_dispatch(cmd_split, setup, cmd_user):
             cmd_split[2], vmin, vmax,
             "intervalo {0:g}".format(passo) if passo else "intervalo padrao ({0:g}, 20 faixas)".format((vmax - vmin) / 20)))
         return setup
+    elif cmd_split[1] == "vinterp":
+        # set vinterp <n>|on|off  - interpolacao vertical do 'd3' (camadas
+        # intermediarias entre niveis); sem argumento volta ao padrao.
+        from .plot_func import VINTERP_PADRAO
+        uso = "Uso: set vinterp <n>|on|off   (n = camadas intermediarias entre dois niveis, 0 a 20; sem argumento = padrao {0})".format(VINTERP_PADRAO)
+        if len(cmd_split) == 2:
+            setup["vinterp"] = VINTERP_PADRAO
+        elif len(cmd_split) == 3:
+            v = cmd_split[2].lower()
+            if v == "on":
+                setup["vinterp"] = VINTERP_PADRAO
+            elif v == "off":
+                setup["vinterp"] = 0
+            elif v.isdigit() and int(v) <= 20:
+                setup["vinterp"] = int(v)
+            else:
+                print(uso)
+                return setup
+        else:
+            print(uso)
+            return setup
+        n = setup["vinterp"]
+        print("vinterp: {0}".format("desligado (so os niveis do modelo)" if n == 0 else "{0} camada(s) interpolada(s) entre cada par de niveis".format(n)))
+        return setup
     elif cmd_split[1] == "tint":
         # Intervalo (em segundos) entre quadros na animacao da serie
         # temporal entre arquivos (ver 'set t <ini> <fim>' e 'd'/'d3').

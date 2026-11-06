@@ -17,7 +17,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import matplotlib.font_manager as _font_manager
-from matplotlib.colors import BoundaryNorm
+from matplotlib.colors import BoundaryNorm, Normalize
 import matplotlib.tri as mtri
 from matplotlib.collections import PolyCollection
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 - registra a projecao '3d'
@@ -1681,12 +1681,62 @@ def _indice_mais_proximo_estatistica(setup):
     dist = np.sqrt((lat - setup["lat_min"]) ** 2 + (lon - setup["lon_min"]) ** 2)
     return int(np.argmin(dist))
 
+VINTERP_PADRAO = 3          # camadas intermediarias entre dois niveis (set vinterp)
+_MAX_CAMADAS_3D = 400       # teto de superficies no shaded 3D
+_MAX_PONTOS_3D = 3000000    # teto de pontos no scatter 3D
+
+def interpolar_vertical(dados, zs, n):
+    """
+    Interpolacao LINEAR na vertical, celula a celula, inserindo 'n' camadas
+    entre cada par de niveis consecutivos - tanto do valor quanto da
+    coordenada Z (altura, pressao ou indice). 'dados' e 'zs' tem forma
+    (nCelulas, nNiveis); devolve (dados_i, zs_i) com
+    nNiveis_i = (nNiveis-1)*(n+1)+1. NaN em qualquer dos dois niveis vizinhos
+    propaga NaN para as camadas entre eles; n <= 0 devolve os dados como estao.
+    """
+    dados = np.asarray(np.ma.filled(np.ma.asarray(dados, dtype=float), np.nan), dtype=float)
+    zs = np.asarray(np.ma.filled(np.ma.asarray(zs, dtype=float), np.nan), dtype=float)
+    if n <= 0 or dados.shape[1] < 2:
+        return dados, zs
+    f = (np.arange(n + 1, dtype=float) / (n + 1))[None, None, :]
+
+    def _interp(a):
+        a0 = a[:, :-1, None]
+        a1 = a[:, 1:, None]
+        r = a0 + (a1 - a0) * f
+        r[:, :, 0] = a0[:, :, 0]            # niveis originais exatos (mesmo com NaN no vizinho)
+        corpo = r.reshape(a.shape[0], -1)
+        return np.concatenate([corpo, a[:, -1:]], axis=1)
+
+    return _interp(dados), _interp(zs)
+
+def _fator_vinterp(setup, n_cell, n_lev, shaded):
+    """Camadas intermediarias efetivas (set vinterp), respeitando os tetos de
+    desempenho; avisa quando precisa reduzir."""
+    n = setup.get("vinterp", VINTERP_PADRAO)
+    try:
+        n = max(int(n), 0)
+    except (TypeError, ValueError):
+        n = 0
+    pedido = n
+    while n > 0:
+        camadas = (n_lev - 1) * (n + 1) + 1
+        if shaded and camadas > _MAX_CAMADAS_3D:
+            n -= 1
+        elif (not shaded) and camadas * n_cell > _MAX_PONTOS_3D:
+            n -= 1
+        else:
+            break
+    if n < pedido:
+        print("Aviso: set vinterp {0} gera camadas demais para esta selecao; usando {1}.".format(pedido, n))
+    return n
+
 def plot_var_3d(setup, var):
     """
-    Comando 'd3 <variavel>': plota em 3D (scatter), numa janela separada da
-    usada pelo 'd' (2D), o subdominio definido por 'set lat <min> <max>',
-    'set lon <min> <max>' e 'set lev <n1> <n2>' - ou seja, exige faixas
-    reais (nao pontos unicos) nas tres dimensoes.
+    Comando 'd3 <variavel>': plota em 3D, numa janela separada da usada pelo
+    'd' (2D), o subdominio definido por 'set lat <min> <max>', 'set lon <min>
+    <max>' e 'set lev <n1> <n2>'. Dimensao que nao for uma faixa (ponto
+    unico ou nao informada) usa TODOS os valores disponiveis.
 
     O eixo Z segue a mesma hierarquia do corte/perfil 2D (secao 7 do
     manual): pressao (t_iso_levels), senao altura real (zgrid), senao
@@ -1708,15 +1758,25 @@ def plot_var_3d(setup, var):
     levels = np.array(nv["valores"])
     variables = setup.get("variables", {})
 
-    if lat_min == lat_max or lon_min == lon_max or levf - lev < 2:
-        print("Para plotar em 3D, selecione faixas (nao pontos unicos) nas tres dimensoes:")
-        print("  set lat <min> <max>")
-        print("  set lon <min> <max>")
-        print("  set lev <n1> <n2>")
-        return None
-
     if len(var.shape) < 3:
         print("Nao e possivel plotar em 3D: a variavel e bidimensional (sem dimensao de nivel).")
+        return None
+
+    silencioso = setup.get("_d3_silencioso")   # na animacao, avisa so no 1o quadro
+    # Dimensao que nao e uma faixa (ponto unico, ou nivel unico/nao
+    # informado): o 3D usa TODOS os valores disponiveis - sem alterar o
+    # 'set' do usuario, que continua valendo para os plots 2D.
+    if lat_min == lat_max:
+        lat_min, lat_max = float(latitudes.min()), float(latitudes.max())
+        if not silencioso: print("d3: 'set lat' nao e uma faixa; usando todas as latitudes ({0:g} a {1:g}).".format(lat_min, lat_max))
+    if lon_min == lon_max:
+        lon_min, lon_max = float(longitudes.min()), float(longitudes.max())
+        if not silencioso: print("d3: 'set lon' nao e uma faixa; usando todas as longitudes ({0:g} a {1:g}).".format(lon_min, lon_max))
+    if levf - lev < 2:
+        lev, levf = 0, int(var.shape[2])
+        if not silencioso: print("d3: 'set lev' nao e uma faixa; usando todos os niveis (0 a {0}).".format(levf - 1))
+    if levf - lev < 2:
+        print("Nao e possivel plotar em 3D: a variavel tem so um nivel.")
         return None
 
     data = var[time_sel, :, lev:levf]  # (nCells, nLevs)
@@ -1758,6 +1818,12 @@ def plot_var_3d(setup, var):
     cut = setup.get("cut")
     gxout = setup.get("gxout", "contour")
 
+    # Interpolacao vertical ('set vinterp'): camadas intermediarias entre os
+    # niveis, para a nuvem/superficies aparecerem continuas na vertical.
+    n_vi = _fator_vinterp(setup, n_cell_sel, n_lev, gxout == "shaded")
+    data_sel, zs_2d = interpolar_vertical(data_sel, zs_2d, n_vi)
+    n_lev = data_sel.shape[1]
+
     # Reaproveita a mesma janela 3D entre chamadas sucessivas de 'd3' (nao
     # abre uma janela nova a cada vez), sem mexer na figura 2D usada pelo 'd'.
     fig3d, ax3d = _ativar_figura_3d(setup)
@@ -1776,6 +1842,16 @@ def plot_var_3d(setup, var):
         triang_base = mtri.Triangulation(lons_sel, lats_sel)
         alguma_superficie = False
         mappable_ref = None
+        if norm is None:
+            # Mesma escala de cores em TODAS as camadas (antes cada superficie
+            # era normalizada pela propria faixa de valores, e as cores nao
+            # eram comparaveis entre os niveis).
+            vis_all = np.isfinite(data_sel) & (data_sel != 0) & _mask_corte(data_sel, cut)
+            if np.any(vis_all):
+                vmin_g, vmax_g = float(data_sel[vis_all].min()), float(data_sel[vis_all].max())
+                if vmax_g <= vmin_g:
+                    vmax_g = vmin_g + 1.0
+                norm = Normalize(vmin=vmin_g, vmax=vmax_g)
         for k in range(n_lev):
             valores_k = data_sel[:, k]
             visivel_k = (valores_k != 0) & _mask_corte(valores_k, cut)
@@ -1784,10 +1860,16 @@ def plot_var_3d(setup, var):
                 continue  # nenhum triangulo visivel neste nivel
             triang_base.set_mask(mask_tri)
             surf = ax3d.plot_trisurf(triang_base, zs_2d[:, k], cmap=cmap, norm=norm, shade=False, alpha=0.7)
-            cores_tri = valores_k[triang_base.triangles].mean(axis=1)
+            # So os triangulos NAO mascarados viram faces da superficie
+            # (plot_trisurf usa get_masked_triangles); a cor de cada face
+            # tem que vir desses mesmos triangulos, na mesma ordem - antes
+            # usava todos os triangulos e as cores saiam trocadas.
+            cores_tri = valores_k[triang_base.get_masked_triangles()].mean(axis=1)
             surf.set_array(cores_tri)
             if norm is None:
                 surf.autoscale()
+            else:
+                surf.set_norm(norm)
             mappable_ref = surf
             alguma_superficie = True
         if not alguma_superficie:
@@ -2470,6 +2552,7 @@ def plot_serie_mapa_3d(setup, var_name, dados):
             rotulo_tempo = d.get("DataDado") or "arquivo {0}".format(d["index"])
             setup["title"] = (Title_base + "  [" + str(rotulo_tempo) + "]").strip()
             resultado = plot_var_3d(setup, d["array"])
+            setup["_d3_silencioso"] = True
             barra.atualizar(i)
 
             try:
@@ -2486,6 +2569,7 @@ def plot_serie_mapa_3d(setup, var_name, dados):
         barra.fim()
     finally:
         setup["title"] = Title_base
+        setup["_d3_silencioso"] = False
     return resultado
 
 def plot_curva_sel(setup, rotulo_y, dados, valores, descricao_regiao, cbar=None):
