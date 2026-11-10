@@ -221,6 +221,9 @@ Num  Arquivo                                        Timestamp
 - `show files` (ver também seção 5) lista, em forma de tabela, todos os
   arquivos abertos na sessão: número, nome do arquivo e o timestamp
   (data/hora), quando disponível — "desconhecida" caso contrário.
+
+Você pode assistir um vídeo exemplo de abertura de um arquivo em [Assista ao vídeo](https://drive.proton.me/urls/RMDNQK0G14#YaSfg8Gzj4Pf)
+
 - Abrir um novo arquivo **não reseta** as configurações já feitas na sessão
   (`set lev`, `set gxout`, `title`, etc.) — elas continuam valendo; só o(s)
   arquivo(s) adicional(is) entram na lista.
