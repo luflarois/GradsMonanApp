@@ -50,6 +50,8 @@ conda activate GradsMonanApp
 grads-monan
 ```
 
+Você pode assistir um vídeo exemplo de instalação (git, pacotes, etc) em [Assista ao vídeo](https://drive.proton.me/urls/RMDNQK0G14#YaSfg8Gzj4Pf)
+
 **OBSERVAÇÃO IMPORTANTE**: se vc for rodar um branch específico que ainda não recebeu
 pull request ou teve pull request aceito, proceda o checkout para o branch:
 
