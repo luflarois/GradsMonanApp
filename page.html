@@ -1,0 +1,2413 @@
+<!DOCTYPE HTML>
+<html>
+
+<head>
+  <title>Manual do GradsMonanApp</title>
+  <meta name="description" content="website description" />
+  <meta name="keywords" content="website keywords, website keywords" />
+  <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+  <link rel="stylesheet" type="text/css" href="style/style.css" />
+  <style>
+    /* ---- Manual ---- */
+    #manual { line-height: 1.55em; }
+    #manual h1 { margin-top: 0; }
+    #manual h2 { border-bottom: 1px solid #DDD; margin-top: 30px; }
+    #manual h2, #manual h3 { scroll-margin-top: 10px; }
+    #manual pre { box-sizing: border-box; background: #2D2D2D; color: #EEE; padding: 10px; white-space: pre-wrap; overflow-wrap: anywhere;
+                  font: 90% Consolas, 'Courier New', monospace; line-height: 1.4em; margin: 0 0 18px 0; }
+    #manual code { overflow-wrap: anywhere; font-family: Consolas, 'Courier New', monospace; background: #EFEDE6; padding: 0 3px; }
+    #manual pre code { overflow-wrap: anywhere; background: none; padding: 0; color: inherit; }
+    #manual .tbl_wrap { margin: 10px 0 25px 0; }
+    #manual .tbl_wrap table { width: 100%; margin: 0; border-collapse: collapse; }
+    #manual table tr th, #manual table tr td { font-size: 90%; vertical-align: top; }
+    #manual hr { border: 0; border-top: 1px solid #DDD; margin: 20px 0; }
+    #manual mark { background: #FFE066; color: #000; padding: 0; }
+    #manual mark.current { background: #FF8C00; color: #FFF; }
+
+    /* ---- Índice na barra lateral ---- */
+    #manual_toc li { line-height: 1.35em; padding-bottom: 6px; }
+    #manual_toc summary { cursor: pointer; }
+    #manual_toc summary a { display: inline; }
+    #manual_toc .toc_sub { margin: 4px 0 0 0; }
+    #manual_toc .toc_sub li { background: none; padding: 0 0 4px 8px; font-size: 90%; }
+
+    /* ---- Busca ---- */
+    #search_status { margin: 6px 0 4px 0; font-size: 90%; }
+    #search_nav button { font-size: 80%; padding: 2px 4px; cursor: pointer; }
+
+    /* ---- Botão voltar ao índice ---- */
+    #to_top { position: fixed; right: 20px; bottom: 20px; background: #5E4238; color: #FFF;
+              padding: 8px 12px; text-decoration: none; border-radius: 4px; font-size: 90%; }
+    #to_top:hover { background: #B48A7C; }
+  </style>
+  <script>
+    // Busca no manual: realça todas as ocorrências (ignora maiúsculas e acentos)
+    var hits = [], hitPos = -1;
+
+    function fold(c) { return c.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase(); }
+
+    function clearMarks() {
+      var root = document.getElementById('manual');
+      root.querySelectorAll('mark').forEach(function (m) {
+        m.replaceWith(document.createTextNode(m.textContent));
+      });
+      root.normalize();
+      hits = []; hitPos = -1;
+    }
+
+    function manualSearch() {
+      clearMarks();
+      var raw = document.getElementById('search_field').value.trim();
+      var status = document.getElementById('search_status');
+      var nav = document.getElementById('search_nav');
+      if (!raw) { status.textContent = ''; nav.style.display = 'none'; return; }
+      var q = Array.from(raw).map(fold).join('');
+
+      var root = document.getElementById('manual');
+      var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+      var nodes = [], n;
+      while ((n = walker.nextNode())) nodes.push(n);
+
+      nodes.forEach(function (node) {
+        var chars = Array.from(node.nodeValue);
+        // texto "dobrado" e mapa: posição no texto dobrado -> índice do caractere original
+        var folded = '', map = [];
+        chars.forEach(function (c, i) {
+          var f = fold(c);
+          for (var k = 0; k < f.length; k++) { folded += f[k]; map.push(i); }
+        });
+        var ranges = [], from = 0, idx;
+        while ((idx = folded.indexOf(q, from)) !== -1) {
+          ranges.push([map[idx], map[idx + q.length - 1] + 1]);
+          from = idx + q.length;
+        }
+        if (!ranges.length) return;
+        var frag = document.createDocumentFragment(), last = 0;
+        ranges.forEach(function (r) {
+          if (r[0] > last) frag.appendChild(document.createTextNode(chars.slice(last, r[0]).join('')));
+          var m = document.createElement('mark');
+          m.textContent = chars.slice(r[0], r[1]).join('');
+          frag.appendChild(m); hits.push(m);
+          last = r[1];
+        });
+        if (last < chars.length) frag.appendChild(document.createTextNode(chars.slice(last).join('')));
+        node.parentNode.replaceChild(frag, node);
+      });
+
+      if (!hits.length) {
+        status.textContent = 'Nenhuma ocorrência de "' + raw + '".';
+        nav.style.display = 'none';
+        return;
+      }
+      nav.style.display = '';
+      searchStep(1);
+    }
+
+    function searchStep(d) {
+      if (!hits.length) return;
+      if (hitPos >= 0) hits[hitPos].classList.remove('current');
+      hitPos = (hitPos + d + hits.length) % hits.length;
+      var m = hits[hitPos];
+      m.classList.add('current');
+      m.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      document.getElementById('search_status').textContent =
+        'Ocorrência ' + (hitPos + 1) + ' de ' + hits.length;
+    }
+
+    function clearSearch() {
+      clearMarks();
+      document.getElementById('search_field').value = '';
+      document.getElementById('search_status').textContent = '';
+      document.getElementById('search_nav').style.display = 'none';
+    }
+  </script>
+
+</head>
+
+<body>
+  <div id="main">
+    <div id="header">
+      <div id="logo">
+        <img id="logo_img" src="style/logo.png" alt="Logo GRADS-MONAN" />
+        <div id="logo_text">
+          <!-- class="logo_colour", allows you to change the colour of the text -->
+          <h1><a href="index.html">simple<span class="logo_colour">style_horizon</span></a></h1>
+          <h2>Simple. Contemporary. Website Template.</h2>
+        </div>
+      </div>
+      <div id="menubar">
+        <ul id="menu">
+          <!-- put class="selected" in the li tag for the selected page - to highlight which page you're on -->
+          <li><a href="index.html">Home</a></li>
+          <li><a href="examples.html">Examples</a></li>
+          <li class="selected"><a href="page.html">A Page</a></li>
+          <li><a href="another_page.html">Another Page</a></li>
+          <li><a href="contact.html">Contact Us</a></li>
+        </ul>
+      </div>
+    </div>
+    <div id="content_header"></div>
+    <div id="site_content">
+      <div id="sidebar_container">
+        <div class="sidebar">
+          <div class="sidebar_top"></div>
+          <div class="sidebar_item">
+            <!-- insert your sidebar items here -->
+            <h3>Latest News</h3>
+            <h4>New Website Launched</h4>
+            <h5>February 1st, 2014</h5>
+            <p>2014 sees the redesign of our website. Take a look around and let us know what you think.<br /><a href="#">Read more</a></p>
+          </div>
+          <div class="sidebar_base"></div>
+        </div>
+        <div class="sidebar">
+          <div class="sidebar_top"></div>
+          <div class="sidebar_item">
+            <h3>Buscar no manual</h3>
+            <form id="search_form" onsubmit="manualSearch(); return false;">
+              <p>
+                <input class="search" type="text" id="search_field" name="search_field" placeholder="Buscar no manual..." />
+                <input name="search" type="image" style="border: 0; margin: 0 0 -9px 5px;" src="style/search.png" alt="Buscar" title="Buscar" />
+              </p>
+              <p id="search_status"></p>
+              <p id="search_nav" style="display:none;">
+                <button type="button" onclick="searchStep(-1)">&#9650; anterior</button>
+                <button type="button" onclick="searchStep(1)">&#9660; próximo</button>
+                <button type="button" onclick="clearSearch()">limpar</button>
+              </p>
+            </form>
+          </div>
+          <div class="sidebar_base"></div>
+        </div>
+        <div class="sidebar">
+          <div class="sidebar_top"></div>
+          <div class="sidebar_item">
+            <h3>Índice do manual</h3>
+            <ul id="manual_toc">
+              <li><a href="#0-instalação-do-miniconda-anaconda">0. Instalação do miniconda (anaconda)</a></li>
+              <li><details><summary><a href="#1-instalação-do-pacote-gradsmonanapp-e-como-rodar">1. Instalação do pacote GradsMonanApp e como rodar</a></summary><ul class="toc_sub"><li><a href="#11-o-prompt-e-e">1.1 O prompt: &gt;, E&gt; e ?&gt;</a></li></ul></details></li>
+              <li><a href="#2-comandos-do-prompt-nível-superior">2. Comandos do prompt (nível superior)</a></li>
+              <li><details><summary><a href="#21-abrindo-mais-de-um-arquivo-open-show-files-sufixo-n">2.1 Abrindo mais de um arquivo (open, show files, sufixo .N)</a></summary><ul class="toc_sub"><li><a href="#muitos-arquivos-abertos-centenas-ou-milhares">Muitos arquivos abertos (centenas ou milhares)</a></li><li><a href="#referenciando-o-arquivo-de-uma-variável-sufixo-n">Referenciando o arquivo de uma variável (sufixo .N)</a></li><li><a href="#escolhendo-um-arquivo-entre-vários-abertos-d-varn-e-set-t-n">Escolhendo um arquivo entre vários abertos (d &lt;var&gt;.N e set t &lt;n&gt;)</a></li><li><a href="#expressões-aritméticas-no-modo-de-série-temporal">Expressões aritméticas no modo de série temporal</a></li><li><a href="#título-e-rótulo-da-barra-de-cores-entre-quadrosplots">Título e rótulo da barra de cores entre quadros/plots</a></li><li><a href="#título-da-janela-barra-superior">Título da janela (barra superior)</a></li></ul></details></li>
+              <li><a href="#22-área-de-limites-para-estatísticas-load-limits">2.2 Área de limites para estatísticas (load limits)</a></li>
+              <li><details><summary><a href="#23-funções-estatísticas-sum-mean-min-max-p10p90">2.3 Funções estatísticas (sum, mean, min, max, p10..p90)</a></summary><ul class="toc_sub"><li><a href="#o-complemento-point-estatística-sobre-o-perfil-temporalvertical">O complemento point — estatística sobre o perfil temporal/vertical</a></li></ul></details></li>
+              <li><a href="#24-variáveis-do-usuário-let">2.4 Variáveis do usuário (let)</a></li>
+              <li><a href="#25-arquivos-em-grade-regular-latitude-longitude">2.5 Arquivos em grade regular (latitude × longitude)</a></li>
+              <li><details><summary><a href="#26-estatística-ao-longo-do-tempo-numa-região-sel-acum">2.6 Estatística ao longo do tempo numa região (sel, acum)</a></summary><ul class="toc_sub"><li><a href="#estatística-no-tempo-função-sel-variável">Estatística no tempo: &lt;função&gt; sel &lt;variável&gt;</a></li><li><a href="#acumulação-no-tempo-acum">Acumulação no tempo: acum</a></li><li><a href="#show-info-e-show-sel">show info e show sel</a></li></ul></details></li>
+              <li><details><summary><a href="#27-exportando-gráficos-de-linha-write-csv">2.7 Exportando gráficos de linha (write csv)</a></summary><ul class="toc_sub"><li><a href="#animação-em-gif-write-animation">Animação em GIF (write animation)</a></li></ul></details></li>
+              <li><details><summary><a href="#28-várias-curvas-plot1-plot2-cores-marcadores-e-legenda">2.8 Várias curvas: plot1, plot2…, cores, marcadores e legenda</a></summary><ul class="toc_sub"><li><a href="#aparência-por-painel-set-pages-set-page">Aparência por painel (set pages / set page)</a></li></ul></details></li>
+              <li><a href="#29-histórico-de-comandos-show-commands-exec-history">2.9 Histórico de comandos (show commands, exec, history)</a></li>
+              <li><a href="#3-sintaxe-do-comando-d-display-2d">3. Sintaxe do comando d / display (2D)</a></li>
+              <li><details><summary><a href="#4-comando-d3-3d-janela-separada">4. Comando d3 (3D) — janela separada</a></summary><ul class="toc_sub"><li><a href="#continuidade-vertical-set-vinterp">Continuidade vertical (set vinterp)</a></li></ul></details></li>
+              <li><a href="#5-comandos-show-opção">5. Comandos show &lt;opção&gt;</a></li>
+              <li><a href="#6-comandos-set-opção">6. Comandos set &lt;opção&gt;</a></li>
+              <li><details><summary><a href="#7-comandos-draw-opção">7. Comandos draw &lt;opção&gt;</a></summary><ul class="toc_sub"><li><a href="#71-tabela-de-símbolos-draw-mark">7.1 Tabela de símbolos (draw mark)</a></li></ul></details></li>
+              <li><details><summary><a href="#8-como-o-dd3-decide-o-que-plotar-2d">8. Como o d/d3 decide o que plotar (2D)</a></summary><ul class="toc_sub"><li><a href="#81-os-quatro-modos-de-gxout-para-mapa-2d">8.1 Os quatro modos de gxout para mapa 2D</a></li><li><a href="#82-tipos-de-nível-vertical-pressão-altura-do-modelo-solo">8.2 Tipos de nível vertical (pressão, altura do modelo, solo)</a></li></ul></details></li>
+              <li><details><summary><a href="#9-área-de-configuração-configgrads_monan">9. Área de configuração (~/.config/grads_monan/)</a></summary><ul class="toc_sub"><li><a href="#91-grads_monantoml">9.1 grads_monan.toml</a></li></ul></details></li>
+              <li><details><summary><a href="#10-a-triangulação-de-delaunay-e-por-que-ela-é-cacheada">10. A triangulação de Delaunay (e por que ela é cacheada)</a></summary><ul class="toc_sub"><li><a href="#101-o-que-é">10.1 O que é</a></li><li><a href="#102-por-que-isso-importa-aqui">10.2 Por que isso importa aqui</a></li></ul></details></li>
+              <li><a href="#11-dicionário-setup-estado-da-sessão">11. Dicionário setup (estado da sessão)</a></li>
+              <li><details><summary><a href="#12-referência-de-módulos-e-funções">12. Referência de módulos e funções</a></summary><ul class="toc_sub"><li><a href="#clipy">cli.py</a></li><li><a href="#setup_configpy">setup_config.py</a></li><li><a href="#history_funcpy">history_func.py</a></li><li><a href="#help_funcpy">help_func.py</a></li><li><a href="#exec_funcpy">exec_func.py</a></li><li><a href="#filespy-antigo-files_ncpy">files.py (antigo files_nc.py)</a></li><li><a href="#estatisticspy">estatistics.py</a></li><li><a href="#set_funcpy">set_func.py</a></li><li><a href="#show_funcpy">show_func.py</a></li><li><a href="#draw_funcpy">draw_func.py</a></li><li><a href="#plot_funcpy">plot_func.py</a></li><li><a href="#map_funcpy">map_func.py</a></li><li><a href="#grade_regularpy">grade_regular.py</a></li><li><a href="#utilspy">utils.py</a></li></ul></details></li>
+              <li><a href="#13-requisitos-de-arquivo">13. Requisitos de arquivo</a></li>
+            </ul>
+          </div>
+          <div class="sidebar_base"></div>
+        </div>
+      </div>
+      <div id="content">
+        <!-- insert the page content here -->
+        <div id="manual">
+<h1 id="manual-do-gradsmonanapp">Manual do GradsMonanApp</h1>
+<p><strong>Versão 1.1.0</strong></p>
+<p>Um clone do GrADS/COLA para abrir e plotar saídas do modelo <strong>MONAN/MPAS</strong>
+(grade de Voronoi não estruturada), incluindo interpolação, cortes
+verticais, perfis, vento, campos escalares em 2D e 3D — com desempenho
+pensado para malhas grandes (testado até a resolução operacional,
+~5,9 milhões de células).</p>
+<hr />
+<h2 id="0-instalação-do-miniconda-anaconda">0. Instalação do miniconda (anaconda)</h2>
+<p>Caso você não tenha um ambiente virtual previamente instalado, proceda com a instalação do mesmo.</p>
+<pre><code class="language-bash">cd $HOME   # ou sua área de trabalho
+wget https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh
+bash Miniforge3-Linux-x86_64.sh -b -p $HOME/miniforge3
+</code></pre>
+<p>Ative o ambiente:</p>
+<pre><code class="language-bash">source $HOME/miniforge3/bin/activate
+conda init bash      # adiciona ao ~/.bashrc
+</code></pre>
+<p>Faça logout e login de novo, ou rode </p>
+<pre><code class="language-bash">source ~/.bashrc
+</code></pre>
+<h2 id="1-instalação-do-pacote-gradsmonanapp-e-como-rodar">1. Instalação do pacote GradsMonanApp e como rodar</h2>
+<p>Clone o GradsMonanApp</p>
+<pre><code class="language-bash">git clone https://github.com/luflarois/GradsMonanApp.git
+</code></pre>
+<p>Entre no diretório clonado e execute os comandos abaixo:</p>
+<pre><code class="language-bash">conda env create -f environment.yml   # ou: pip install .
+conda deactivate
+conda activate GradsMonanApp
+grads-monan
+</code></pre>
+<p>Você pode assistir um vídeo exemplo de instalação (git, pacotes, etc) em <a href="https://drive.proton.me/urls/RMDNQK0G14#YaSfg8Gzj4Pf">Assista ao vídeo</a></p>
+<p><strong>OBSERVAÇÃO IMPORTANTE</strong>: se vc for rodar um branch específico que ainda não recebeu
+pull request ou teve pull request aceito, proceda o checkout para o branch:</p>
+<pre><code class="language-bash">git checkout &lt;branch_de_interesse&gt;
+</code></pre>
+<p>Na primeira execução, a pasta de configuração (<code>~/.config/grads_monan/</code>) e
+o <code>grads_monan.toml</code> são criados automaticamente — não é preciso rodar
+nenhum script de instalação à parte. Para recriar a configuração do zero:
+<code>grads-monan-setup</code>.</p>
+<p>Ao iniciar, abre um prompt interativo, com histórico de comandos (setas
+para cima/baixo) via <code>readline</code>. Comandos com scripts prontos podem ser
+executados com <code>run &lt;arquivo&gt;</code>.</p>
+<h3 id="11-o-prompt-e-e">1.1 O prompt: <code>&gt;</code>, <code>E&gt;</code> e <code>?&gt;</code></h3>
+<p>O texto do prompt muda a cada linha, conforme o resultado do <strong>comando
+anterior</strong> (o primeiro prompt da sessão é sempre <code>&gt;</code>):</p>
+<div class="tbl_wrap"><table>
+<thead>
+<tr>
+<th>Prompt</th>
+<th>Significado</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>&gt;</code></td>
+<td>O comando anterior <strong>existe e foi executado sem erro</strong>.</td>
+</tr>
+<tr>
+<td><code>E&gt;</code></td>
+<td>O comando anterior <strong>existe, mas a execução falhou</strong> (ex.: argumento inválido, arquivo/variável não encontrado, seleção incompatível).</td>
+</tr>
+<tr>
+<td><code>?&gt;</code></td>
+<td>O comando anterior (ou sub-comando, ex.: <code>set &lt;opção&gt;</code>) <strong>não existe/não é reconhecido</strong>.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Como funciona: o primeiro token da linha (<code>show</code>, <code>set</code>, <code>d</code>, <code>mean</code>, etc.)
+é conferido contra a lista de comandos de primeiro nível conhecidos pelo
+programa — se não bater com nenhum, o prompt vira <code>?&gt;</code> <strong>sem tentar
+executar nada</strong>. Se bater, o comando é executado normalmente (o usuário vê
+a saída na hora, como sempre) e o texto impresso é conferido em busca dos
+marcadores de erro já usados por convenção em todo o programa (<code>Erro:</code>,
+<code>Erro ao</code>, <code>Falha</code>) ou do marcador de sub-comando desconhecido
+(<code>Command not recognized!</code>, usado por <code>set &lt;opção&gt;</code> — seção 6). Se nenhum
+marcador de erro aparecer, o prompt volta a <code>&gt;</code>; se aparecer um marcador
+de erro, vira <code>E&gt;</code>; se aparecer <code>Command not recognized!</code>, vira <code>?&gt;</code>
+(mesmo com o comando de primeiro nível reconhecido, já que o sub-comando em
+si não existe). Uma exceção não tratada durante a execução de um comando
+também é capturada (a sessão não é derrubada) e vira <code>E&gt;</code>. Mensagens que
+começam com <code>Aviso:</code> são avisos informativos (ex.: ao abrir um arquivo sem
+<code>xtime</code>) e <strong>não</strong> contam como erro.</p>
+<hr />
+<h2 id="2-comandos-do-prompt-nível-superior">2. Comandos do prompt (nível superior)</h2>
+<div class="tbl_wrap"><table>
+<thead>
+<tr>
+<th>Comando</th>
+<th>Descrição</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>open &lt;arquivo.nc&gt; [grade.nc]</code></td>
+<td>Abre um arquivo NetCDF de saída do MONAN/MPAS. Pode ser chamado <strong>mais de uma vez na mesma sessão</strong>, para trabalhar com vários arquivos ao mesmo tempo — ver seção 2.1. <code>&lt;arquivo.nc&gt;</code> também aceita <strong>wildcards</strong> (<code>*</code>, <code>?</code>, <code>[...]</code>), abrindo em sequência todos os arquivos que derem match (ordem alfabética dos nomes — ver seção 2.1). O segundo argumento (opcional) é um arquivo de grade externo — necessário quando o arquivo de dados não traz <code>latCell</code>/<code>lonCell</code>/<code>nCells</code> embutidos. Ver seção 10 para o detalhe de cada caso. Qualquer falha (inclusive um arquivo com malha diferente da já aberta) avisa e <strong>mantém a sessão anterior intacta</strong>, sem encerrar o programa.</td>
+</tr>
+<tr>
+<td><code>load limits &lt;arquivo.csv&gt;</code></td>
+<td>Carrega uma área fechada (polígono) a partir de um arquivo de pontos lat/lon, marca quais células da malha aberta caem dentro dela e plota um mapa de conferência — ver seção 2.2.</td>
+</tr>
+<tr>
+<td><code>sum</code>/<code>mean</code>/<code>min</code>/<code>max</code>/<code>p10</code>..<code>p90</code> <code>all\|inlimits\|point &lt;variavel&gt;</code></td>
+<td>Imprime uma estatística (soma, média, mínimo, máximo ou percentil) da variável — em todas as células da malha, só nas de dentro da última área de <code>load limits</code>, ou (<code>point</code>) reduzindo também sobre a faixa de níveis selecionada, mesmo sem um ponto/corte fixado; agregando todos os arquivos do intervalo de <code>set t</code>, quando houver mais de um — ver seção 2.3.</td>
+</tr>
+<tr>
+<td><code>d sum\|mean\|min\|max\|p10..p90 all\|inlimits\|point &lt;variavel&gt;</code></td>
+<td>Como acima, mas plota o resultado <strong>ponto a ponto</strong> (um mapa, perfil ou corte), em vez de reduzir a um único número — ver seção 2.3.</td>
+</tr>
+<tr>
+<td><code>sel</code> / <code>sel lat &lt;ini&gt; &lt;fim&gt;</code> / <code>sel lon &lt;ini&gt; &lt;fin&gt;</code> / <code>sel t &lt;ini&gt; [&lt;fim&gt;]</code></td>
+<td>Define a <strong>região e o período</strong> usados pelas estatísticas ao longo do tempo (<code>sel</code>, <strong>não</strong> <code>set</code>). Sem argumentos, mostra a seleção atual — ver seção 2.6.</td>
+</tr>
+<tr>
+<td><code>sum</code>/<code>mean</code>/<code>min</code>/<code>max</code>/<code>p10</code>..<code>p90 sel &lt;variavel&gt;</code> e <code>acum &lt;estatistica&gt; sel &lt;variavel&gt;</code></td>
+<td>Estatística da variável <strong>na região do <code>sel</code>, instante a instante</strong> (uma linha por arquivo); com <code>acum</code>, sobre o campo <strong>acumulado</strong> no tempo. <code>d ...</code> plota a curva — ver seção 2.6.</td>
+</tr>
+<tr>
+<td><code>write csv &lt;arquivo&gt;</code></td>
+<td>Grava em CSV (separado por vírgula, com cabeçalho) <strong>todas as curvas</strong> (gráficos de linha) ainda na tela: série temporal (<code>d &lt;var&gt;</code> em ponto com <code>set t &lt;ini&gt; &lt;fim&gt;</code>), curva de <code>d &lt;estat&gt; sel &lt;var&gt;</code> ou perfil vertical. Colunas: 1ª = eixo comum (tempo numa série, nível/altura num perfil) e uma coluna por curva, com o nome da legenda. Se faltar extensão, acrescenta <code>.csv</code>. Sem gráfico de linha na tela (ou após <code>c</code>) dá erro. Ver seção 2.7.</td>
+</tr>
+<tr>
+<td><code>write animation &lt;variável&gt; &lt;arquivo.gif&gt; [intervalo]</code></td>
+<td>Grava um <strong>GIF animado</strong> do mapa da variável em cada arquivo/tempo do intervalo de <code>set t &lt;ini&gt; &lt;fim&gt;</code>, usando o <code>set gxout</code> atual (<code>shaded</code>, <code>contour</code>, <code>voronoi</code> ou <code>hex</code>), o nível, <code>set cmap</code> etc. <code>intervalo</code> = segundos entre quadros; se omitido, usa o de <code>set tint</code> (padrão 1 s). Aceita expressões (<code>write animation t2m-273.15 t2m.gif 0.5</code>). Sem extensão, acrescenta <code>.gif</code>. Exige <code>set t</code> com intervalo, lat/lon não fixados num ponto. Ver seção 2.7.</td>
+</tr>
+<tr>
+<td><code>help</code> / <code>help &lt;termo&gt;</code></td>
+<td>Lista sucinta de <strong>todos os comandos</strong>, agrupados, cada um com um comentário curto. <code>help &lt;termo&gt;</code> mostra só o que se relaciona ao termo (<code>help set</code>, <code>help marker</code>, <code>help sel</code>, <code>help show</code>…). Funciona sem arquivo aberto. Um guia impresso equivalente está em <code>refcard.md</code> (A4 paisagem, 6 painéis).</td>
+</tr>
+<tr>
+<td><code>debug</code> / <code>debug &lt;on\|off&gt;</code></td>
+<td>Liga/desliga as mensagens na tela. <code>on</code> (padrão): tudo aparece, como sempre. <code>off</code>: os comandos ficam <strong>silenciosos</strong> (confirmações, avisos, detalhes de <code>open</code>/<code>set</code>/<code>d</code>...); continuam aparecendo os <strong>erros</strong> e a saída dos comandos cuja finalidade é imprimir (<code>show</code>, <code>let</code>/<code>sel</code> sem argumentos, estatísticas escalares como <code>sum sel t2m</code>). Sem argumento, mostra o estado. Vale para a sessão (sobrevive a <code>reinit</code>); útil em scripts (<code>run</code>) e aberturas de milhares de arquivos.</td>
+</tr>
+<tr>
+<td><code>reinit</code></td>
+<td>Fecha <strong>todos</strong> os arquivos abertos na sessão, apaga toda a configuração associada a eles (inclusive os caches de triangulação em memória) e volta ao estado inicial, pronto para um novo <code>open</code>. Também limpa a janela de gráficos.</td>
+</tr>
+<tr>
+<td><code>reset</code></td>
+<td>Volta a seleção de <strong>latitude/longitude/nível/corte (<code>set cut</code>)/arquivo (<code>set t</code>)/região do <code>sel</code></strong> para a condição inicial (toda a malha, nível padrão da configuração, corte desligado, arquivo 1, série/animação desligada) e <strong>limpa</strong> título, rótulo de linha/legenda, rótulo da colorbar, o mapa de fundo automático (<code>draw map</code>) e o gráfico atual — mas <strong>mantém os arquivos abertos</strong> (ao contrário de <code>reinit</code>). Ver detalhes abaixo.</td>
+</tr>
+<tr>
+<td><code>run &lt;script&gt;</code></td>
+<td>Executa, em sequência, os comandos contidos no arquivo de script informado (um comando por linha).</td>
+</tr>
+<tr>
+<td><code>c</code></td>
+<td>Limpa o gráfico ativo no momento. Se o <code>d3</code> foi o último a plotar, limpa a <strong>janela 3D</strong> (recriando o eixo); se foi o <code>d</code>, limpa a janela 2D (só o painel atual, se <code>set pages</code> estiver ativo).</td>
+</tr>
+<tr>
+<td><code>gxprint &lt;arquivo_saida&gt;</code></td>
+<td>Salva a figura atual em disco (PNG, PDF, etc.), usando <code>fig_dpi</code>/<code>fig_inches</code>/<code>fig_transparency</code> do <code>setup</code>.</td>
+</tr>
+<tr>
+<td><code>show &lt;opção&gt;</code></td>
+<td>Consulta informações da sessão/arquivo atual — ver tabela na seção 5.</td>
+</tr>
+<tr>
+<td><code>set &lt;opção&gt; &lt;valores&gt;</code></td>
+<td>Ajusta uma configuração de plotagem/sessão — ver tabela na seção 6.</td>
+</tr>
+<tr>
+<td><code>draw &lt;opção&gt;</code></td>
+<td>Desenha um elemento adicional sobre o gráfico atual — ver tabela na seção 7.</td>
+</tr>
+<tr>
+<td><code>let &lt;nome&gt; = &lt;expressão&gt;</code> / <code>&lt;nome&gt; = &lt;expressão&gt;</code></td>
+<td>Cria uma <strong>variável nova</strong> a partir de uma expressão sobre variáveis do arquivo (ex.: <code>let tg = temp.2/geo.2</code>) — ver seção 2.4. <code>let</code> sozinho lista as definidas.</td>
+</tr>
+<tr>
+<td><code>undef &lt;nome&gt;</code></td>
+<td>Remove uma variável criada com <code>let</code>.</td>
+</tr>
+<tr>
+<td><code>d &lt;variavel&gt;</code> / <code>display &lt;variavel&gt;</code></td>
+<td>Plota uma variável em <strong>2D</strong>, na janela principal — ver sintaxes na seção 3.</td>
+</tr>
+<tr>
+<td><code>d3 &lt;variavel&gt;</code></td>
+<td>Plota uma variável em <strong>3D</strong>, numa janela separada — ver seção 4.</td>
+</tr>
+<tr>
+<td><code>! &lt;comando&gt;</code> / <code>exec &lt;comando&gt;</code></td>
+<td>Executa um comando de shell do sistema operacional. (<code>exec</code> seguido <strong>só de números</strong> é outro comando — veja abaixo.)</td>
+</tr>
+<tr>
+<td><code>show commands</code></td>
+<td>Abre uma <strong>janela editável</strong> com o histórico de comandos numerado (1 até o fim), cursor no último comando e botão <strong>Close</strong> — seção 2.9.</td>
+</tr>
+<tr>
+<td><code>exec &lt;ini&gt; [&lt;fin&gt;]</code></td>
+<td>Reexecuta os comandos numerados do histórico, de <code>&lt;ini&gt;</code> a <code>&lt;fin&gt;</code> (ou só <code>&lt;ini&gt;</code>) — seção 2.9.</td>
+</tr>
+<tr>
+<td><code>history backup &lt;arquivo&gt;</code></td>
+<td>Copia o histórico para <code>&lt;arquivo&gt;</code> (em <code>~/.config/grads_monan</code>) — seção 2.9.</td>
+</tr>
+<tr>
+<td><code>history clean</code></td>
+<td>Salva o histórico em <code>history_backup&lt;n&gt;</code> e o esvazia — seção 2.9.</td>
+</tr>
+<tr>
+<td><code>q</code> / <code>exit</code> / <code>quit</code></td>
+<td>Encerra o programa.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Qualquer comando (exceto <code>!</code>/<code>exec</code>, <code>open</code>, <code>reinit</code>, <code>run</code> e <code>q</code>/<code>exit</code>/<code>quit</code>)
+exige um arquivo aberto; sem isso, o programa avisa e volta ao prompt (<code>reset</code>
+inclusive — sem nenhum arquivo aberto, avisa e não faz nada).</p>
+<p><strong><code>reset</code> vs. <code>reinit</code></strong>: <code>reinit</code> fecha os arquivos e começa do zero (é
+preciso um novo <code>open</code>); <code>reset</code> é mais leve — mantém o(s) arquivo(s) já
+aberto(s) (e tudo o que foi lido deles: variáveis, malha, arquivos
+adicionais de <code>open</code>/<code>set t</code>), só devolvendo à condição inicial a
+<strong>seleção espacial</strong> (<code>set lat</code>/<code>set lon</code>/<code>set lev</code>, que voltam a cobrir
+toda a malha, no nível padrão da configuração; <code>set cut</code>, que é
+desligado; e <code>set t</code>, que volta ao arquivo 1 e desliga a série/animação
+entre arquivos) e <strong>limpando</strong> o que foi desenhado/rotulado (<code>draw title</code>,
+<code>set label</code>, <code>draw label</code>, <code>draw map</code>, e o próprio gráfico na tela —
+equivalente a um <code>c</code>). Útil para recomeçar uma nova análise nos mesmos
+arquivos, sem o custo de reabri-los:</p>
+<pre><code>&gt; set lat -22
+&gt; set lon -46
+&gt; set lev 5
+&gt; set cut -5 5
+&gt; set t 8
+&gt; draw title Perfil em Sao Paulo
+&gt; draw label Vento (m/s)
+&gt; reset
+Reset: lat/lon voltaram para toda a malha, nivel 0, arquivo 1; titulo, rotulos, corte (cut) e mapa limpos. Arquivos abertos mantidos.
+&gt; d t2m
+</code></pre>
+<p><strong>Importante</strong>: antes desta correção, <code>set cut</code> <strong>não</strong> era desligado por
+<code>reset</code> — um corte estreito deixado ligado ao testar uma variável (ex.
+<code>set cut -5 5</code> para uma temperatura em °C) continuava filtrando
+silenciosamente <strong>todas as variáveis seguintes</strong>, mesmo depois de um
+<code>reset</code>, fazendo campos com valores fora dessa faixa (como ozônio em
+ppmv) aparecerem quase todos como <code>NaN</code>/vazios — um mapa com apenas o
+contorno da malha e uma cor quase constante (colorbar num intervalo
+minúsculo, tipo ±1e-14), sem nenhum erro impresso. Se isso já aconteceu
+com você, o <code>reset</code> atualizado resolve; se persistir mesmo com <code>cut</code>
+desligado (<code>show setup</code> mostra <code>'cut': None</code>), pode ser a própria variável
+que não tem dado válido naquele nível específico — experimente <code>d o3</code> em
+outros níveis (<code>set lev &lt;n&gt;</code>) para comparar.</p>
+<p><code>load limits</code> (seção 2.2), <code>set clevs</code>/<code>set gxout</code>/<code>set cmap</code> e as marcas
+de <code>draw mark</code> <strong>não</strong> são alterados por <code>reset</code> (só a seleção espacial —
+incluindo <code>cut</code> e <code>set t</code>, arquivo/série — e os elementos de rótulo/mapa
+listados acima).</p>
+<hr />
+<h2 id="21-abrindo-mais-de-um-arquivo-open-show-files-sufixo-n">2.1 Abrindo mais de um arquivo (<code>open</code>, <code>show files</code>, sufixo <code>.N</code>)</h2>
+<p>O <code>open</code> pode ser chamado várias vezes na mesma sessão, para trabalhar com
+mais de um arquivo ao mesmo tempo (por exemplo, comparar dois horários de
+previsão, ou dois membros de um ensemble):</p>
+<pre><code>&gt; open SP_O_2022071400_2022071400.00.00.x40962L55.nc
+&gt; open SP_O_2022071400_2022071412.00.00.x40962L55.nc
+&gt; show files
+Num  Arquivo                                        Timestamp
+---------------------------------------------------------------
+1    SP_O_2022071400_2022071400.00.00.x40962L55.nc   2022-07-14T00
+2    SP_O_2022071400_2022071412.00.00.x40962L55.nc    2022-07-14T12
+</code></pre>
+<ul>
+<li>O primeiro <code>open</code> bem-sucedido da sessão vira o <strong>arquivo 1</strong>; cada <code>open</code>
+  seguinte que for aceito vira o próximo número em sequência (2, 3, ...).</li>
+<li><strong>Wildcards</strong>: <code>open &lt;padrão&gt;</code> aceita <code>*</code>, <code>?</code> e <code>[...]</code> no nome do
+  arquivo. Nesse caso, todos os arquivos que derem match são abertos em
+  sequência, em ordem alfabética (que normalmente corresponde à ordem
+  cronológica, já que os nomes trazem a data/hora), cada um recebendo o
+  próximo número disponível. A mesma validação de malha (abaixo) vale para
+  cada arquivo do lote: um arquivo do padrão com grade diferente é pulado
+  (com aviso), sem interromper a abertura dos demais. Exemplo:
+  ```<blockquote>
+<p>open SP_O_2022071400_2022071400.00.00.x40962L55.nc  grade.nc
+open SP_O_2022071400_20220714*.nc                   grade.nc
+  ```
+  (o argumento de grade externo, se necessário, é opcional e vale igual
+  para todos os arquivos do padrão.)</p>
+</blockquote>
+</li>
+<li><strong>Mesma malha é obrigatória</strong>: um novo arquivo só é aceito se tiver
+  exatamente a mesma malha (mesmo número de células e mesmas coordenadas
+  <code>latCell</code>/<code>lonCell</code>) do(s) arquivo(s) já aberto(s) — a mesma técnica de
+  assinatura (nº de células + hash) usada no cache de Delaunay (seção 10.2).
+  Se a malha for diferente, o <code>open</code> é <strong>rejeitado</strong>, com uma mensagem de
+  erro, e a sessão anterior (com todos os arquivos já abertos e as
+  configurações feitas até então) permanece <strong>intacta</strong>. Para trocar de
+  malha, rode <code>reinit</code> primeiro.</li>
+<li><code>show files</code> (ver também seção 5) lista, em forma de tabela, todos os
+  arquivos abertos na sessão: número, nome do arquivo e o timestamp
+  (data/hora), quando disponível — "desconhecida" caso contrário.</li>
+</ul>
+<p>Você pode assistir um vídeo exemplo de abertura de um arquivo em <a href="https://drive.proton.me/urls/RMDNQK0G14#YaSfg8Gzj4Pf">Assista ao vídeo</a></p>
+<ul>
+<li>Abrir um novo arquivo <strong>não reseta</strong> as configurações já feitas na sessão
+  (<code>set lev</code>, <code>set gxout</code>, <code>title</code>, etc.) — elas continuam valendo; só o(s)
+  arquivo(s) adicional(is) entram na lista.</li>
+<li><code>reinit</code> fecha todos os arquivos abertos e reinicia a sessão do zero.</li>
+</ul>
+<h3 id="muitos-arquivos-abertos-centenas-ou-milhares">Muitos arquivos abertos (centenas ou milhares)</h3>
+<p>Os arquivos a partir do 2º são abertos <strong>sob demanda</strong>: depois de lidos os
+metadados no <code>open</code>, ficam fechados e são reabertos quando um comando precisa
+deles; no máximo 128 ficam abertos ao mesmo tempo (<code>_MAX_ABERTOS</code> em
+<code>files.py</code>; os menos usados fecham primeiro). Isso evita estourar o limite de
+descritores de arquivo do sistema (erro <code>bit out of range 0 - FD_SETSIZE</code>)
+em <code>open dir/*.nc</code> com milhares de arquivos. O arquivo 1 e a malha ficam
+sempre abertos. Séries sobre muitos arquivos ficam mais lentas (reabertura),
+mas funcionam.</p>
+<h3 id="referenciando-o-arquivo-de-uma-variável-sufixo-n">Referenciando o arquivo de uma variável (sufixo <code>.N</code>)</h3>
+<p>Em qualquer lugar onde uma variável é referenciada para plotagem — <code>d</code>/
+<code>display</code>, <code>d3</code>, <code>mag(...)</code>, a forma vetorial <code>&lt;u&gt;;&lt;v&gt;</code>, ou dentro de uma
+expressão aritmética — ela pode trazer um sufixo <code>.N</code> indicando de qual
+arquivo aberto ler:</p>
+<pre><code>&gt; d t2m         (sem sufixo -&gt; le do arquivo 1)
+&gt; d t2m.1       (equivalente ao de cima, arquivo 1 explicito)
+&gt; d t2m.2       (le a variavel t2m do arquivo 2)
+</code></pre>
+<p>Isso permite comparar diretamente dois arquivos numa mesma expressão
+aritmética — por exemplo, a diferença entre os dois horários abertos:</p>
+<pre><code>&gt; d (t2m.2 - t2m.1)
+</code></pre>
+<p>e também funciona com <code>mag(...)</code> e com a forma vetorial <code>u;v</code>:</p>
+<pre><code>&gt; d mag(u10.2,v10.2)
+&gt; d u10.1;v10.1
+&gt; d3 t2m.2
+</code></pre>
+<p>Se o número do arquivo referenciado não estiver aberto, ou a variável não
+existir naquele arquivo, o programa avisa (com sugestões por similaridade,
+quando aplicável) e <strong>não trava</strong> — nem interrompe a sessão.</p>
+<h3 id="escolhendo-um-arquivo-entre-vários-abertos-d-varn-e-set-t-n">Escolhendo um arquivo entre vários abertos (<code>d &lt;var&gt;.N</code> e <code>set t &lt;n&gt;</code>)</h3>
+<p>Com mais de um arquivo aberto (seção 2.1), há <strong>duas formas equivalentes</strong>
+de escolher qual arquivo <code>d</code>/<code>d3</code> (ou as estatísticas da seção 2.3) usam
+quando não estiver no modo de série/animação (abaixo):</p>
+<ul>
+<li><strong>Pontual, só para uma chamada</strong>: o sufixo <code>.N</code> na própria variável —
+  <code>d o3.8</code> mostra o arquivo número 8 uma única vez, sem afetar chamadas
+  seguintes.</li>
+<li><strong>Persistente, para as próximas chamadas</strong>: <code>set t &lt;n&gt;</code> (ou
+  <code>set time &lt;n&gt;</code>, um único argumento) seleciona o arquivo número <code>&lt;n&gt;</code>
+  como o arquivo <strong>padrão</strong> — toda variável <strong>sem</strong> sufixo <code>.N</code> (<code>d o3</code>,
+  <code>d t2m</code>, <code>mean all o3</code>, etc.) passa a usar esse arquivo, até o próximo
+  <code>set t &lt;n&gt;</code> (ou um <code>reset</code>/<code>reinit</code>, que voltam ao arquivo 1):</li>
+</ul>
+<pre><code>&gt; open SP_O_2022071400_20220714*.nc
+&gt; set lev 45
+&gt; set t 8
+Arquivo 8 selecionado: SP_O_2022071400_2022071407.00.00.x40962L55.nc (2022-07-14T07).
+&gt; d o3
+&gt; d co2
+</code></pre>
+<p>(as duas chamadas de <code>d</code> acima usam o arquivo 8; um sufixo <code>.N</code> explícito,
+se usado numa delas, vale só para aquela chamada, sem mudar a seleção de
+<code>set t</code>.) Sem nenhum <code>set t</code>/sufixo, o padrão é o arquivo 1 (o primeiro
+aberto). <code>set t &lt;n&gt;</code> fora do intervalo de arquivos abertos (ex: <code>set t 30</code>
+com só 24 abertos) avisa com uma mensagem clara e não altera a seleção
+anterior.</p>
+<p><code>set t &lt;arquivo_inicial&gt; &lt;arquivo_final&gt;</code> (<strong>dois</strong> argumentos — inclusive
+iguais, ex: <code>set t 3 3</code>) é um comando <strong>diferente</strong>: liga o modo de
+<strong>série temporal/animação</strong> entre um intervalo de arquivos, descrito no
+restante desta seção — não confundir com <code>set t &lt;n&gt;</code> (um argumento),
+acima, que só troca o arquivo padrão de uma chamada simples.</p>
+<p><strong>As duas formas são modos mutuamente exclusivos</strong> — vale sempre o último
+<code>set t</code> usado: um <code>set t &lt;n&gt;</code> (um argumento) <strong>desliga</strong> o modo de série,
+mesmo que um <code>set t &lt;inicio&gt; &lt;fim&gt;</code> tenha ligado ele antes na mesma
+sessão. Isso é necessário porque, no modo de série, <code>d</code>/<code>d3</code> só aceitam
+<strong>uma</strong> dentre latitude/longitude/nível como faixa (as outras duas
+precisam ser um ponto/nível único — ver a tabela abaixo); pedir um
+arquivo/tempo único com <code>set t &lt;n&gt;</code> normalmente vem acompanhado de um
+corte de verdade (lat/lon fixa <strong>e</strong> uma faixa de níveis, por exemplo),
+que só faz sentido fora do modo de série:</p>
+<pre><code>&gt; set t 1 24          (liga o modo serie/animacao)
+&gt; set t 5              (pontual: desliga a serie, seleciona so o arquivo 5)
+&gt; set lat -22
+&gt; set lev 1 54
+&gt; d o3                 (corte normal no arquivo 5, sem restricao de serie)
+</code></pre>
+<p>A partir daí, <code>d &lt;variavel&gt;</code> (ou <code>d3 &lt;variavel&gt;</code>) — em forma simples ou
+como <strong>expressão aritmética</strong> (mas ainda sem <code>mag(...)</code> nem <code>&lt;u&gt;;&lt;v&gt;</code>) —
+passa a considerar todos os arquivos do intervalo, em vez de um só. O que
+ele plota depende de <code>set lat</code>/<code>set lon</code>/<code>set lev</code>:</p>
+<pre><code>&gt; open SP_O_2022071400_20220714*.nc
+&gt; set t 1 24
+&gt; set lat -22
+&gt; set lon -55
+&gt; set lev 0
+&gt; d t2m-273.15
+</code></pre>
+<div class="tbl_wrap"><table>
+<thead>
+<tr>
+<th>Seleção de lat/lon/nível</th>
+<th>Resultado de <code>d &lt;variavel&gt;</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Latitude <strong>e</strong> longitude fixadas num ponto único</td>
+<td><strong>Gráfico de linha</strong>: valor da variável (na célula mais próxima do ponto) x tempo, um ponto por arquivo do intervalo.</td>
+</tr>
+<tr>
+<td>Latitude, longitude ou nível como uma <strong>faixa única</strong> (as outras duas num ponto/nível fixo)</td>
+<td><strong>Diagrama tipo Hovmöller</strong>: tempo no eixo X, a dimensão em faixa (latitude, longitude ou nível — com a mesma hierarquia pressão/altura/índice da seção 8) no eixo Y, valor da variável na cor, com barra de cores.</td>
+</tr>
+<tr>
+<td>Nem latitude nem longitude fixadas num ponto (mapa horizontal "normal")</td>
+<td><strong>Animação</strong>: plota o mapa de cada arquivo do intervalo, em sequência, na mesma janela, aguardando <code>set tint &lt;segundos&gt;</code> entre cada quadro (ver abaixo). O timestamp de cada arquivo aparece anexado ao título do gráfico, quadro a quadro.</td>
+</tr>
+<tr>
+<td>Mais de uma das três (lat, lon, nível) como faixa ao mesmo tempo — exceto o caso do mapa acima</td>
+<td>Não suportado: avisa e não plota (ambíguo demais para um único gráfico).</td>
+</tr>
+</tbody>
+</table></div>
+<p><code>d3 &lt;variavel&gt;</code> no modo de série temporal sempre anima (dimensão sem faixa usa
+todos os valores, como no <code>d3</code> normal — seção 4):
+plota o quadro de cada arquivo do intervalo, em sequência, na mesma janela
+3D, aguardando <code>set tint</code> entre cada um.</p>
+<p><strong>Barra de progresso e interrupção:</strong> durante a animação (e durante <code>write animation</code>) o terminal mostra uma barra de 0% a 100% na mesma linha, por exemplo <code>Animacao [###############---------------]  50% (12/24)  Ctrl+C para parar</code>. Pressione <strong>Ctrl+C</strong> para parar: a animação em tela fica no último quadro desenhado e avisa em que quadro parou; em <code>write animation</code> a gravação é cancelada e nenhum arquivo é escrito. A sessão continua normalmente. A barra aparece só em terminal interativo e mesmo com <code>debug off</code>.</p>
+<p><code>set tint &lt;segundos&gt;</code> define o intervalo, em segundos, entre os quadros da
+animação (<code>d</code>/<code>d3</code> no modo mapa/3D acima). Padrão: 1 segundo. Fica
+guardado no <code>setup</code> da sessão (seção 11), valendo para toda animação
+seguinte até ser trocado. Exemplo:</p>
+<pre><code>&gt; set tint 0.5
+&gt; d t2m
+</code></pre>
+<p>Um sufixo <code>.N</code> na variável simples (<code>d t2m.2</code>, por exemplo) é <strong>ignorado</strong>
+nesse modo, com um aviso — o arquivo já vem do intervalo de <code>set t</code>.</p>
+<h3 id="expressões-aritméticas-no-modo-de-série-temporal">Expressões aritméticas no modo de série temporal</h3>
+<p><code>d &lt;expressão&gt;</code> também funciona no modo de série temporal — por exemplo,
+para converter unidades ao longo do tempo:</p>
+<pre><code>&gt; set t 1 24
+&gt; d t2m-273.15
+&gt; d (t2m - 273.15) * 1.0
+</code></pre>
+<p>Dentro da expressão, cada nome de variável <strong>sem</strong> sufixo <code>.N</code> é resolvido
+no arquivo do <strong>próprio quadro</strong> (o arquivo daquele instante da série) —
+não sempre no arquivo 1. Um nome <strong>com</strong> sufixo <code>.N</code> explícito continua
+fixo naquele arquivo específico em todos os quadros — útil para calcular
+uma anomalia contra um arquivo de referência:</p>
+<pre><code>&gt; d t2m - t2m.1        (anomalia de cada arquivo em relação ao primeiro)
+</code></pre>
+<h3 id="título-e-rótulo-da-barra-de-cores-entre-quadrosplots">Título e rótulo da barra de cores entre quadros/plots</h3>
+<p><strong>Mapa de fundo e níveis de cor</strong>: <code>set clevs</code> (faixas de cor fixas) já
+vale automaticamente para qualquer plot seguinte, animado ou não — é uma
+configuração de sessão como outra qualquer, e não é resetada em nenhum
+momento. O mapa de fundo (<code>draw map</code>), por sua vez, antes precisava ser
+chamado de novo a cada plot para continuar visível (cada novo <code>d</code>/<code>d3</code>
+reaproveita ou limpa o mesmo eixo); agora, <code>draw map</code> liga um modo
+persistente (ver tabela da seção 7) que o redesenha automaticamente em
+cima de cada plot seguinte — inclusive quadro a quadro na animação — até
+um <code>draw map off</code>.</p>
+<p><strong>Título</strong> (<code>draw title &lt;texto&gt;</code>) e <strong>rótulo da barra de cores</strong>
+(<code>draw label &lt;texto&gt;</code>), definidos antes de um <code>d</code>/<code>d3</code>, também ficam
+<strong>preservados</strong> em todo plot seguinte, incluindo quadro a quadro na
+animação (cada eixo é limpo e redesenhado a cada quadro — sem essa
+persistência, o título/rótulo sumiriam depois do primeiro quadro). No caso
+do título, durante a animação o timestamp de cada arquivo é anexado a ele,
+quadro a quadro, voltando ao texto original ao final:</p>
+<pre><code>&gt; draw title Temperatura a 2m
+&gt; draw label Temp. (C)
+&gt; set t 1 24
+&gt; d t2m-273.15
+</code></pre>
+<p>Não é preciso que já exista um gráfico para usar <code>draw title</code>/<code>draw
+label</code>: se chamados antes de qualquer <code>d</code>/<code>d3</code>, o texto fica guardado e
+passa a valer automaticamente assim que o primeiro gráfico (com barra de
+cores, no caso do <code>draw label</code>) for criado.</p>
+<h3 id="título-da-janela-barra-superior">Título da janela (barra superior)</h3>
+<p>Não confundir com <code>draw title</code> (o título <strong>do gráfico</strong>, acima): o
+título da <strong>janela</strong> do matplotlib (a barra no topo da janela do
+sistema operacional) já é atualizado automaticamente ao <strong>abrir</strong> o(s)
+arquivo(s) (<code>open</code>, seção 2.1 — cobrindo toda a malha, no nível padrão,
+sem precisar de nenhum <code>set</code> antes), e sempre que a seleção de
+tempo/arquivo (<code>set t</code>), latitude (<code>set lat</code>), longitude (<code>set lon</code>) ou
+nível (<code>set lev</code>) muda depois disso — inclusive por um <code>reset</code>. Formato:</p>
+<pre><code>GradsMonan: &lt;timestamp&gt;,&lt;latitude(s)&gt;,&lt;longitude(s)&gt;,L&lt;nível(is)&gt;
+</code></pre>
+<ul>
+<li><strong>Timestamp</strong>: o do arquivo/tempo atualmente selecionado (o primeiro
+  do intervalo, no modo de série/animação; o arquivo pontual de <code>set t
+  &lt;n&gt;</code>, fora dele).</li>
+<li><strong>Latitude(s)</strong>: um valor único, sempre com <strong>2 casas decimais</strong> (ex.
+  <code>22.00S</code>) quando um ponto está selecionado, ou uma faixa
+  <code>x&lt;suf&gt;-y&lt;suf&gt;</code> (ex. <code>10.00S-5.00N</code>) quando há uma faixa — sufixo <code>S</code>
+  para negativo (sul), <code>N</code> para positivo (norte).</li>
+<li><strong>Longitude(s)</strong>: mesma ideia (2 casas decimais), sufixo <code>W</code> para
+  negativo (oeste), <code>E</code> para positivo (leste) — ex. <code>60.00W-30.00W</code>.</li>
+<li><strong>Nível(is)</strong>: sempre prefixado com <code>L</code> — um único índice (ex. <code>L3</code>),
+  ou <code>L&lt;inicial&gt;-&lt;final&gt;</code> (ambos inclusivos, ex. <code>L1-45</code>) quando há uma
+  faixa de níveis.</li>
+</ul>
+<p>Exemplo:</p>
+<pre><code>&gt; open SP_O_2022071400_2022071404.00.00.x40962L55.nc
+&gt; set t 5
+&gt; set lat -22
+&gt; set lon -60 -30
+&gt; set lev 1 45
+</code></pre>
+<p>deixa o título da janela como
+<code>GradsMonan: 2022-07-14T04,22.00S,60.00W-30.00W,L1-45</code>.</p>
+<hr />
+<h2 id="22-área-de-limites-para-estatísticas-load-limits">2.2 Área de limites para estatísticas (<code>load limits</code>)</h2>
+<p><code>load limits &lt;arquivo.csv&gt;</code> carrega uma <strong>área fechada</strong> (polígono) a
+partir de um arquivo de texto/CSV com uma lista de pontos — um por linha,
+no formato <code>latitude&lt;separador&gt;longitude</code> — e marca quais células da
+malha aberta (os mesmos centros de <code>latCell</code>/<code>lonCell</code>) caem <strong>dentro</strong>
+dela. Essa seleção fica pronta para ser reaproveitada pelas próximas
+funções estatísticas dentro da área (média, mínimo, máximo, etc.), que
+não precisarão refazer esse cálculo.</p>
+<p>O separador entre latitude e longitude, em cada linha, pode ser vírgula,
+ponto-e-vírgula ou espaço (e combinações deles, como <code>", "</code>). Linhas
+vazias e comentários (iniciados por <code>#</code>) são ignorados; uma linha que não
+resulte em exatamente dois números (por exemplo, um cabeçalho <code>lat,lon</code>)
+é ignorada com um aviso, sem interromper a leitura do restante do
+arquivo. O polígono não precisa repetir o primeiro ponto no final — ele é
+sempre tratado como fechado (o último ponto liga de volta ao primeiro).</p>
+<p>Exemplo de arquivo (<code>bacia.csv</code>):</p>
+<pre><code>lat,lon
+-22.0,-55.0
+-22.0,-45.0
+-15.0,-45.0
+-15.0,-55.0
+</code></pre>
+<p>Uso:</p>
+<pre><code>&gt; open SP_O_2022071400_2022071400.00.00.x40962L55.nc
+&gt; load limits bacia.csv
+Limites carregados de 'bacia.csv': 4 ponto(s) no poligono, 8532 celula(s) da malha dentro da area.
+</code></pre>
+<p>O comando plota, na hora, um <strong>mapa de conferência</strong>: o contorno do
+polígono lido (linha preta) e todos os centros de célula da malha,
+destacando em vermelho os que caíram dentro da área (os demais aparecem
+em cinza claro, só para dar contexto espacial) — assim dá para checar
+visualmente se a área foi lida corretamente antes de rodar qualquer
+estatística sobre ela. <code>show limits</code> (seção 5) resume o que está
+carregado sem replotar o mapa.</p>
+<p>O resultado fica guardado no <code>setup</code> da sessão (seção 11):
+<code>limits_poligono</code>, <code>limits_mask</code>, <code>limits_indices</code>, <code>limits_arquivo</code>. Um
+novo <code>load limits</code> <strong>substitui</strong> a área anterior; se o arquivo informado
+não existir, não puder ser lido, ou não tiver pelo menos 3 pontos válidos,
+a área anterior (se houver) é <strong>preservada</strong> — o comando avisa e não
+altera nada.</p>
+<hr />
+<h2 id="23-funções-estatísticas-sum-mean-min-max-p10p90">2.3 Funções estatísticas (<code>sum</code>, <code>mean</code>, <code>min</code>, <code>max</code>, <code>p10</code>..<code>p90</code>)</h2>
+<p>O módulo <code>estatistics.py</code> reúne funções estatísticas sobre a variável (ou
+uma <strong>expressão aritmética</strong> sobre variáveis, ex: <code>t2m-273.15</code> — seção
+3), usando <strong>exatamente a mesma seleção espacial que <code>d</code>/<code>d3</code> usariam
+para plotar agora mesmo</strong> (seção 8), conforme <code>set lat</code>/<code>set lon</code>/<code>set
+lev</code>:</p>
+<ul>
+<li><strong>Mapa horizontal</strong> (nem latitude nem longitude fixadas num único
+  ponto — o caso comum): todas as células da malha, no <strong>nível único</strong>
+  selecionado (<code>set lev &lt;nivel&gt;</code>).</li>
+<li><strong>Ponto</strong> (<code>set lat &lt;x&gt;</code> + <code>set lon &lt;y&gt;</code>, fixando os dois no mesmo
+  valor): a estatística vira um <strong>perfil vertical</strong>, calculado na célula
+  mais próxima desse ponto, ao longo da <strong>faixa de níveis</strong> selecionada
+  (<code>set lev &lt;nivel_inicial&gt; &lt;nivel_final&gt;</code>).</li>
+<li><strong>Corte</strong> (só <code>set lat</code> OU só <code>set lon</code> fixada, sem a outra): a
+  estatística usa todas as células da malha, também ao longo da faixa de
+  níveis selecionada.</li>
+</ul>
+<p>Nos modos <strong>ponto</strong> e <strong>corte</strong>, se nenhuma faixa de níveis tiver sido
+definida explicitamente (<code>set lev &lt;inicial&gt; &lt;final&gt;</code>) — ou seja, <code>set
+lev</code> só selecionou um nível único —, a estatística usa exatamente esse
+nível (comportamento igual ao do modo mapa, um só nível por vez).</p>
+<p>Há duas formas de usar cada estatística:</p>
+<ul>
+<li><strong>Escalar</strong> (<code>&lt;estatística&gt; all|inlimits|point &lt;variável&gt;</code>, sem <code>d</code> na
+  frente): reduz a variável a <strong>um único número</strong>, impresso na tela antes
+  do próximo prompt; nenhum gráfico é alterado.</li>
+<li><strong>Espacial</strong> (<code>d &lt;estatística&gt; all|inlimits|point &lt;variável&gt;</code>): calcula
+  o resultado célula a célula (ou nível a nível, nos modos ponto/corte) e
+  plota exatamente como <code>d</code>/<code>d3</code> plotariam a própria variável agora —
+  mapa, perfil vertical ou corte vertical, conforme a seleção acima
+  (mesmas regras de <code>gxout</code>, mapa de fundo, título e colorbar do <code>d</code>
+  normal). Exceção: com <code>point</code> e nenhum ponto/corte fixado (mapa
+  horizontal) mais uma faixa de níveis selecionada, não há um mapa nem um
+  corte bem definido para plotar (ver complemento <code>point</code>, abaixo) — a
+  forma espacial avisa e não plota; use a forma escalar nesse caso.</li>
+</ul>
+<h3 id="o-complemento-point-estatística-sobre-o-perfil-temporalvertical">O complemento <code>point</code> — estatística sobre o perfil temporal/vertical</h3>
+<p>Além de <code>all</code>/<code>inlimits</code>, todo comando de estatística aceita o
+complemento <strong><code>point</code></strong> (ex.: <code>max point &lt;variável&gt;</code>, <code>d sum point
+&lt;variável&gt;</code>): pede explicitamente a estatística sobre o <strong>perfil
+temporal e vertical</strong> da seleção atual — reduzindo também sobre a <strong>faixa
+de níveis</strong> selecionada (<code>set lev &lt;inicial&gt; &lt;final&gt;</code>), mesmo quando nem
+latitude nem longitude estão fixadas (mapa horizontal). Isso permite
+combinar <strong>qualquer variação</strong> dos quatro componentes de seleção
+(latitude, longitude, nível, tempo) — por exemplo:</p>
+<ul>
+<li>Um ponto (lat e lon fixos) e um único nível, com vários arquivos/tempos
+  (<code>set t &lt;inicio&gt; &lt;fim&gt;</code>).</li>
+<li>Um único tempo, uma latitude e várias longitudes (corte), ou uma lat e
+  uma lon (ponto).</li>
+<li>Um único tempo, com vários níveis, no mapa inteiro (nem lat nem lon
+  fixa) — combinação que só <code>point</code> cobre, já que <code>all</code>/<code>inlimits</code> olham
+  para um nível só nesse caso.</li>
+</ul>
+<p>Nos modos <strong>ponto</strong> e <strong>corte</strong>, <code>point</code> se comporta exatamente como
+<code>all</code> (a única diferença que <code>point</code> acrescenta é ativa apenas no modo
+mapa, sem lat/lon fixados). No <strong>modo mapa com uma faixa genuína de
+níveis selecionada</strong>, <code>point</code> reduz também sobre os níveis — um modo
+interno chamado aqui de "mapa com níveis": a forma escalar (<code>mean point
+u10</code>, por exemplo) funciona normalmente, reduzindo células, níveis e
+tempos a um único número; a forma espacial (<code>d mean point u10</code>) <strong>não
+tem como plotar</strong> esse resultado (não há uma direção de corte definida
+sem lat ou lon fixada) e avisa em vez de arriscar um gráfico incorreto —
+use a forma escalar, ou fixe <code>set lat</code>/<code>set lon</code> (num único ponto, para
+um perfil, ou só um dos dois, para um corte) para poder plotar.</p>
+<p>Em ambas as formas, <strong>quando houver mais de um arquivo aberto com um
+intervalo definido por <code>set t &lt;arquivo_inicial&gt; &lt;arquivo_final&gt;</code></strong>
+(seção 2.1), a estatística usa <strong>todos os arquivos (tempos) desse
+intervalo</strong> — cada arquivo conta como um "tempo" a mais na conta. Sem
+<code>set t</code> ativo (ou com um só arquivo aberto), a estatística usa só o
+arquivo/instante atual, como antes (o sufixo <code>.N</code> de arquivo, seção 2.1,
+continua funcionando nesse caso — inclusive dentro de uma expressão, ex:
+<code>mean all (t2m.1 - t2m.2)</code>; dentro do modo de série, o sufixo é ignorado
+com aviso — quem manda é o intervalo de <code>set t</code>, igual ao <code>d</code>/<code>d3</code> em
+série).</p>
+<p>As estatísticas disponíveis:</p>
+<div class="tbl_wrap"><table>
+<thead>
+<tr>
+<th>Comando</th>
+<th>O que calcula</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>sum</code></td>
+<td>Soma.</td>
+</tr>
+<tr>
+<td><code>mean</code></td>
+<td>Média.</td>
+</tr>
+<tr>
+<td><code>min</code></td>
+<td>Mínimo.</td>
+</tr>
+<tr>
+<td><code>max</code></td>
+<td>Máximo.</td>
+</tr>
+<tr>
+<td><code>p10</code>, <code>p20</code>, ..., <code>p90</code></td>
+<td>Percentis 10 a 90 (de 10 em 10).</td>
+</tr>
+</tbody>
+</table></div>
+<p>Todas as estatísticas acima têm as duas formas (escalar e espacial) e os
+três complementos abaixo.</p>
+<p>E as três variantes de seleção espacial, para todas as estatísticas acima:</p>
+<ul>
+<li><code>all</code> — usa <strong>todas</strong> as células da malha aberta (ou, no modo ponto, o
+  próprio ponto selecionado, sem restrição).</li>
+<li><code>inlimits</code> — usa apenas as células dentro da <strong>última área carregada</strong>
+  com <code>load limits</code> (seção 2.2). Sem nenhuma área carregada, o comando
+  avisa e não calcula nada. Nos modos mapa/corte, na forma espacial
+  (<code>d ... inlimits ...</code>), as células de fora da área ficam com <strong>NaN</strong> no
+  mapa/corte (não aparecem plotadas, igual a um <code>set cut</code>); no modo
+  ponto, <code>inlimits</code> apenas confere se o ponto selecionado cai dentro da
+  área — se não cair, avisa e não calcula nada (não há mais células para
+  restringir).</li>
+<li><code>point</code> — estatística sobre o perfil temporal/vertical (ver seção
+  acima): igual a <code>all</code> nos modos ponto/corte; no modo mapa, reduz
+  também sobre a faixa de níveis selecionada, quando houver uma (a forma
+  espacial não plota esse caso — só a escalar).</li>
+</ul>
+<p>Se a variável (ou expressão) for bidimensional (sem dimensão de nível,
+ex: <code>t2m</code>), a seleção de ponto/corte não se aplica (mesma regra do
+<code>d</code>/<code>d3</code> — só faz sentido para variáveis com nível) e o nível não aparece
+na mensagem. Se for tridimensional (ex: <code>u10</code>), a estatística usa o
+nível (mapa) ou a faixa de níveis (ponto/corte) atualmente selecionados,
+e a mensagem indica qual foi usado.</p>
+<p>Exemplos (forma escalar, mapa horizontal):</p>
+<pre><code>&gt; open SP_O_2022071400_2022071400.00.00.x40962L55.nc
+&gt; sum all t2m
+Soma de 't2m' (todos os 8532 ponto(s) da malha): 2394871.5
+
+&gt; mean all t2m-273.15
+Media de 't2m-273.15' (todos os 8532 ponto(s) da malha): 12.4
+
+&gt; set lev 5
+&gt; mean all u10
+Media de 'u10' (todos os 8532 ponto(s) da malha, nivel 5 = 850.0 hPa): 4.92
+
+&gt; load limits bacia.csv
+Limites carregados de 'bacia.csv': 4 ponto(s) no poligono, 812 celula(s) da malha dentro da area.
+&gt; max inlimits t2m
+Maximo de 't2m' (dentro dos limites, 812 celula(s)): 305.1
+
+&gt; p90 all t2m
+Percentil 90 de 't2m' (todos os 8532 ponto(s) da malha): 301.4
+</code></pre>
+<p>Exemplo com vários arquivos (série temporal, seção 2.1) — a estatística
+passa a considerar todos os tempos do intervalo:</p>
+<pre><code>&gt; open SP_O_2022071400_2022071400.00.00.x40962L55.nc
+&gt; open SP_O_2022071400_2022071406.00.00.x40962L55.nc
+&gt; open SP_O_2022071400_2022071412.00.00.x40962L55.nc
+&gt; set t 1 3
+&gt; mean all t2m
+Media de 't2m' (todos os 8532 ponto(s) da malha, 3 tempo(s)): 296.7
+</code></pre>
+<p>Exemplo com um <strong>ponto</strong> selecionado (perfil vertical) e um <strong>corte</strong>
+(só latitude fixa):</p>
+<pre><code>&gt; set lat -22
+&gt; set lon -46
+&gt; set lev 0 19
+&gt; mean all u10
+Media de 'u10' (ponto lat -22, lon -46, niveis 0-19): 3.7
+
+&gt; set lon -180 180
+&gt; max all u10
+Maximo de 'u10' (todos os 8532 ponto(s) da malha, niveis 0-19): 41.2
+</code></pre>
+<p>Exemplo da forma espacial — plota a média (ponto a ponto, ao longo dos 3
+tempos acima) como um mapa comum; com um ponto ou corte selecionados
+(como acima), plota um perfil ou corte vertical no lugar do mapa. <code>sum</code>
+também tem forma espacial:</p>
+<pre><code>&gt; d mean all t2m
+&gt; d min inlimits t2m
+&gt; d sum all t2m
+</code></pre>
+<p>Exemplo do complemento <code>point</code> — perfil temporal/vertical, em qualquer
+combinação de ponto/lon/lat/nível/tempo:</p>
+<pre><code>&gt; set lat -22
+&gt; set lon -46
+&gt; set lev 3
+&gt; set t 1 3
+&gt; mean point u10
+Media de 'u10' (ponto lat -22, lon -46, 3 tempo(s), niveis 3-3): 4.1
+
+&gt; set lat -90 90
+&gt; set lon -180 180
+&gt; set lev 0 19
+&gt; mean point u10
+Media de 'u10' (todos os 8532 ponto(s) da malha, 3 tempo(s), niveis 0-19): 3.8
+&gt; d mean point u10
+Aviso: nao e possivel plotar a estatistica espacial com uma faixa de niveis
+sem fixar latitude e/ou longitude (perfil ou corte) - use a forma escalar
+('mean point &lt;variavel&gt;'), ou fixe 'set lat'/'set lon' num unico ponto
+(perfil) ou so um dos dois (corte).
+</code></pre>
+<hr />
+<h2 id="24-variáveis-do-usuário-let">2.4 Variáveis do usuário (<code>let</code>)</h2>
+<p>Guardam o resultado de uma expressão para uso posterior, como se fossem
+variáveis do arquivo:</p>
+<pre><code>&gt; let tg = temp.2/geo.2          # as duas variáveis do arquivo 2
+&gt; tg = (temp/geo)-273.15         # o 'let' é opcional
+&gt; let vel = sqrt(u**2 + v**2)
+&gt; d tg                           # plota como qualquer variável
+&gt; let                            # lista as definidas
+&gt; undef tg                       # remove
+</code></pre>
+<ul>
+<li><strong>Expressão</strong>: variáveis do arquivo (com sufixo <code>.N</code> opcional, como em
+  <code>d t2m.2 - t2m.1</code>), outras variáveis criadas com <code>let</code>, números, <code>+ - * / **</code>,
+  parênteses e as funções <code>sqrt</code>, <code>abs</code>, <code>log</code>, <code>log10</code>, <code>exp</code>, <code>sin</code>, <code>cos</code>,
+  <code>tan</code> e <code>mag(u,v)</code>.</li>
+<li><strong>Instantâneo</strong>: o valor é calculado no momento do <code>let</code>, com os arquivos
+  indicados pelos sufixos <code>.N</code> (sem sufixo, o arquivo de <code>set t &lt;n&gt;</code>). Mudar
+  <code>set t</code> depois não altera a variável; para recalcular, repita o <code>let</code>.
+  No modo de série (<code>set t &lt;ini&gt; &lt;fim&gt;</code>), porém, a expressão guardada é
+  reavaliada em cada arquivo do intervalo.</li>
+<li><strong>Níveis</strong>: a variável herda o tipo de nível (pressão, solo, altura — seção
+  8.2) das variáveis usadas e o <code>set lev</code> é conferido contra ele ao plotar.</li>
+<li>Usável em <code>d</code>, <code>d3</code>, <code>d</code> com expressões (<code>d tg*2</code>), estatísticas (<code>mean all tg</code>)
+  e em outros <code>let</code>. Não aceita sufixo <code>.N</code> (<code>d tg.2</code> dá erro).</li>
+<li>Erros (nada é definido): variável inexistente, nome reservado (comandos e
+  funções, ex. <code>let d = 1</code>), expressão vazia, ou resultado que não seja um
+  campo da malha (ex. <code>let w = 5</code>). Se o nome coincidir com uma variável do
+  arquivo, avisa que ela passa a ficar oculta.</li>
+<li><code>show variables</code> lista também as variáveis do <code>let</code>. <code>reset</code> as mantém;
+  <code>reinit</code> as apaga.</li>
+</ul>
+<h2 id="25-arquivos-em-grade-regular-latitude-longitude">2.5 Arquivos em grade regular (latitude × longitude)</h2>
+<p>Além da malha de Voronoi do MPAS/MONAN, o <code>open</code> aceita arquivos já
+interpolados para uma <strong>grade regular lat/lon</strong> (como as saídas
+pós-processadas <code>MONAN_DIAG_G_POS_*</code>). O programa identifica o formato
+<strong>pelo conteúdo do arquivo</strong> — não pelo nome:</p>
+<ul>
+<li>não tem <code>nCells</code>, <code>latCell</code> nem <code>lonCell</code>;</li>
+<li>tem uma variável-coordenada 1-D de <strong>latitude</strong> e outra de <strong>longitude</strong>
+  (dimensão com o mesmo nome da variável), reconhecidas por <code>standard_name</code>
+  (<code>latitude</code>/<code>longitude</code>), unidades em graus (<code>degree_north</code>/<code>degree_east</code>)
+  ou, na falta delas, pelo nome (<code>latitude</code>, <code>lat</code>, <code>longitude</code>, <code>lon</code>…).</li>
+</ul>
+<pre><code>&gt; open MONAN_DIAG_G_POS_GFS_2023010100_2023123015.00.00.x163842L18.nc
+Grade regular detectada: 361 latitudes x 721 longitudes = 260281 pontos (tratados como celulas).
+Niveis de pressao lidos da coordenada 'level' (18 niveis).
+Tempo lido da variavel 'Time': 2023-12-30_15:00:00
+</code></pre>
+<p>Como funciona: cada ponto da grade vira uma "célula" (ordem latitude-maior)
+e as variáveis passam a ter o formato <code>(Time, nCells)</code> ou <code>(Time, nCells,
+nível)</code> — o nível vertical sempre por último, mesmo em variáveis como
+<code>acc_etrani(Time, level, latitude, longitude)</code>. O arquivo não é alterado.
+Todo o resto funciona igual ao da malha de Voronoi: <code>d</code>, <code>d3</code>, perfil,
+corte, séries de tempo, <code>let</code>, estatísticas, <code>set lat/lon/lev</code> etc.</p>
+<p>Detalhes:
+- <strong>Níveis</strong>: uma dimensão genérica como <code>level</code> cujo variável-coordenada
+  tem unidade de pressão (<code>Pa</code>, <code>hPa</code>, <code>mb</code>) ou <code>standard_name =
+  air_pressure</code> é tratada como <strong>pressão</strong> (eixo em hPa, invertido) — ver
+  seção 8.2.
+- <strong>Tempo</strong>: sem <code>xtime</code>, a data vem da variável <code>Time</code> quando ela tem
+  unidades CF (<code>hours since AAAA-MM-DD hh:mm:ss</code>; também <code>seconds</code>,
+  <code>minutes</code>, <code>days</code>).
+- <strong>Variáveis sem tempo</strong> (ex.: <code>ter(latitude, longitude)</code>) aparecem como
+  <code>(1, nCells)</code> e plotam normalmente.
+- <strong>Vários arquivos</strong>: valem as regras da seção 2.1 — todos precisam ter a
+  mesma grade (latitudes e longitudes idênticas).
+- <strong>Longitudes</strong> em 0–360 são normalizadas para (−180, 180], como na malha
+  do MPAS.
+- <code>show info</code> informa o tipo de grade (regular ou Voronoi).
+- <strong>Desempenho</strong>: a interpolação usa a triangulação de Delaunay dos pontos
+  (seção 10), calculada uma vez por grade (≈4 s para 361×721) e guardada em
+  cache. <code>gxout hex</code> (polígonos das células) não está disponível, pois a
+  grade regular não traz a conectividade do MPAS — use <code>shaded</code>, <code>contour</code>
+  ou <code>voronoi</code>.
+- Grades <strong>curvilíneas</strong> (latitude/longitude 2-D) não são tratadas como
+  regulares.</p>
+<h2 id="26-estatística-ao-longo-do-tempo-numa-região-sel-acum">2.6 Estatística ao longo do tempo numa região (<code>sel</code>, <code>acum</code>)</h2>
+<p>Os comandos <code>sel</code> (atenção: é <code>sel</code>, <strong>não</strong> <code>set</code>) definem uma <strong>região
+geográfica</strong> e um <strong>período</strong>; combinados com uma função estatística
+(seção 2.3) e a palavra <code>sel</code>, produzem uma <strong>curva da estatística no
+tempo</strong> — um valor por arquivo/instante aberto.</p>
+<div class="tbl_wrap"><table>
+<thead>
+<tr>
+<th>Comando</th>
+<th>Efeito</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>sel</code></td>
+<td>Mostra a seleção atual (e quantas células ela contém).</td>
+</tr>
+<tr>
+<td><code>sel lat &lt;ini&gt; &lt;fin&gt;</code></td>
+<td>Faixa de latitude (−90 a 90, <code>ini &lt;= fin</code>).</td>
+</tr>
+<tr>
+<td><code>sel lon &lt;ini&gt; &lt;fin&gt;</code></td>
+<td>Faixa de longitude. Aceita 0–360 ou −180–180; se <code>ini &gt; fin</code> a faixa <strong>cruza o meridiano</strong> (ex. <code>sel lon 350 10</code> = −10 a 10; <code>sel lon 170 -170</code> cruza a linha de data).</td>
+</tr>
+<tr>
+<td><code>sel t &lt;ini&gt; [&lt;fim&gt;]</code></td>
+<td>Arquivos (pelo número de <code>show files</code>) incluídos na curva. Sem <code>sel t</code>, todos os abertos.</td>
+</tr>
+<tr>
+<td><code>sel lat\|lon\|t clear</code></td>
+<td>Limpa só aquela parte.</td>
+</tr>
+<tr>
+<td><code>sel clear</code> (ou <code>off</code>, <code>reset</code>)</td>
+<td>Limpa toda a seleção.</td>
+</tr>
+</tbody>
+</table></div>
+<p>O <code>reset</code> também limpa o <code>sel</code>. Cada parte não definida significa "tudo"
+(todo o domínio / todos os arquivos abertos). O <code>sel</code> é <strong>independente</strong> do
+<code>set lat</code>/<code>set lon</code>/<code>set t</code>, que continuam controlando o que <code>d</code> plota
+como mapa.</p>
+<h3 id="estatística-no-tempo-função-sel-variável">Estatística no tempo: <code>&lt;função&gt; sel &lt;variável&gt;</code></h3>
+<pre><code>&gt; sel lat 10 30
+&gt; sel lon 10 30
+&gt; sum sel t2m
+Soma de t2m (lat 10 a 30, lon 10 a 30, t: todos os arquivos abertos; 25 celula(s)):
+  arquivo   1  2024-01-01T0   50.0
+  arquivo   2  2024-01-01T6   100.0
+  arquivo   3  2024-01-01T12  150.0
+&gt; d sum sel t2m          # plota a curva (eixo x = data/hora)
+&gt; d mean sel t2m-273.15  # aceita expressão e variáveis do let
+</code></pre>
+<ul>
+<li>Funções: <code>sum</code>, <code>mean</code>, <code>min</code>, <code>max</code>, <code>p10</code>..<code>p90</code> (as mesmas da seção 2.3).</li>
+<li>Sem <code>d</code>: imprime a tabela. Com <code>d</code>: plota a curva, com o eixo x em
+  data/hora (como as séries da seção 2.1), o eixo y <code>"&lt;Função&gt; de &lt;var&gt;"</code>
+  e a região no título.</li>
+<li>Variável 3D: usa o nível de <code>set lev</code>; com faixa (<code>set lev 0 2</code>), reduz
+  também sobre os níveis da faixa.</li>
+<li>A variável pode ser nome, <code>nome.N</code>, expressão ou variável do <code>let</code>.</li>
+<li>Erros: região sem nenhuma célula, <code>sel t</code> fora dos arquivos abertos,
+  variável inexistente. Com apenas um instante, avisa que não há curva.</li>
+</ul>
+<h3 id="acumulação-no-tempo-acum">Acumulação no tempo: <code>acum</code></h3>
+<p><code>acum</code> é um <strong>pré-comando</strong>: antes de aplicar a estatística, acumula
+(soma ao longo do tempo) o campo <strong>célula a célula</strong>, ignorando <code>NaN</code>; só
+depois reduz a região.</p>
+<pre><code>&gt; acum sum sel t2m
+Soma de t2m (acumulado no tempo) (lat 10 a 30, lon 10 a 30, t: todos os arquivos abertos; 25 celula(s)):
+  arquivo   1  2024-01-01T0   50.0
+  arquivo   2  2024-01-01T6   150.0
+  arquivo   3  2024-01-01T12  300.0
+&gt; d acum sum sel chuva   # curva da chuva acumulada na região
+</code></pre>
+<p><code>acum</code> exige <code>sel</code> no comando (<code>d acum t2m</code> dá erro de uso).</p>
+<h3 id="show-info-e-show-sel"><code>show info</code> e <code>show sel</code></h3>
+<p><code>show info</code> agora mostra, além do arquivo e das variáveis, os blocos
+<strong>"Configuração atual (set)"</strong> (lat, lon, lev, t, gxout, cmap, clevs, cut,
+map, grade…) e <strong>"Seleção atual (sel)"</strong> (<code>sel lat</code>, <code>sel lon</code>, <code>sel t</code> e
+nº de células na região). <code>show sel</code> mostra apenas o segundo bloco.</p>
+<hr />
+<h2 id="27-exportando-gráficos-de-linha-write-csv">2.7 Exportando gráficos de linha (<code>write csv</code>)</h2>
+<pre><code>&gt; sel lat 10 30
+&gt; sel lon 10 30
+&gt; d sum sel t2m
+&gt; d mean sel t2m
+&gt; write csv estatisticas
+CSV gravado em 'estatisticas.csv' (3 linhas, 2 curva(s); colunas: tempo, Soma de t2m, Media de t2m).
+</code></pre>
+<p>Conteúdo de <code>estatisticas.csv</code>:</p>
+<pre><code>tempo,Soma de t2m,Media de t2m
+2024-01-01T0,50.0,2.0
+2024-01-01T6,100.0,4.0
+2024-01-01T12,150.0,6.0
+</code></pre>
+<ul>
+<li><strong>Todas as curvas</strong> do gráfico ativo são gravadas (plot1, plot2… — seção 2.8), uma coluna para cada, na ordem em que foram plotadas. O cabeçalho usa o texto da legenda (<code>set plot &lt;n&gt; label</code>); nomes repetidos recebem o sufixo <code>#&lt;n&gt;</code>.</li>
+<li><strong>Série temporal / curva de <code>sel</code>:</strong> 1ª coluna = tempo (eixo X).</li>
+<li><strong>Perfil vertical:</strong> 1ª coluna = nível ou altura (eixo Y, na unidade do eixo). Perfis com níveis diferentes são <strong>alinhados</strong> pela 1ª coluna (ordenada), com célula vazia onde a curva não tem o nível.</li>
+<li>Curvas de <strong>tipos diferentes</strong> no mesmo gráfico (ex.: série e perfil) saem em <strong>blocos</strong> separados por uma linha em branco, cada um com seu cabeçalho.</li>
+<li>Os valores gravados são os do gráfico (com <code>set cut</code> aplicado).</li>
+<li>Só vale para gráficos de linha <strong>ainda na tela</strong>: depois de <code>c</code>, ou com um mapa/corte/Hovmöller, o comando dá erro.</li>
+</ul>
+<h3 id="animação-em-gif-write-animation">Animação em GIF (<code>write animation</code>)</h3>
+<pre><code>&gt; set t 1 24
+&gt; set gxout shaded
+&gt; write animation t2m t2m.gif 0.5
+Animacao gravada em 't2m.gif': 24 quadros, 0.5 s entre quadros (gxout shaded).
+</code></pre>
+<p>Cada quadro é um mapa de um arquivo do intervalo de <code>set t &lt;ini&gt; &lt;fim&gt;</code>, com o timestamp no título (como na animação em tela). O terceiro argumento é o intervalo entre quadros em segundos; se omitido, vale <code>set tint</code> (padrão 1 s). Requer <code>set gxout shaded|contour|voronoi|hex</code>, mais de um arquivo aberto, e <code>set lat</code>/<code>set lon</code> não fixados num único valor (use <code>set lat</code> / <code>set lon</code> sem argumentos para voltar ao domínio completo). O GIF repete em laço.</p>
+<hr />
+<h2 id="28-várias-curvas-plot1-plot2-cores-marcadores-e-legenda">2.8 Várias curvas: plot1, plot2…, cores, marcadores e legenda</h2>
+<p>Cada <strong>gráfico de linha</strong> (série temporal em ponto, curva de <code>d &lt;estat&gt; sel &lt;var&gt;</code> ou perfil vertical) recebe, na ordem em que é plotado, o número <strong>plot1, plot2, plot3…</strong>, guardado em <code>setup['plots']</code>. Sem <code>c</code> entre dois <code>d</code>, as curvas se acumulam no mesmo gráfico; <strong><code>c</code> (ou <code>reset</code>) recomeça a contagem em plot1</strong>.</p>
+<p><strong>Sequência automática</strong>
+- <strong>Cores</strong> — as 8 cores ANSI padrão (<code>ESC[1;30m</code> a <code>ESC[1;37m</code>): preto, vermelho, verde, amarelo, azul, magenta, ciano, branco; depois da 8ª recomeça. (O branco aparece pouco sobre fundo branco — ajuste com <code>set plot &lt;n&gt; color</code>.)
+- <strong>Marcadores</strong> — <code>o s D * ^ v &lt; &gt; p h + x</code>, e recomeça na 13ª curva.</p>
+<pre><code>&gt; sel lat 10 30
+&gt; sel lon 10 30
+&gt; d sum sel t2m        # plot1: preto, círculo
+&gt; d mean sel t2m       # plot2: vermelho, quadrado
+&gt; d max sel t2m        # plot3: verde, losango
+&gt; show plots
+</code></pre>
+<p><strong>Ajuste por curva</strong> — <code>set plot &lt;n&gt; ...</code> (vale para a curva na tela e, se ainda não existe, para quando for plotada):</p>
+<pre><code>set plot 2 color blue          cor da linha (e do marcador)
+set plot 2 marker D            tipo do marcador (auto = sequência)
+set plot 2 markercolor green   cor do marcador
+set plot 2 markersize 10
+set plot 2 linetype tracejada  cheia tracejada traco-ponto pontilhada nenhuma …
+set plot 2 linesize 2.5
+set plot 2 label Controle      texto na legenda
+set plot 2 default             volta ao automático
+</code></pre>
+<p>Prioridade: <code>set plot &lt;n&gt;</code> &gt; <code>set marker ...</code> (global: <code>set marker type D</code> força o tipo em <strong>todas</strong> as curvas; <code>set marker off</code> apaga todos) &gt; sequência automática. <code>set plot_line</code> é legado e não afeta as curvas numeradas.</p>
+<p><strong>Legenda</strong> — <strong>cada painel tem a sua</strong> (<code>set pages</code>): <code>set legend on|off</code>, <code>set legend position</code> e <code>draw legend title</code> valem para o <strong>painel selecionado</strong> (<code>set page &lt;lin&gt; &lt;col&gt;</code>); os demais painéis não mudam. A caixa fica <strong>fora</strong> do gráfico (por padrão à esquerda) e só o eixo do próprio painel encolhe para dar lugar a ela, então legendas de painéis diferentes nunca se sobrepõem. As opções de estilo (<code>color</code>, <code>line</code>, <code>linetype</code>, <code>title size</code>) valem para todas. <code>set pages</code> recomeça as legendas.</p>
+<pre><code>set legend on                     liga (off desliga)
+set legend position R             L esquerda, R direita, U acima, D abaixo
+draw legend title Minhas curvas   título da caixa
+set legend title size 12          tamanho do título
+set legend color red              texto, título e borda
+set legend line 2                 espessura da borda
+set legend linetype pontilhada    tipo da borda
+</code></pre>
+<p>Cada entrada é <strong>só o nome da variável</strong> (ou o <code>label</code> definido por <code>set plot &lt;n&gt; label</code>). <code>draw legend</code> com curvas na tela equivale a <code>set legend on</code>.</p>
+<p><strong><code>show plots</code></strong> mostra, no prompt, uma tabela com as curvas na tela:</p>
+<pre><code>&gt; show plots
+Plot #  Variable      Color  Marker
+-----------------------------------
+1       Soma de t2m   black  o
+2       Media de t2m  red    s
+</code></pre>
+<p>(<code>Color</code> usa o nome ANSI da sequência automática, ou o que você definiu em <code>set plot &lt;n&gt; color</code>.) <code>write csv</code> grava <strong>todas</strong> as curvas (seção 2.7).</p>
+<hr />
+<h3 id="aparência-por-painel-set-pages-set-page">Aparência por painel (<code>set pages</code> / <code>set page</code>)</h3>
+<p>Com <strong>mais de um painel</strong> (<code>set pages &lt;lin&gt; &lt;col&gt;</code>), os comandos de <strong>aparência</strong> valem <strong>só para o painel selecionado</strong> (<code>set page &lt;lin&gt; &lt;col&gt;</code>); os demais painéis não mudam:</p>
+<ul>
+<li>marcadores e curvas: <code>set marker ...</code>, <code>set plot &lt;n&gt; ...</code>;</li>
+<li>legenda: <code>set legend ...</code>, <code>draw legend title</code>;</li>
+<li>eixos: <code>set xrange|yrange|xdiv|ydiv|xtics|ytics</code>;</li>
+<li>grade: <code>set grid color|size|type</code>;</li>
+<li>textos: <code>draw title</code>, <code>draw xlabel|ylabel</code>, <code>set title|xlabel|ylabel font|color|size|style</code>.</li>
+</ul>
+<p>Ao trocar de painel, a configuração do que sai é guardada e a do que entra é carregada; um painel ainda não configurado parte dos valores que valiam quando o <code>set pages</code> foi dado (então dá para ajustar o estilo <strong>antes</strong> de dividir a janela e ele vale para todos). Os comandos de <strong>dados</strong> (<code>set lat|lon|lev|t|cut|cmap|clevs|gxout</code>, <code>sel</code>, <code>let</code>) continuam globais — valem para o próximo <code>d</code> em qualquer painel. <code>set background</code> é da janela inteira. Com um painel só, tudo é global, como sempre. <code>show plots</code> ganha a coluna <code>Page</code> quando há curvas em mais de um painel (a numeração plot1, plot2… é <strong>por painel</strong>).</p>
+<hr />
+<h2 id="29-histórico-de-comandos-show-commands-exec-history">2.9 Histórico de comandos (<code>show commands</code>, <code>exec</code>, <code>history</code>)</h2>
+<p>Todo comando dado no prompt é gravado, uma linha por comando, em
+<code>~/.config/grads_monan/grads_monan.history</code> (o mesmo arquivo das setas
+para cima/baixo). Quatro comandos trabalham com ele:</p>
+<pre><code>&gt; show commands
+Janela do histórico aberta (42 comandos). Use 'exec &lt;ini&gt; [&lt;fin&gt;]' para reexecutar.
+&gt; exec 12 15
+[12] open arq1.nc
+[13] set lat -30 10
+[14] set lon -80 -30
+[15] d t2m
+exec: 4 comando(s) executado(s), 0 com erro ou nao reconhecido(s).
+&gt; exec 15
+&gt; history backup sessao_ontem
+Historico salvo em '/home/voce/.config/grads_monan/sessao_ontem' (47 comandos).
+&gt; history clean
+Historico salvo em '/home/voce/.config/grads_monan/history_backup3' (47 comandos) e limpo.
+</code></pre>
+<div class="tbl_wrap"><table>
+<thead>
+<tr>
+<th>Comando</th>
+<th>O que faz</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>show commands</code></td>
+<td>Abre uma <strong>nova janela, editável</strong>, com todos os comandos do histórico, <strong>numerados de 1 até o fim</strong> (um número por comando). O cursor já abre no <strong>último</strong> comando; o botão <strong>Close</strong> (ou a tecla <code>Esc</code>) fecha a janela. A janela roda à parte: o prompt continua livre, então dá para olhar os números e digitar <code>exec</code> ao mesmo tempo. O texto pode ser editado e copiado à vontade, mas as edições <strong>não</strong> alteram o histórico real. Sem <code>tkinter</code> ou sem ambiente gráfico, a lista numerada sai no próprio terminal.</td>
+</tr>
+<tr>
+<td><code>exec &lt;ini&gt; &lt;fin&gt;</code></td>
+<td>Executa, em ordem, os comandos de número <code>&lt;ini&gt;</code> a <code>&lt;fin&gt;</code> (os mesmos números de <code>show commands</code>). Cada um é mostrado como <code>[n] comando</code> antes de rodar; no fim sai um resumo.</td>
+</tr>
+<tr>
+<td><code>exec &lt;n&gt;</code></td>
+<td>Executa só o comando número <code>&lt;n&gt;</code>.</td>
+</tr>
+<tr>
+<td><code>history backup &lt;arquivo&gt;</code></td>
+<td>Copia o histórico atual para <code>&lt;arquivo&gt;</code>. Nome simples → fica em <code>~/.config/grads_monan</code>; um caminho (com <code>/</code> ou absoluto) é usado como está. Não sobrescreve: se o arquivo já existe, dá erro.</td>
+</tr>
+<tr>
+<td><code>history clean</code></td>
+<td>Copia o histórico para <code>~/.config/grads_monan/history_backup&lt;n&gt;</code> — <code>&lt;n&gt;</code> é o <strong>maior número já existente nesse diretório + 1</strong> (1 se não houver nenhum) — e depois <strong>esvazia</strong> o arquivo de histórico (e as setas do prompt). O próprio <code>history clean</code> não é gravado no histórico limpo. Com o histórico já vazio, avisa e não cria backup.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Detalhes do <code>exec</code>:</p>
+<ul>
+<li><strong><code>exec</code> de shell continua existindo.</strong> <code>exec &lt;ini&gt; [&lt;fin&gt;]</code> só vale quando todos os argumentos são <strong>números inteiros</strong> (<code>exec 5</code>, <code>exec 5 9</code>); qualquer outra forma (<code>exec ls -l</code>) segue sendo o comando de shell da seção 2.</li>
+<li><strong>Numeração:</strong> conta as linhas <strong>não vazias</strong> do arquivo de histórico, em ordem; é a mesma de <code>show commands</code>. Números fora de <code>1..n</code>, <code>0</code> ou <code>&lt;ini&gt;</code> maior que <code>&lt;fin&gt;</code> dão erro e nada é executado.</li>
+<li><strong>Não reexecuta</strong> (aparece <code>(ignorado: ...)</code> e segue para o próximo): <code>exec &lt;n&gt;</code>, <code>history ...</code>, <code>show commands</code> e <code>q</code>/<code>exit</code>/<code>quit</code> — evita recursão e o encerramento inesperado do programa.</li>
+<li>Um comando com erro ou não reconhecido <strong>não interrompe</strong> a faixa: ela segue até o fim e o resumo conta os que falharam. <strong>Ctrl+C</strong> interrompe antes do próximo comando. O prompt seguinte é <code>E&gt;</code> se algum falhou.</li>
+<li>Os comandos reexecutados <strong>não são gravados de novo</strong> no histórico (só o <code>exec</code> em si).</li>
+<li>Dentro de um script (<code>run</code>), <code>exec &lt;ini&gt; [&lt;fin&gt;]</code> dá erro: só vale no prompt.</li>
+</ul>
+<hr />
+<h2 id="3-sintaxe-do-comando-d-display-2d">3. Sintaxe do comando <code>d</code> / <code>display</code> (2D)</h2>
+<div class="tbl_wrap"><table>
+<thead>
+<tr>
+<th>Forma</th>
+<th>Efeito</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>d &lt;variavel&gt;</code></td>
+<td>Plota a variável diretamente do arquivo (mapa, corte vertical ou perfil, dependendo de <code>lat</code>/<code>lon</code>/<code>lev</code> selecionados — ver seção 8).</td>
+</tr>
+<tr>
+<td><code>d (&lt;expressão&gt;)</code></td>
+<td>Avalia uma expressão aritmética (<code>+ - * / **</code> e parênteses) substituindo os nomes de variáveis do arquivo, e plota o resultado. Ex.: <code>d t2m-273.15</code>, <code>d (t2m - 273.15)</code>, ou cruzando arquivos: <code>d (t2m.2 - t2m.1)</code>. Avaliação restrita (sem acesso a funções do Python) — variáveis/arquivos não encontrados são reportados com sugestões. Também funciona no modo de série temporal entre arquivos (seção 2.1), onde cada nome sem sufixo <code>.N</code> é lido do arquivo do próprio quadro.</td>
+</tr>
+<tr>
+<td><code>d mag(&lt;var_u&gt;,&lt;var_v&gt;)</code> (ou <code>d mag &lt;var_u&gt; &lt;var_v&gt;</code>)</td>
+<td>Calcula a magnitude <code>sqrt(u²+v²)</code> das duas variáveis e a trata como uma variável escalar comum: obedece <code>shaded</code>/<code>contour</code>/<code>voronoi</code>, corte vertical e perfil.</td>
+</tr>
+<tr>
+<td><code>d &lt;var_u&gt;;&lt;var_v&gt;</code></td>
+<td>Plotagem de <strong>vento</strong>: sempre desenha vetores/streamlines/barbelas (conforme <code>set gxout</code>), nunca <code>shaded</code>/<code>contour</code>. Não limpa a figura — sobrepõe a um campo escalar já plotado.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Em qualquer forma:
+- cada nome de variável pode trazer o sufixo <code>.N</code> apontando para o
+  N-ésimo arquivo aberto (seção 2.1); sem sufixo, assume o arquivo 1;
+- variável (ou arquivo <code>.N</code>) não encontrado → sugestões/mensagem clara por
+  similaridade, sem travar;
+- número de pontos da variável diferente do número de pontos da malha
+  aberta → aviso claro (seção 10.2), sem travar.</p>
+<hr />
+<h2 id="4-comando-d3-3d-janela-separada">4. Comando <code>d3</code> (3D) — janela separada</h2>
+<pre><code>d3 &lt;variavel&gt;
+</code></pre>
+<p>Assim como no <code>d</code>/<code>display</code>, <code>&lt;variavel&gt;</code> aceita o sufixo <code>.N</code> (seção 2.1)
+para escolher de qual arquivo aberto ler — ex.: <code>d3 t2m.2</code>. Sem sufixo,
+assume o arquivo 1.</p>
+<p>Usa a caixa definida por faixas nas três dimensões:</p>
+<pre><code>&gt; set lat &lt;min&gt; &lt;max&gt;
+&gt; set lon &lt;min&gt; &lt;max&gt;
+&gt; set lev &lt;n1&gt; &lt;n2&gt;
+&gt; d3 &lt;variavel&gt;
+</code></pre>
+<p><strong>Dimensão que não é uma faixa</strong> (ponto único — <code>set lat 20</code>, <code>set lev 5</code> — ou
+nível não informado) <strong>usa todos os valores disponíveis</strong>: todas as
+latitudes/longitudes do arquivo e todos os níveis da própria variável. Um
+aviso diz o que foi assumido (<code>d3: 'set lev' nao e uma faixa; usando todos os
+niveis (0 a 54).</code>; na animação, só no primeiro quadro) e o <code>set</code> do usuário
+<strong>não é alterado</strong> — continua valendo para os plots 2D. Assim, <code>d3 &lt;variavel&gt;</code>
+sozinho já plota o volume inteiro. Filtra as células da malha dentro da caixa
+lat×lon, e os níveis dentro do intervalo. O eixo Z segue a mesma
+coordenada vertical <strong>da própria variável</strong> (pressão, altura do modelo ou
+profundidade do solo — seção 8.2).</p>
+<p>Abre numa <strong>janela própria</strong>, separada da 2D, e a <strong>reaproveita</strong> entre
+chamadas sucessivas de <code>d3</code> (não acumula uma janela nova a cada vez).
+<code>c</code> limpa a janela que estiver ativa no momento (a 3D, se foi a última
+usada).</p>
+<div class="tbl_wrap"><table>
+<thead>
+<tr>
+<th><code>set gxout</code></th>
+<th>Efeito no <code>d3</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>vect</code> (padrão) ou qualquer valor não listado abaixo</td>
+<td><em>Scatter</em> 3D: um ponto por célula/nível, colorido pelo valor.</td>
+</tr>
+<tr>
+<td><code>shaded</code></td>
+<td>Uma superfície triangulada <strong>por nível</strong>, empilhada no eixo Z, colorida pelo valor da variável (não pela altura).</td>
+</tr>
+</tbody>
+</table></div>
+<p><code>set clevs</code> (faixas de cor discretas) e <code>set cut &lt;min&gt; &lt;max&gt;</code> (transparência
+fora do intervalo) funcionam igual ao 2D. No <code>shaded</code>, a cor de cada face vem dos próprios vértices visíveis depois do corte: com <code>set cut 40 150</code> nenhuma face com valores fora de 40–150 aparece (versões anteriores trocavam as cores das faces quando o corte escondia parte da superfície). Valores exatamente zero também
+ficam sempre transparentes no <code>d3</code>.</p>
+<h3 id="continuidade-vertical-set-vinterp">Continuidade vertical (<code>set vinterp</code>)</h3>
+<p>Os dados têm só alguns níveis do modelo; desenhar uma superfície (ou nuvem de pontos) por nível deixa <strong>vãos</strong> entre as camadas. Por isso o <code>d3</code> <strong>interpola linearmente na vertical</strong>, célula a célula, inserindo camadas intermediárias entre cada par de níveis — tanto no valor da variável quanto na coordenada Z (altura, pressão ou índice). O resultado aparece como um volume contínuo.</p>
+<div class="tbl_wrap"><table>
+<thead>
+<tr>
+<th>Comando</th>
+<th>Efeito</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>set vinterp &lt;n&gt;</code></td>
+<td><code>n</code> camadas interpoladas entre cada par de níveis (<code>0</code> a <code>20</code>). Com <code>L</code> níveis, o <code>d3</code> desenha <code>(L-1)*(n+1)+1</code> camadas.</td>
+</tr>
+<tr>
+<td><code>set vinterp on</code> / <code>set vinterp</code></td>
+<td>Valor padrão: <strong>3</strong>.</td>
+</tr>
+<tr>
+<td><code>set vinterp off</code> (ou <code>0</code>)</td>
+<td>Sem interpolação: só os níveis do modelo (comportamento antigo).</td>
+</tr>
+</tbody>
+</table></div>
+<p>Vale para <code>shaded</code> e para o <em>scatter</em> (mais pontos). Mais camadas = imagem mais contínua, porém mais pesada para girar com o mouse; por isso há um <strong>teto</strong> (400 superfícies no <code>shaded</code>, 3 milhões de pontos no <em>scatter</em>): se <code>n</code> passar disso, o programa avisa e usa o maior valor que cabe. Valores exatamente zero continuam transparentes, e a interpolação entre um zero e um valor positivo faz a borda esmaecer em vez de cortar abruptamente. <code>set vinterp</code> aparece em <code>show info</code>.</p>
+<p>No <code>shaded</code>, <strong>todas as camadas usam a mesma escala de cores</strong> (de <code>set clevs</code>/<code>set minmax</code>, se definidos; senão, do mínimo ao máximo dos valores visíveis de toda a seleção). Antes, cada superfície era normalizada pela própria faixa de valores, e as cores não eram comparáveis entre os níveis.</p>
+<p><code>draw map</code>, quando a janela 3D é a ativa, desenha o mapa de fundo projetado
+na "superfície" da caixa (o nível mais próximo do solo), em vez do
+comportamento 2D padrão — ver seção 7.</p>
+<p><strong>Limitações conhecidas</strong>: só aceita <code>d3 &lt;variavel&gt;</code> simples (não há
+<code>d3 mag(...)</code> nem <code>d3 &lt;u&gt;;&lt;v&gt;</code> ainda); e, por operar em coordenadas planas,
+pode haver artefatos perto da costura de ±180° de longitude em domínios
+globais muito amplos.</p>
+<hr />
+<h2 id="5-comandos-show-opção">5. Comandos <code>show &lt;opção&gt;</code></h2>
+<div class="tbl_wrap"><table>
+<thead>
+<tr>
+<th>Opção</th>
+<th>Mostra</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>show info</code></td>
+<td>Nome do arquivo NetCDF (e da grade, se houver), dimensões (inclusive <strong>cada tipo de nível vertical</strong> do arquivo, com dimensão, nº de níveis e fonte dos valores) e a lista completa de variáveis, com nº de níveis, <strong>tipo de nível entre colchetes</strong> (<code>[pressao]</code>, <code>[solo]</code>, <code>[altura]</code>), descrição e unidade — sempre referente ao <strong>arquivo 1</strong>. Se houver mais de um arquivo aberto, avisa e aponta para <code>show files</code>.</td>
+</tr>
+<tr>
+<td><code>show files</code></td>
+<td>Tabela com <strong>todos</strong> os arquivos abertos na sessão: número, nome do arquivo e timestamp (data/hora, quando disponível) — ver seção 2.1. Se nenhum arquivo estiver aberto, informa isso.</td>
+</tr>
+<tr>
+<td><code>show plots</code></td>
+<td>Tabela das curvas (plot1, plot2…) na tela: <code>Plot #</code>, <code>Variable</code>, <code>Color</code>, <code>Marker</code> — seção 2.8.</td>
+</tr>
+<tr>
+<td><code>show timestamp [&lt;n&gt;]</code></td>
+<td>Timestamp do arquivo <strong>n</strong> (número de <code>show files</code>), ex.: <code>show timestamp 5</code> → <code>Arquivo 5 (nome.nc): 2023-12-30T15</code>. Sem <code>n</code>, o do arquivo selecionado por <code>set t</code>. Erro se <code>n</code> não for um arquivo aberto.</td>
+</tr>
+<tr>
+<td><code>show times</code></td>
+<td>Tabela (número + timestamp) só com o(s) tempo(s) <strong>atualmente selecionado(s)</strong> por <code>set t</code> (seção 2.1/6): todos os arquivos do intervalo, um por linha, se o modo de série/animação estiver ligado (<code>set t &lt;inicio&gt; &lt;fim&gt;</code>); senão, uma única linha, o arquivo/tempo pontual selecionado (<code>set t &lt;n&gt;</code>, padrão o arquivo 1).</td>
+</tr>
+<tr>
+<td><code>show latitudes</code> / <code>show longitudes</code></td>
+<td>Lista de coordenadas da malha, ordenada.</td>
+</tr>
+<tr>
+<td><code>show levels [pressao\|altura\|solo]</code></td>
+<td>Lista os níveis de <strong>cada tipo</strong> de coordenada vertical do arquivo, com o índice a usar em <code>set lev</code>: pressão em hPa (<code>t_iso_levels</code>), níveis do modelo (<code>nVertLevels</code>; a altura em m vem do <code>zgrid</code>, por célula) e camadas do solo (<code>nSoilLevels</code>, profundidade em m — ver seção 8.2). Com o filtro, mostra só um tipo.</td>
+</tr>
+<tr>
+<td><code>show lev</code></td>
+<td><code>set lev</code> atual (índice inicial e final), descrito <strong>em cada tipo de nível</strong> (ex.: <code>500.0 hPa</code> e <code>0.150 m de profundidade</code>); um tipo que não tem esse índice aparece como <code>fora do intervalo</code>.</td>
+</tr>
+<tr>
+<td><code>show variables</code></td>
+<td>Lista de variáveis do arquivo com sua descrição (<code>long_name</code>), seguidas das criadas com <code>let</code> (seção 2.4).</td>
+</tr>
+<tr>
+<td><code>show time_variable</code> / <code>show time_units</code> / <code>show Date</code></td>
+<td>Informações de tempo do arquivo (com valores de reserva se ausentes).</td>
+</tr>
+<tr>
+<td><code>show title</code> / <code>show label</code></td>
+<td>Título do gráfico / rótulo da barra de cores atuais.</td>
+</tr>
+<tr>
+<td><code>show map</code></td>
+<td>Lista os shapefiles disponíveis em <code>mappath</code>, marcando o selecionado.</td>
+</tr>
+<tr>
+<td><code>show map_color</code> / <code>show map_line</code></td>
+<td>Cor/espessura da linha do mapa de fundo.</td>
+</tr>
+<tr>
+<td><code>show lat</code> / <code>show lon</code></td>
+<td>Intervalo de latitude/longitude atualmente selecionado.</td>
+</tr>
+<tr>
+<td><code>show cmap</code></td>
+<td>Colormap atual.</td>
+</tr>
+<tr>
+<td><code>show sel</code></td>
+<td>Seleção atual do <code>sel</code> (lat, lon, t) e nº de células na região — seção 2.6. O <code>show info</code> também mostra os <code>set</code> e <code>sel</code> atuais.</td>
+</tr>
+<tr>
+<td><code>show setup</code></td>
+<td>Imprime o dicionário <code>setup</code> inteiro (debug).</td>
+</tr>
+<tr>
+<td><code>show limits</code></td>
+<td>Resumo da área de limites carregada por <code>load limits</code> (seção 2.2): arquivo, número de pontos do polígono e quantas células da malha caem dentro dela. Avisa se nenhuma área foi carregada ainda.</td>
+</tr>
+<tr>
+<td><code>show fonts</code></td>
+<td>Lista, em ordem alfabética, as fontes TrueType/OpenType instaladas no sistema e reconhecidas pelo matplotlib — use um destes nomes em <code>set label font &lt;nome&gt;</code>/<code>set title font &lt;nome&gt;</code>/<code>set xlabel font &lt;nome&gt;</code>/<code>set ylabel font &lt;nome&gt;</code> (seção 6).</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="6-comandos-set-opção">6. Comandos <code>set &lt;opção&gt;</code></h2>
+<p>Todos os termos numéricos são validados: erro de conversão ou argumento
+faltando avisa e <strong>mantém a configuração anterior</strong>, sem travar.</p>
+<div class="tbl_wrap"><table>
+<thead>
+<tr>
+<th>Comando</th>
+<th>Efeito</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>set lev &lt;n&gt;</code></td>
+<td>Nível único. É um <strong>índice</strong>, aceito até o maior número de níveis entre os tipos do arquivo (ex.: 0–17 com pressão de 18 níveis e solo de 6). Imprime o nível em cada tipo que o tem: pressão em hPa, profundidade do solo em m, altura média (<code>zgrid</code>) ou só o índice. Ao plotar, o índice é conferido contra os níveis <strong>da variável</strong> (ex.: <code>set lev 10</code> seguido de <code>d tslb</code> avisa que o solo só tem 6 níveis, 0 a 5).</td>
+</tr>
+<tr>
+<td><code>set lev &lt;n1&gt; &lt;n2&gt;</code></td>
+<td>Intervalo de níveis, <strong>ambos inclusivos</strong> (corte vertical, perfil, <code>d3</code>) — <code>&lt;n1&gt;</code> e <code>&lt;n2&gt;</code> são índices de nível válidos, de <code>0</code> a <code>n_niveis-1</code> (a mesma faixa aceita por <code>set lev &lt;n&gt;</code>), e o nível <code>&lt;n2&gt;</code> <strong>entra</strong> na seleção. <code>&lt;n1&gt;</code> não pode ser maior que <code>&lt;n2&gt;</code>. Um corte vertical/<code>d3</code> precisa de pelo menos 2 níveis na faixa; um perfil (seção 8) aceita também uma faixa de 1 nível só (equivalente a <code>set lev &lt;n1&gt;</code>, com <code>&lt;n1&gt; == &lt;n2&gt;</code>).</td>
+</tr>
+<tr>
+<td><code>set lat &lt;valor&gt;</code> / <code>set lat &lt;min&gt; &lt;max&gt;</code> / <code>set lat</code></td>
+<td>Latitude fixa num ponto, ou intervalo (domínio do mapa). Sem argumentos, volta ao domínio completo de latitude.</td>
+</tr>
+<tr>
+<td><code>set lon &lt;valor&gt;</code> / <code>set lon &lt;min&gt; &lt;max&gt;</code> / <code>set lon</code></td>
+<td>Longitude fixa num ponto, ou intervalo. Sem argumentos, volta ao domínio completo de longitude.</td>
+</tr>
+<tr>
+<td><code>set gxout &lt;tipo&gt;</code></td>
+<td><code>shaded</code>/<code>contour</code>/<code>voronoi</code>/<code>hex</code> (2D, variáveis escalares — também vale <code>shaded</code> no <code>d3</code>); <code>vect</code> (padrão)/<code>stream</code>/<code>barb</code> (vento, <code>d u;v</code> ou <code>d mag(...)</code>).</td>
+</tr>
+<tr>
+<td><code>set cut &lt;minimo&gt; &lt;maximo&gt;</code></td>
+<td>Só plota valores dentro de <code>[minimo, maximo]</code>; fora disso fica transparente. Vale para <code>d</code> (mapa, corte, perfil) e <code>d3</code>. <code>set cut</code> sem valores desliga.</td>
+</tr>
+<tr>
+<td><code>set xrange &lt;min&gt; &lt;max&gt;</code></td>
+<td>Fixa os limites do eixo X de todos os gráficos com eixos (mapa, perfil, corte, séries, curvas do <code>sel</code>...), no gráfico atual e nos seguintes. Aceita números (ex. <code>set xrange -60 -30</code>) ou, num eixo de tempo, datas <code>AAAA-MM-DDTHH</code> (ex. <code>set xrange 2024-01-01T00 2024-01-02T00</code>). <code>set xrange off</code> (ou sem valores) volta ao automático. <code>min</code> deve ser menor que <code>max</code>; valor inválido avisa e mantém o anterior. Não é alterado por <code>reset</code>.</td>
+</tr>
+<tr>
+<td><code>set yrange &lt;min&gt; &lt;max&gt;</code></td>
+<td>Como <code>set xrange</code>, para o eixo Y (só números). Em eixos invertidos (pressão) o sentido é preservado. <code>set yrange off</code> volta ao automático.</td>
+</tr>
+<tr>
+<td><code>set xdiv &lt;valor&gt;</code> / <code>set ydiv &lt;valor&gt;</code></td>
+<td>Tamanho de <strong>cada divisão</strong> do eixo X / Y (espaçamento dos marcadores e, com <code>set grid on</code>, das linhas da grade). Ex.: <code>set xdiv 5</code> → marcas de 5 em 5 graus. Em eixo de <strong>tempo</strong>, <code>xdiv</code> é dado em <strong>horas</strong> (<code>set xdiv 6</code>). Valor positivo; <code>off</code> volta ao automático. Não se aplica a eixos de tempo com rótulos fixos por arquivo (sem datas).</td>
+</tr>
+<tr>
+<td><code>set xtics &lt;on\|off&gt;</code> / <code>set ytics &lt;on\|off&gt;</code></td>
+<td>Liga/desliga as marcações (traços e valores) dos eixos X / Y, no gráfico atual e nos seguintes. Padrão <code>on</code>. Não é alterado por <code>reset</code>.</td>
+</tr>
+<tr>
+<td><code>set marker &lt;on\|off&gt;</code></td>
+<td>Liga/desliga os <strong>marcadores</strong> dos gráficos de linha (série temporal em ponto, curva de <code>d &lt;estat&gt; sel &lt;var&gt;</code> e perfil vertical). Padrão <code>on</code>.</td>
+</tr>
+<tr>
+<td><code>set marker type &lt;tipo&gt;</code></td>
+<td>Forma do marcador: qualquer código do matplotlib — <code>o</code> círculo, <code>s</code> quadrado, <code>D</code> diamante, <code>d</code> diamante fino, <code>*</code> estrela, <code>^</code> <code>v</code> <code>&lt;</code> <code>&gt;</code> triângulos, <code>p</code> pentágono, <code>h</code> <code>H</code> hexágonos, <code>+</code> <code>x</code> <code>X</code> <code>P</code>, <code>.</code> <code>,</code> <code>\|</code> <code>_</code>, <code>1</code>..<code>4</code> — ou apelidos (<code>circulo</code>, <code>quadrado</code>, <code>diamante</code>, <code>estrela</code>, <code>triangulo</code>; <code>S</code> = <code>s</code>). <code>auto</code> (padrão) volta à sequência por curva (seção 2.8). Também liga os marcadores. Tipo inválido avisa e mantém o anterior.</td>
+</tr>
+<tr>
+<td><code>set marker size &lt;tamanho&gt;</code></td>
+<td>Tamanho do marcador em pontos (número positivo; padrão <code>6</code>).</td>
+</tr>
+<tr>
+<td><code>set marker color &lt;cor&gt;</code></td>
+<td>Cor do marcador (nome do matplotlib ou <code>#RRGGBB</code>); <code>set marker color default</code> usa a cor da linha.</td>
+</tr>
+<tr>
+<td><code>set marker text &lt;on\|off&gt;</code></td>
+<td>Escreve, junto de cada marcador, o <strong>valor</strong> do ponto (3–4 algarismos significativos): nas séries e curvas, o valor do eixo Y; no perfil vertical, o valor da variável (eixo X). Padrão <code>off</code>.</td>
+</tr>
+<tr>
+<td><code>set plot &lt;n&gt; color &lt;cor&gt;</code> / <code>markercolor &lt;cor&gt;</code> / <code>marker &lt;tipo\|auto&gt;</code> / <code>markersize &lt;n&gt;</code> / <code>linetype &lt;tipo&gt;</code> / <code>linesize &lt;n&gt;</code> / <code>label &lt;texto&gt;</code> / <code>default</code></td>
+<td>Estilo da curva número <code>&lt;n&gt;</code> (<strong>plot1, plot2, …</strong> — seção 2.8): cor da linha, cor/tipo/tamanho do marcador, tipo e espessura da linha (mesmos tipos de <code>set grid type</code>), texto na legenda; <code>default</code> volta ao automático. Vale na hora para a curva na tela e, se ainda não existir, para quando for plotada.</td>
+</tr>
+<tr>
+<td><code>set legend &lt;on\|off&gt;</code></td>
+<td>Liga/desliga a <strong>caixa de legenda do painel selecionado</strong> (uma entrada por curva — seção 2.8). Cada painel de <code>set pages</code> tem a sua legenda.</td>
+</tr>
+<tr>
+<td><code>set legend position &lt;L\|R\|U\|D&gt;</code></td>
+<td>Posição da caixa de legenda <strong>do painel selecionado</strong>: <code>L</code> esquerda (padrão), <code>R</code> direita, <code>U</code> acima, <code>D</code> abaixo do gráfico (também aceita <code>esquerda</code>/<code>direita</code>/<code>acima</code>/<code>abaixo</code>). A margem correspondente se abre sozinha; em <code>U</code>/<code>D</code> as entradas ficam lado a lado.</td>
+</tr>
+<tr>
+<td><code>set legend title size &lt;n&gt;</code></td>
+<td>Tamanho da fonte do título da legenda (padrão 10). O texto do título é <code>draw legend title &lt;texto&gt;</code>.</td>
+</tr>
+<tr>
+<td><code>set legend color &lt;cor&gt;</code></td>
+<td>Cor do texto, do título e da <strong>borda</strong> da caixa (<code>default</code> volta ao automático).</td>
+</tr>
+<tr>
+<td><code>set legend line &lt;espessura&gt;</code> / <code>set legend linetype &lt;tipo&gt;</code></td>
+<td>Espessura e tipo (cheia, tracejada, traço-ponto, pontilhada…, como em <code>set grid type</code>) da <strong>borda</strong> da caixa.</td>
+</tr>
+<tr>
+<td><code>set minmax &lt;variável&gt; &lt;min&gt; &lt;max&gt; [&lt;intervalo&gt;]</code></td>
+<td>Fixa a escala de cores <strong>da variável</strong> em <code>d</code>, <code>d3</code> e <code>write animation</code> (ex.: <code>set minmax t2m 280 320 5</code> → 280 K a 320 K, faixas de 5 K). Sem <code>&lt;intervalo&gt;</code>, usa 20 faixas iguais entre min e max. Vale para esse nome de variável (com ou sem <code>.N</code>; expressões sem espaços, como <code>t2m-273.15</code>, têm chave própria); tem prioridade sobre <code>set clevs</code> para ela. Valores fora de min–max ficam sem cor. <code>set minmax &lt;variável&gt;</code> remove a escala dela; <code>set minmax</code> sem argumentos remove todas (volta ao automático). <code>reset</code> não altera. Aparece em <code>show info</code>.</td>
+</tr>
+<tr>
+<td><code>set vinterp &lt;n&gt;\|on\|off</code></td>
+<td>Interpolação vertical do <code>d3</code>: <code>n</code> camadas intermediárias entre cada par de níveis (padrão 3; <code>off</code> = 0) — seção 4.</td>
+</tr>
+<tr>
+<td><code>set clevs &lt;v0&gt; &lt;v1&gt; ... &lt;vn&gt;</code></td>
+<td>Fronteiras exatas dos intervalos de cor/contorno (ex.: <code>0 100 200 ... 1500</code>). Usadas em todo tipo de plotagem com barra de cores, inclusive <code>d3</code>. Lista vazia volta ao padrão automático (20 níveis).</td>
+</tr>
+<tr>
+<td><code>set cmap &lt;nome&gt;</code></td>
+<td>Colormap do matplotlib.</td>
+</tr>
+<tr>
+<td><code>set pages &lt;linhas&gt; &lt;colunas&gt;</code></td>
+<td>Grade de painéis da janela 2D (ex.: <code>set pages 1 2</code>). Limpa a janela e seleciona o primeiro painel.</td>
+</tr>
+<tr>
+<td><code>set page &lt;linha&gt; &lt;coluna&gt;</code></td>
+<td>Seleciona em qual painel plotar.</td>
+</tr>
+<tr>
+<td><code>set label &lt;texto&gt;</code></td>
+<td>Rótulo da barra de cores.</td>
+</tr>
+<tr>
+<td><code>set label font &lt;nome_da_fonte&gt;</code></td>
+<td>Fonte usada no rótulo da <strong>barra de cores</strong> (<code>draw label</code>; os rótulos dos eixos têm comandos próprios, abaixo) — verifica se a fonte existe no sistema (mesma lista de <code>show fonts</code>); se não existir, avisa e mantém a fonte anterior.</td>
+</tr>
+<tr>
+<td><code>set label color &lt;cor&gt;</code></td>
+<td>Cor do rótulo — nome de cor do matplotlib (ex.: <code>red</code>) ou código <code>#RRGGBB</code>.</td>
+</tr>
+<tr>
+<td><code>set label size &lt;n&gt;</code></td>
+<td>Tamanho de fonte do rótulo (em pontos).</td>
+</tr>
+<tr>
+<td><code>set label style &lt;bold\|italic\|normal&gt;</code></td>
+<td>Estilo do rótulo: negrito, itálico ou normal.</td>
+</tr>
+<tr>
+<td><code>set xlabel font &lt;nome_da_fonte&gt;</code> / <code>set ylabel font &lt;nome_da_fonte&gt;</code></td>
+<td>Fonte do rótulo do eixo <strong>X</strong> / <strong>Y</strong> (o padrão — <code>Longitude</code>, <code>Latitude</code>, <code>Tempo</code>, <code>Pressao (hPa)</code>… — ou o texto de <code>draw xlabel</code>/<code>draw ylabel</code>). Mesma verificação de <code>set label font</code>.</td>
+</tr>
+<tr>
+<td><code>set xlabel color &lt;cor&gt;</code> / <code>set ylabel color &lt;cor&gt;</code></td>
+<td>Cor do rótulo do eixo X / Y.</td>
+</tr>
+<tr>
+<td><code>set xlabel size &lt;n&gt;</code> / <code>set ylabel size &lt;n&gt;</code></td>
+<td>Tamanho de fonte (pontos) do rótulo do eixo X / Y.</td>
+</tr>
+<tr>
+<td><code>set xlabel style &lt;bold\|italic\|normal&gt;</code> / <code>set ylabel style &lt;bold\|italic\|normal&gt;</code></td>
+<td>Estilo do rótulo do eixo X / Y.</td>
+</tr>
+<tr>
+<td><code>set title font &lt;nome_da_fonte&gt;</code></td>
+<td>Fonte usada no título do gráfico (<code>draw title</code>) — mesma verificação de <code>set label font</code>.</td>
+</tr>
+<tr>
+<td><code>set title color &lt;cor&gt;</code></td>
+<td>Cor do título do gráfico.</td>
+</tr>
+<tr>
+<td><code>set title size &lt;n&gt;</code></td>
+<td>Tamanho de fonte do título do gráfico (em pontos).</td>
+</tr>
+<tr>
+<td><code>set title style &lt;bold\|italic\|normal&gt;</code></td>
+<td>Estilo do título do gráfico: negrito, itálico ou normal.</td>
+</tr>
+<tr>
+<td><code>set bar position &lt;U\|D\|L\|R&gt;</code></td>
+<td>Posição da barra de cores: <code>U</code> (up/cima), <code>D</code> (down/baixo), <code>L</code> (left/esquerda) ou <code>R</code> (right/direita — padrão do matplotlib). <code>U</code>/<code>D</code> deixam a barra horizontal; <code>L</code>/<code>R</code>, vertical.</td>
+</tr>
+<tr>
+<td><code>set background &lt;cor&gt;</code></td>
+<td>Cor de fundo da <strong>janela</strong> e da área de plotagem (nome de cor do matplotlib, ex. <code>black</code>, <code>lightgray</code>, ou <code>#RRGGBB</code>). Vale na hora para os gráficos abertos e para todos os seguintes (inclusive após <code>c</code> e na janela do <code>d3</code>), e também no arquivo salvo por <code>gxprint</code>. Cor inválida avisa e mantém a anterior. <code>set background default</code> volta ao fundo branco padrão. Os textos (título, rótulos, eixos) não mudam de cor sozinhos: num fundo escuro, ajuste com <code>set title color</code>, <code>set xlabel color</code>, etc.</td>
+</tr>
+<tr>
+<td><code>set contour line size &lt;n&gt;</code></td>
+<td>Espessura das linhas de contorno (<code>set gxout contour</code>).</td>
+</tr>
+<tr>
+<td><code>set contour line &lt;bw\|color&gt;</code></td>
+<td>Linhas de contorno em preto e branco (<code>bw</code>) ou coloridas conforme o nível, usando o colormap (<code>color</code>, padrão).</td>
+</tr>
+<tr>
+<td><code>set contour font &lt;nome_da_fonte&gt;</code></td>
+<td>Fonte dos rótulos inline do contorno (os números escritos sobre as linhas) — verifica se a fonte existe no sistema (mesma lista de <code>show fonts</code>).</td>
+</tr>
+<tr>
+<td><code>set contour font color &lt;cor&gt;</code></td>
+<td>Cor dos rótulos inline do contorno.</td>
+</tr>
+<tr>
+<td><code>set contour font size &lt;n&gt;</code></td>
+<td>Tamanho de fonte dos rótulos inline do contorno (padrão: 10).</td>
+</tr>
+<tr>
+<td><code>set contour font style &lt;bold\|italic\|normal&gt;</code></td>
+<td>Estilo dos rótulos inline do contorno: negrito, itálico ou normal.</td>
+</tr>
+<tr>
+<td><code>set mappat &lt;caminho&gt;</code></td>
+<td>Diretório dos shapefiles do mapa de fundo.</td>
+</tr>
+<tr>
+<td><code>set mpdset &lt;arquivo.shp&gt;</code></td>
+<td>Shapefile a usar como mapa de fundo.</td>
+</tr>
+<tr>
+<td><code>set mpt &lt;cor&gt; &lt;espessura&gt;</code></td>
+<td>Cor e espessura da linha do mapa de fundo.</td>
+</tr>
+<tr>
+<td><code>set plot_line &lt;espessura&gt; &lt;cor&gt;</code></td>
+<td>Espessura/cor de linha usada em perfis.</td>
+</tr>
+<tr>
+<td><code>set grid on\|off</code></td>
+<td>Liga/desliga a grade (gridlines) do gráfico atual, usando o estilo abaixo.</td>
+</tr>
+<tr>
+<td><code>set grid color &lt;cor&gt;</code></td>
+<td>Cor das linhas da grade (nome de cor do matplotlib ou <code>#RRGGBB</code>).</td>
+</tr>
+<tr>
+<td><code>set grid size &lt;espessura&gt;</code></td>
+<td>Espessura das linhas da grade (em pontos; número positivo, ex. <code>0.5</code>, <code>2</code>).</td>
+</tr>
+<tr>
+<td><code>set grid type &lt;tipo&gt;</code></td>
+<td>Tipo de linha da grade: <code>cheia</code> (<code>solid</code>, <code>-</code>), <code>tracejada</code> (<code>dashed</code>, <code>--</code>), <code>traco-ponto</code> (<code>dashdot</code>, <code>-.</code>), <code>pontilhada</code> (<code>dotted</code>, <code>:</code>), <code>nenhuma</code>; ou qualquer estilo nomeado do matplotlib (<code>loosely_dotted</code>, <code>densely_dotted</code>, <code>loosely_dashed</code>, <code>densely_dashed</code>, <code>loosely_dashdotted</code>, <code>dashdotted</code>, <code>densely_dashdotted</code>, <code>dashdotdotted</code>, <code>loosely_dashdotdotted</code>, <code>densely_dashdotdotted</code>); ou um padrão próprio <code>dash:&lt;traço&gt;,&lt;espaço&gt;[,...]</code> em pontos (ex. <code>dash:6,2,1,2</code>). Tipo inválido avisa e mantém o anterior.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Os três comandos <code>set grid color|size|type</code> guardam o estilo (vale também para a grade que o programa liga sozinho, como nos perfis verticais e séries de um ponto) e o aplicam na hora se a grade do gráfico atual já estiver ligada; com a grade desligada, só passam a valer no próximo <code>set grid on</code>.
+| <code>set time &lt;n&gt;</code> (ou <code>set t &lt;n&gt;</code>) | (aceita também <code>first</code>/<code>last</code>) Seleciona o arquivo número <code>&lt;n&gt;</code> (entre os vários abertos) como o arquivo padrão para as próximas <code>d</code>/<code>d3</code>/estatísticas sem sufixo <code>.N</code> — ver seção 2.1. |
+| <code>set time &lt;ini&gt; &lt;fim&gt;</code> (ou <code>set t &lt;ini&gt; &lt;fim&gt;</code>) | Cada limite pode ser um número, <code>first</code> (primeiro tempo/arquivo) ou <code>last</code> (último aberto): <code>set t 2 last</code>, <code>set t first 5</code>, <code>set t first last</code>. Com mais de um arquivo aberto: intervalo de arquivos (pelo número de abertura) para a série temporal entre arquivos — ver seção 2.1. |
+| <code>set tint &lt;segundos&gt;</code> | Intervalo, em segundos, entre os quadros da animação da série temporal (<code>d</code>/<code>d3</code> no modo mapa/3D — seção 2.1). Padrão: 1 segundo. |
+| <code>set mark &lt;x&gt; &lt;y&gt; &lt;cor&gt; &lt;tamanho&gt; &lt;legenda&gt;</code> | Mecanismo antigo de acumular pontos de marcação. <strong>Legado</strong>: não é mais usado por <code>draw mark</code> (seção 7), que hoje é autossuficiente. |
+| <code>set fig_dpi &lt;n&gt;</code> / <code>set fig_inches &lt;modo&gt;</code> / <code>set fig_transparency &lt;bool&gt;</code> | Resolução/margens/transparência ao salvar (<code>gxprint</code>). |</p>
+<hr />
+<h2 id="7-comandos-draw-opção">7. Comandos <code>draw &lt;opção&gt;</code></h2>
+<div class="tbl_wrap"><table>
+<thead>
+<tr>
+<th>Comando</th>
+<th>Efeito</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>draw title &lt;texto&gt;</code></td>
+<td>Define e desenha o título do gráfico.</td>
+</tr>
+<tr>
+<td><code>draw mark &lt;lat&gt; &lt;lon&gt; &lt;simbolo&gt;</code></td>
+<td>Desenha um símbolo de marca na coordenada geográfica informada. <code>simbolo</code> é um inteiro de 1 a 11 (tabela abaixo). Entradas inválidas avisam sem travar.</td>
+</tr>
+<tr>
+<td><code>draw legend</code></td>
+<td>Mostra a legenda do gráfico atual.</td>
+</tr>
+<tr>
+<td><code>draw map</code></td>
+<td>Desenha o mapa de fundo e <strong>liga</strong> o modo "mapa persistente": a partir daqui, o mapa é <strong>redesenhado automaticamente</strong> em todo <code>d</code>/<code>d3</code> seguinte — inclusive quadro a quadro na animação da série temporal (seção 2.1) — até um <code>draw map off</code>. Se a janela <strong>3D</strong> (<code>d3</code>) for a ativa no momento, desenha projetado na "superfície" da caixa 3D em vez do comportamento 2D padrão. Pode ser chamado antes de qualquer <code>d</code>/<code>d3</code> (garante sozinho uma janela/eixo 2D válidos).</td>
+</tr>
+<tr>
+<td><code>draw map off</code></td>
+<td>Desliga o modo "mapa persistente": os próximos <code>d</code>/<code>d3</code> (e a animação) deixam de redesenhar o mapa automaticamente.</td>
+</tr>
+<tr>
+<td><code>draw xlabel &lt;texto&gt;</code> / <code>draw ylabel &lt;texto&gt;</code></td>
+<td>Substitui o rótulo <strong>padrão</strong> do eixo X / Y (<code>Longitude</code>, <code>Latitude</code>, <code>Tempo</code>, <code>Altura (m)</code>, <code>Pressao (hPa)</code>, etc.) pelo texto informado. Se já existe um gráfico, aplica na hora; o texto fica guardado na sessão (<code>setup['xlabel']</code>/<code>setup['ylabel']</code>) e é reaplicado em todo <code>d</code>/<code>d3</code> seguinte, inclusive quadro a quadro nas animações. <code>reset</code> volta aos rótulos padrão. Sem texto, mostra o uso.</td>
+</tr>
+<tr>
+<td><code>draw label &lt;texto&gt;</code></td>
+<td>Define o rótulo da barra de cores. Se já existe uma barra de cores no gráfico atual, escreve o texto nela <strong>na hora</strong>. O texto também fica guardado na sessão e é <strong>reaplicado automaticamente</strong> toda vez que uma nova barra de cores for criada — inclusive quadro a quadro na animação (seção 2.1), onde a colorbar é recriada a cada quadro — e pode ser chamado mesmo antes de qualquer <code>d</code>/<code>d3</code> (o texto entra em vigor assim que a primeira barra de cores for criada).</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="71-tabela-de-símbolos-draw-mark">7.1 Tabela de símbolos (<code>draw mark</code>)</h3>
+<div class="tbl_wrap"><table>
+<thead>
+<tr>
+<th>Nº</th>
+<th>Símbolo</th>
+<th><code>marker</code> / <code>fillstyle</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><code>+</code></td>
+<td><code>+</code></td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>○</code> círculo vazio</td>
+<td><code>o</code> / <code>none</code></td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>●</code> círculo cheio</td>
+<td><code>o</code> / <code>full</code></td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>□</code> quadrado vazio</td>
+<td><code>s</code> / <code>none</code></td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>■</code> quadrado cheio</td>
+<td><code>s</code> / <code>full</code></td>
+</tr>
+<tr>
+<td>6</td>
+<td><code>×</code></td>
+<td><code>x</code></td>
+</tr>
+<tr>
+<td>7</td>
+<td><code>◇</code> losango vazio</td>
+<td><code>D</code> / <code>none</code></td>
+</tr>
+<tr>
+<td>8</td>
+<td><code>△</code> triângulo vazio</td>
+<td><code>^</code> / <code>none</code></td>
+</tr>
+<tr>
+<td>9</td>
+<td><code>▲</code> triângulo cheio</td>
+<td><code>^</code> / <code>full</code></td>
+</tr>
+<tr>
+<td>10</td>
+<td>◐ círculo meio (esq/dir)</td>
+<td><code>o</code> / <code>left</code></td>
+</tr>
+<tr>
+<td>11</td>
+<td>◑ círculo meio (cima/baixo)</td>
+<td><code>o</code> / <code>top</code></td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="8-como-o-dd3-decide-o-que-plotar-2d">8. Como o <code>d</code>/<code>d3</code> decide o que plotar (2D)</h2>
+<div class="tbl_wrap"><table>
+<thead>
+<tr>
+<th>Condição</th>
+<th>Resultado</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Latitude e longitude fixas no mesmo ponto</td>
+<td><strong>Perfil vertical</strong>, no intervalo de níveis selecionado (<code>set lev &lt;n1&gt; &lt;n2&gt;</code> — seção 6) — ou só no nível único de <code>set lev &lt;n&gt;</code>, se nenhuma faixa tiver sido escolhida.</td>
+</tr>
+<tr>
+<td>Apenas latitude fixa (ou só longitude)</td>
+<td><strong>Corte vertical</strong>, interpolando a malha sobre uma linha. Exige uma faixa de <strong>pelo menos 2 níveis</strong> (<code>set lev &lt;n1&gt; &lt;n2&gt;</code>, com <code>&lt;n2&gt;</code> maior que <code>&lt;n1&gt;</code>) — um nível único (de <code>set lev &lt;n&gt;</code>, ou uma faixa <code>set lev &lt;n&gt; &lt;n&gt;</code>) avisa e não plota, pois não há como desenhar um corte 2D com um só nível.</td>
+</tr>
+<tr>
+<td>Nem latitude nem longitude fixas</td>
+<td><strong>Mapa horizontal</strong>, conforme <code>gxout</code> (<code>shaded</code>/<code>contour</code>/<code>voronoi</code>), sempre no <strong>nível único</strong> de <code>set lev &lt;n&gt;</code> (ou no primeiro nível de uma faixa, se uma estiver selecionada).</td>
+</tr>
+</tbody>
+</table></div>
+<p>No <strong>eixo vertical</strong> do corte/perfil (e no eixo Z do <code>d3</code>):
+1. <strong>Pressão</strong> (hPa), para variáveis na dimensão isobárica (<code>t_iso_levels</code>/<code>nIsoLevelsT</code>) — maior pressão embaixo.
+2. <strong>Profundidade do solo</strong> (m), para variáveis em <code>nSoilLevels</code> — superfície em cima, profundidade crescendo para baixo.
+3. <strong>Altura real</strong> (m), para variáveis em <code>nVertLevels</code> quando houver <code>zgrid</code> — interpolada ao longo do corte (acompanha o terreno); menor embaixo.
+4. <strong>Índice do nível</strong>, se não houver como obter o valor; menor embaixo.</p>
+<p>O tipo vem da <strong>dimensão vertical da própria variável</strong> (seção 8.2), não de um eixo único para o arquivo.</p>
+<p>Áreas sem dado válido (corte/superfície abaixo da topografia) aparecem
+<strong>hachuradas</strong> no corte vertical 2D.</p>
+<h3 id="81-os-quatro-modos-de-gxout-para-mapa-2d">8.1 Os quatro modos de <code>gxout</code> para mapa 2D</h3>
+<div class="tbl_wrap"><table>
+<thead>
+<tr>
+<th><code>gxout</code></th>
+<th>Como funciona</th>
+<th>Quando usar</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>shaded</code></td>
+<td>Interpola para uma <strong>grade regular</strong> (reaproveitando a triangulação de Delaunay em cache) e usa <code>contourf</code> de grade regular.</td>
+<td>Campo suave, contínuo. Rápido mesmo em malhas grandes graças ao cache (seção 9).</td>
+</tr>
+<tr>
+<td><code>contour</code></td>
+<td>Igual ao <code>shaded</code>, mas com <code>contour</code> (linhas + rótulos) em vez de preenchido.</td>
+<td>Mesma ideia, isolinhas.</td>
+</tr>
+<tr>
+<td><code>voronoi</code></td>
+<td><strong>Rasteriza</strong> o diagrama de Voronoi por aproximação: para cada pixel da imagem, usa o valor da célula mais próxima (via <code>cKDTree</code>), sem interpolar. Mostra o valor real de cada célula, sem suavização — mas visualmente sai como "pixels" quadrados, não a forma real da célula.</td>
+<td>Quando quer ver os dados "crus", célula por célula, e a malha for grande o suficiente para o modo <code>hex</code> (abaixo) ficar pesado.</td>
+</tr>
+<tr>
+<td><code>hex</code></td>
+<td>Desenha o <strong>polígono real</strong> de cada célula — o hexágono/pentágono de verdade da malha MPAS/MONAN (pentágonos aparecem nos poucos defeitos topológicos inevitáveis de qualquer malha icosaédrica/Voronoi) — usando a conectividade completa do arquivo de grade (<code>verticesOnCell</code>/<code>nEdgesOnCell</code>/<code>latVertex</code>/<code>lonVertex</code>). Exemplo: <code>set gxout hex</code> seguido de <code>d t2m</code>. Em domínios de área limitada, as células da borda saem automaticamente com o tamanho/formato real (tipicamente diferente das internas) — a geometria vem direto dos vértices do próprio arquivo, sem nenhum tratamento especial de borda. Precisa da conectividade completa; sem ela, avisa e sugere <code>voronoi</code>. Mais fiel que <code>voronoi</code>, porém mais pesado (constrói e desenha um polígono por célula) — recomendado para domínios regionais ou malhas de porte pequeno/médio; em malhas globais muito grandes (milhões de células), prefira <code>shaded</code>/<code>contour</code>/<code>voronoi</code>.</td>
+<td></td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h3 id="82-tipos-de-nível-vertical-pressão-altura-do-modelo-solo">8.2 Tipos de nível vertical (pressão, altura do modelo, solo)</h3>
+<p>Um mesmo arquivo MONAN/MPAS pode ter vários tipos de nível, cada um numa
+dimensão do NetCDF. O programa escolhe o tipo <strong>por variável</strong>:</p>
+<div class="tbl_wrap"><table>
+<thead>
+<tr>
+<th>Dimensão da variável</th>
+<th>Tipo</th>
+<th>Valores do eixo</th>
+<th>Rótulo do eixo</th>
+<th>Sentido</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>t_iso_levels</code> / <code>nIsoLevelsT</code></td>
+<td>pressão</td>
+<td>variável <code>t_iso_levels</code> (Pa → hPa)</td>
+<td><code>Pressao (hPa)</code></td>
+<td>invertido (maior pressão embaixo)</td>
+</tr>
+<tr>
+<td><code>nSoilLevels</code></td>
+<td>solo</td>
+<td><code>zs</code> (com eixo de camadas); senão centros calculados da espessura <code>dzs</code> (acumulado − metade); senão índice</td>
+<td><code>Profundidade do solo (m)</code></td>
+<td>invertido (superfície em cima)</td>
+</tr>
+<tr>
+<td><code>nVertLevels</code></td>
+<td>altura do modelo</td>
+<td><code>zgrid</code> (m, por célula), senão índice</td>
+<td><code>Altura (m)</code> / <code>Levels</code></td>
+<td>normal</td>
+</tr>
+</tbody>
+</table></div>
+<p>Observações:
+- Nada precisa ser configurado: <code>d temperature_isobaric</code> usa o eixo de
+  pressão e <code>d tslb</code> o de profundidade, no mesmo arquivo.
+- <code>set lev &lt;n&gt;</code> é um índice; cada variável o interpreta na <strong>sua</strong>
+  dimensão (índice 3 = 500 hPa na pressão e 0,15 m no solo). <code>show lev</code>
+  mostra a leitura em cada tipo.
+- Se o índice não existir na variável plotada (ex.: <code>set lev 10</code> com
+  <code>tslb</code>, que tem 6 níveis), o programa avisa com o intervalo válido e
+  não plota.
+- Em alguns arquivos (como o diagnóstico MONAN) <code>zs</code> vem como
+  <code>(Time, nCells)</code>, sem eixo de camadas; nesse caso as profundidades são
+  calculadas de <code>dzs</code>. <code>show levels solo</code> informa a fonte usada.
+- O atributo global <code>num_soil_layers</code> do arquivo é ignorado: vale o
+  tamanho real da dimensão <code>nSoilLevels</code>.</p>
+<h2 id="9-área-de-configuração-configgrads_monan">9. Área de configuração (<code>~/.config/grads_monan/</code>)</h2>
+<p>Criada automaticamente na primeira execução (<code>grads-monan</code> ou
+<code>grads-monan-setup</code>). Contém:</p>
+<div class="tbl_wrap"><table>
+<thead>
+<tr>
+<th>Arquivo</th>
+<th>Conteúdo</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>grads_monan.toml</code></td>
+<td>Configuração padrão de sessão (seção 9.1).</td>
+</tr>
+<tr>
+<td><code>grads_monan.history</code></td>
+<td>Histórico de comandos do prompt (setas para cima/baixo; <code>show commands</code>, <code>exec</code>, <code>history</code> — seção 2.9).</td>
+</tr>
+<tr>
+<td><code>history_backup&lt;n&gt;</code></td>
+<td>Cópias criadas por <code>history clean</code> (seção 2.9).</td>
+</tr>
+<tr>
+<td><code>Continents.*</code></td>
+<td>Shapefiles do mapa de fundo padrão.</td>
+</tr>
+<tr>
+<td><code>delaunay_cache.pkl</code></td>
+<td><strong>Cache persistente</strong> da triangulação de Delaunay da última malha usada — ver seção 10.</td>
+</tr>
+<tr>
+<td><code>last_grid.info</code></td>
+<td>Arquivo texto legível com as <strong>características</strong> da malha desse cache (não o nome do arquivo — ver seção 10).</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="91-grads_monantoml">9.1 <code>grads_monan.toml</code></h3>
+<p>Define os valores padrão de sessão (usados sempre que um arquivo é aberto):
+<code>xmark</code>, <code>ymark</code>, <code>colormark</code>, <code>sizemark</code>, <code>legend</code>, <code>lev</code>, <code>levf</code>, <code>gxout</code>,
+<code>title</code>, <code>label</code>, <code>map</code>, <code>map_color</code>, <code>map_line</code>, <code>cmap</code>, <code>lw</code>, <code>lc</code>, <code>clevs</code>,
+<code>lat_min</code>, <code>lat_max</code>, <code>lon_min</code>, <code>lon_max</code>, <code>time_sel</code>, <code>mappath</code>, <code>fig_dpi</code>,
+<code>fig_inches</code>, <code>fig_transparency</code>, <code>label_font</code>, <code>label_color</code>, <code>label_size</code>,
+<code>label_style</code>, <code>background</code>, <code>grid_color</code>, <code>grid_size</code>, <code>grid_type</code>, <code>xlabel_font</code>, <code>xlabel_color</code>, <code>xlabel_size</code>, <code>xlabel_style</code> (e <code>ylabel_*</code>, iguais), <code>title_color</code>, <code>title_font</code>, <code>title_size</code>, <code>title_style</code>,
+<code>bar_position</code>, <code>contour_line_size</code>, <code>contour_line_mode</code>, <code>contour_font</code>,
+<code>contour_font_color</code>, <code>contour_font_size</code>, <code>contour_font_style</code>.</p>
+<hr />
+<h2 id="10-a-triangulação-de-delaunay-e-por-que-ela-é-cacheada">10. A triangulação de Delaunay (e por que ela é cacheada)</h2>
+<h3 id="101-o-que-é">10.1 O que é</h3>
+<p>A malha do MONAN/MPAS é um conjunto de pontos (centros de célula)
+espalhados irregularmente pelo globo — não uma grade regular. Para
+interpolar essa malha (corte vertical, <code>streamlines</code> de vento, mapa
+<code>shaded</code>/<code>contour</code>), o programa precisa de uma <strong>triangulação de Delaunay</strong>:
+uma malha de triângulos conectando os pontos vizinhos, construída de forma
+que nenhum ponto fique dentro do círculo circunscrito de outro triângulo
+qualquer (a propriedade que garante uma interpolação bem-comportada,
+sem triângulos "espremidos"). É o que o <code>scipy.spatial.Delaunay</code> calcula.</p>
+<p>Uma vez triangulada, é possível interpolar qualquer variável para qualquer
+ponto de destino (uma linha de corte, uma grade regular, os nós de uma
+grade de <code>streamplot</code>) rapidamente — a parte cara é a <strong>construção</strong> da
+triangulação em si, não o uso dela depois.</p>
+<h3 id="102-por-que-isso-importa-aqui">10.2 Por que isso importa aqui</h3>
+<p>Para a malha operacional (~5,9 milhões de células), construir essa
+triangulação do zero leva dezenas de segundos. Refazer isso a cada <code>d</code>
+(cada troca de variável) seria inviável. Por isso, o programa a mantém em
+<strong>cache em dois níveis</strong>:</p>
+<ol>
+<li>
+<p><strong>Em memória, por sessão</strong> (<code>setup["_delaunay_malha"]</code>): construída na
+   primeira vez que é necessária (primeiro <code>shaded</code>/<code>contour</code>/corte/
+   <code>streamlines</code>/<code>d3 shaded</code> depois de um <code>open</code>), e reaproveitada por
+   todo o resto da sessão — trocar de variável, de tipo de plot, repetir
+   o mesmo comando: tudo usa a mesma triangulação já pronta.</p>
+</li>
+<li>
+<p><strong>Em disco, entre sessões</strong> (<code>~/.config/grads_monan/delaunay_cache.pkl</code>):
+   quando a triangulação é construída pela primeira vez numa sessão, ela
+   também é salva em disco. Da próxima vez que o programa for aberto (nova
+   execução) e um arquivo com a <strong>mesma malha</strong> for aberto, a triangulação
+   é lida do disco em vez de reconstruída — mesmo sendo tecnicamente um
+   arquivo <code>.nc</code> diferente (outra data/hora de rodada do modelo, por
+   exemplo), desde que a malha em si seja a mesma.</p>
+</li>
+</ol>
+<p>O que identifica "a mesma malha" <strong>não é o nome do arquivo</strong> — é uma
+assinatura calculada a partir do número de células e de um hash (<code>md5</code>) do
+conteúdo real de <code>latitude</code>/<code>longitude</code> de cada célula, gravada em
+<code>last_grid.info</code>. Se a assinatura do arquivo recém-aberto bater com a do
+cache salvo, ele é reaproveitado; se não bater (malha diferente), o
+programa reconstrói normalmente e substitui o cache em disco pelo novo.</p>
+<p>Esse mesmo Delaunay em cache também é usado pelo <code>shaded</code>/<code>contour</code> do
+<code>d3</code> no modo <code>vect</code>/<code>shaded</code> (via <code>_grade_regular_interpolada</code>) e pelo
+corte vertical e <code>streamlines</code> (<code>d u;v</code> com <code>gxout stream</code>) — a primeira
+dessas operações numa sessão "paga" o custo da triangulação; todas as
+outras, incluindo em sessões futuras com a mesma malha, saem rápidas.</p>
+<p><strong>Nota prática</strong>: o arquivo <code>delaunay_cache.pkl</code> pode ficar grande (algumas
+centenas de MB numa malha de milhões de células) — normal, não é um bug.</p>
+<p>O <code>voronoi</code> (seção 8.1) <strong>não</strong> usa essa triangulação — ele usa uma árvore
+<code>cKDTree</code> dos centros de célula, guardada só em cache de memória (não em
+disco), pois sua construção já é rápida por natureza.</p>
+<hr />
+<h2 id="11-dicionário-setup-estado-da-sessão">11. Dicionário <code>setup</code> (estado da sessão)</h2>
+<p>Além dos valores vindos do <code>.toml</code> (seção 9.1), o <code>setup</code> é enriquecido no
+<code>open</code> com:</p>
+<div class="tbl_wrap"><table>
+<thead>
+<tr>
+<th>Chave</th>
+<th>Conteúdo</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>openFile</code> / <code>openFileName</code> / <code>gridFileName</code></td>
+<td>Se há arquivo aberto; caminho do arquivo de dados; caminho do arquivo de grade usado (ou <code>None</code> se embutido no arquivo de dados) — sempre referentes ao <strong>arquivo 1</strong> (seção 2.1).</td>
+</tr>
+<tr>
+<td><code>variables</code></td>
+<td>Referência a <code>dataset.variables</code> do <strong>arquivo 1</strong>.</td>
+</tr>
+<tr>
+<td><code>files</code></td>
+<td>Lista com um registro por arquivo aberto na sessão (índice, nome do arquivo, arquivo de grade, <code>dataset</code>, informações de tempo) — ver seção 2.1.</td>
+</tr>
+<tr>
+<td><code>_malha_assinatura</code></td>
+<td>Assinatura (nº de células + hash <code>md5</code> de lat/lon) da malha da sessão, usada para validar que um novo <code>open</code> tem a mesma grade (uso interno — seção 2.1).</td>
+</tr>
+<tr>
+<td><code>arquivo_sel</code></td>
+<td>Número do arquivo (entre os abertos) usado por padrão em <code>d</code>/<code>d3</code>/estatísticas sem sufixo <code>.N</code> — selecionado por <code>set t &lt;n&gt;</code> (um argumento), padrão <code>1</code> — ver seção 2.1.</td>
+</tr>
+<tr>
+<td><code>time_ini</code>, <code>time_fim</code></td>
+<td>Intervalo de arquivos (pelo número de abertura) selecionado por <code>set t &lt;ini&gt; &lt;fim&gt;</code>, para a série temporal entre arquivos — ver seção 2.1. <code>None</code> se ainda não definido.</td>
+</tr>
+<tr>
+<td><code>minmax</code></td>
+<td>Dicionário <code>{variável: (min, max, intervalo|None)}</code> de <code>set minmax</code> — vazio = automático.</td>
+</tr>
+<tr>
+<td><code>tint</code></td>
+<td>Intervalo, em segundos, entre os quadros da animação da série temporal (<code>set tint</code>) — padrão 1.0.</td>
+</tr>
+<tr>
+<td><code>draw_map_on</code></td>
+<td><code>True</code> depois de <code>draw map</code> (até um <code>draw map off</code>): o mapa de fundo é redesenhado automaticamente em todo <code>d</code>/<code>d3</code> seguinte, inclusive quadro a quadro na animação — ver seção 2.1.</td>
+</tr>
+<tr>
+<td><code>cbar_label</code></td>
+<td>Texto definido por <code>draw label &lt;texto&gt;</code> (ou <code>None</code>/ausente se nunca usado): reaplicado automaticamente toda vez que uma nova barra de cores é criada, inclusive quadro a quadro na animação — ver seção 2.1/7.</td>
+</tr>
+<tr>
+<td><code>limits_poligono</code></td>
+<td>Array <code>(n_pontos, 2)</code> com os vértices (longitude, latitude) lidos por <code>load limits</code> (seção 2.2), ou ausente se nenhuma área foi carregada.</td>
+</tr>
+<tr>
+<td><code>limits_mask</code></td>
+<td>Array booleano <code>(nCells,)</code>: <code>True</code> nas células cujo centro cai dentro da área carregada por <code>load limits</code>. Base para as futuras funções estatísticas dentro da área.</td>
+</tr>
+<tr>
+<td><code>limits_indices</code></td>
+<td>Índices (inteiros) das células dentro da área — equivalente a <code>np.nonzero(limits_mask)[0]</code>, já pronto para uso direto.</td>
+</tr>
+<tr>
+<td><code>limits_arquivo</code></td>
+<td>Caminho do último arquivo de limites carregado com sucesso por <code>load limits</code>.</td>
+</tr>
+<tr>
+<td><code>latitudes</code> / <code>longitudes</code></td>
+<td>Coordenadas de cada célula da malha (graus, longitude normalizada).</td>
+</tr>
+<tr>
+<td><code>levels</code> / <code>eixo_pressao</code></td>
+<td>Nível <em>padrão</em> do arquivo (pressão se houver <code>t_iso_levels</code>; senão níveis do modelo), usado só quando a variável é desconhecida. O tipo de nível de cada variável vem de <code>utils.descritor_nivel</code> (seção 8.2).</td>
+</tr>
+<tr>
+<td><code>_nivel_atual</code></td>
+<td>Descritor do nível da variável do comando em andamento (tipo, valores, rótulo, sentido do eixo), registrado por <code>exec_func.py</code> ao resolver a variável.</td>
+</tr>
+<tr>
+<td><code>lat_min</code>, <code>lat_max</code>, <code>lon_min</code>, <code>lon_max</code></td>
+<td>Domínio geográfico selecionado.</td>
+</tr>
+<tr>
+<td><code>plots</code> / <code>plot_estilos</code></td>
+<td>Lista das curvas numeradas na tela (<code>{n, tipo, linha, x, y,…}</code>) e <code>{n: {color, marker, markersize, markercolor, linetype, linesize, label}}</code> de <code>set plot &lt;n&gt; ...</code> (seção 2.8).</td>
+</tr>
+<tr>
+<td><code>legend_paineis</code></td>
+<td><code>{(linha, coluna): {on, pos, title}}</code> — legenda de cada painel (seção 2.8); <code>legend_on</code>/<code>legend_pos</code>/<code>legend_title</code> espelham o painel selecionado.</td>
+</tr>
+<tr>
+<td><code>legend_on</code>, <code>legend_pos</code>, <code>legend_title</code>, <code>legend_title_size</code>, <code>legend_color</code>, <code>legend_line</code>, <code>legend_linetype</code></td>
+<td>Estado de <code>set legend ...</code> / <code>draw legend title</code> (seção 2.8).</td>
+</tr>
+<tr>
+<td><code>marker</code>, <code>marker_type</code>, <code>marker_size</code>, <code>marker_color</code>, <code>marker_text</code></td>
+<td>Estilo dos marcadores dos gráficos de linha (<code>set marker ...</code>; padrões <code>True</code>, <code>"auto"</code>, <code>6.0</code>, <code>None</code> = cor da linha, <code>False</code>).</td>
+</tr>
+<tr>
+<td><code>xtics</code> / <code>ytics</code></td>
+<td><code>True</code>/<code>False</code> — <code>set xtics|ytics on|off</code> (padrão <code>True</code>).</td>
+</tr>
+<tr>
+<td><code>yrange</code> / <code>xdiv</code> / <code>ydiv</code></td>
+<td><code>None</code> ou <code>(min, max)</code> / valor — <code>set yrange</code>, <code>set xdiv</code>, <code>set ydiv</code> (seção 6).</td>
+</tr>
+<tr>
+<td><code>xrange</code></td>
+<td><code>None</code> ou <code>(min, max)</code> — limites do eixo X de <code>set xrange</code>.</td>
+</tr>
+<tr>
+<td><code>sel</code></td>
+<td><code>{"lat": None\|(ini, fin), "lon": None\|(ini, fin), "t": None\|(ini, fim)}</code> — região/período do comando <code>sel</code> (seção 2.6). Limpo por <code>reset</code>.</td>
+</tr>
+<tr>
+<td><code>lev</code>, <code>levf</code></td>
+<td>Índice de nível (único ou intervalo) selecionado.</td>
+</tr>
+<tr>
+<td><code>cut</code></td>
+<td><code>None</code>, ou <code>(minimo, maximo)</code> — ver <code>set cut</code>.</td>
+</tr>
+<tr>
+<td><code>time</code>, <code>time_variable</code>, <code>time_units</code>, <code>time_str</code>, <code>DataDado</code></td>
+<td>Informações de tempo (com valores de reserva se ausentes).</td>
+</tr>
+<tr>
+<td><code>pages_rows</code>, <code>pages_cols</code>, <code>page_row</code>, <code>page_col</code></td>
+<td>Grade de painéis 2D.</td>
+</tr>
+<tr>
+<td><code>fig2d</code>, <code>fig3d</code>, <code>ax3d</code></td>
+<td>Referências às figuras/eixo ativos de <code>d</code> e <code>d3</code> (uso interno).</td>
+</tr>
+<tr>
+<td><code>_delaunay_malha</code></td>
+<td>Triangulação de Delaunay em cache de memória (uso interno — seção 10).</td>
+</tr>
+<tr>
+<td><code>_arvore_celulas</code></td>
+<td>Árvore <code>cKDTree</code> em cache de memória, para <code>gxout voronoi</code> (uso interno).</td>
+</tr>
+<tr>
+<td><code>_malha_dataset</code></td>
+<td>Referência ao <code>dataset</code> do arquivo de grade (embutido ou externo) usado para extrair <code>latCell</code>/<code>lonCell</code> do arquivo 1 — reaproveitado para ler <code>verticesOnCell</code>/<code>nEdgesOnCell</code>/<code>latVertex</code>/<code>lonVertex</code> sob demanda, quando <code>gxout hex</code> é usado (uso interno — seção 8.1).</td>
+</tr>
+<tr>
+<td><code>_poligonos_celulas</code></td>
+<td>Lista com o polígono (lon/lat) de cada célula, para <code>gxout hex</code>, em cache de memória — ou <code>None</code> se o arquivo de grade não tiver a conectividade completa (uso interno).</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="12-referência-de-módulos-e-funções">12. Referência de módulos e funções</h2>
+<h3 id="clipy"><code>cli.py</code></h3>
+<ul>
+<li><code>main()</code> — laço principal: banner, <code>ensure_config()</code>, lê comandos
+  (<code>custom_input</code>, passando o prompt atual — seção 1.1), despacha via
+  <code>_executar_com_status</code> (que por baixo chama <code>exec_cmd</code>), escolhe o
+  prompt da próxima linha a partir do status devolvido
+  (<code>_PROMPT_POR_STATUS</code>), força o redesenho da janela (<code>plt.draw()</code> +
+  <code>plt.pause()</code>) após cada comando.</li>
+<li><code>_COMANDOS_CONHECIDOS</code> — conjunto com todo comando de primeiro nível
+  reconhecido (mantido em sincronia manualmente com a cadeia de
+  <code>if</code>/<code>elif</code> de <code>exec_cmd</code>, mais os nomes de <code>NOMES_ESTATISTICA_ESCALAR</code>
+  — seção 2.3); se o primeiro token da linha não estiver aqui, o prompt
+  vira <code>?&gt;</code> sem sequer chamar <code>exec_cmd</code>.</li>
+<li><code>_executar_com_status(...)</code> — chama <code>exec_cmd</code> normalmente (a saída
+  continua aparecendo na hora, via <code>_TeeStdout</code>), guarda uma cópia dela e
+  devolve também o status (<code>_status_comando</code>); captura qualquer exceção
+  não tratada dentro do comando (vira <code>'erro'</code>, sem derrubar a sessão),
+  deixando <code>SystemExit</code> (<code>q</code>/<code>exit</code>/<code>quit</code>) passar normalmente.</li>
+<li><code>_status_comando(texto_impresso)</code> — classifica a saída de um comando
+  reconhecido em <code>'ok'</code>, <code>'erro'</code> ou <code>'desconhecido'</code>, conferindo os
+  marcadores <code>Erro:</code>/<code>Erro ao</code>/<code>Falha</code> (erro) e <code>Command not
+  recognized!</code> (desconhecido — seção 6, sub-comando de <code>set</code> inválido);
+  <code>Aviso:</code> não conta como erro.</li>
+<li><code>_TeeStdout</code> — encaminha toda escrita para o stdout real (nada muda
+  para quem está usando o programa) e também guarda uma cópia em memória,
+  usada só por <code>_executar_com_status</code> para decidir o status depois que o
+  comando termina.</li>
+<li><code>_PROMPT_POR_STATUS</code> — mapeia cada status (<code>'ok'</code>/<code>'erro'</code>/
+  <code>'desconhecido'</code>) para o texto do prompt (<code>'&gt; '</code>/<code>'E&gt; '</code>/<code>'?&gt; '</code>).</li>
+</ul>
+<h3 id="setup_configpy"><code>setup_config.py</code></h3>
+<ul>
+<li><code>ensure_config(force=False)</code> — cria <code>~/.config/grads_monan/</code> e o
+  <code>grads_monan.toml</code> se ainda não existirem (chamado automaticamente pelo
+  <code>main()</code>).</li>
+<li><code>main()</code> — ponto de entrada de <code>grads-monan-setup</code> (reinicializa a config).</li>
+</ul>
+<h3 id="history_funcpy"><code>history_func.py</code></h3>
+<ul>
+<li><code>ler_historico</code>, <code>texto_numerado</code>, <code>arquivo_historico</code>/<code>diretorio_config</code> — leitura do histórico (linhas não vazias; a numeração de <code>show commands</code> e de <code>exec</code> é a mesma). <code>eh_exec_historico</code>, <code>intervalo_exec</code>, <code>motivo_pular</code> — validação de <code>exec &lt;ini&gt; [&lt;fin&gt;]</code>. <code>cmd_history</code> (<code>history backup|clean</code>, <code>proximo_backup</code> = maior <code>history_backup&lt;n&gt;</code> + 1), <code>cmd_show_commands</code> e <code>abrir_janela</code>/<code>_main_janela</code> (janela <code>tkinter</code> em <strong>processo separado</strong>, <code>python -m grads_monan.history_func</code>, para não interferir no loop de eventos do matplotlib; cai no terminal se faltar <code>tkinter</code>/display). A execução em si de <code>exec</code> fica em <code>cli.py</code> (<code>_exec_historico</code>, usando <code>_executar_linha</code>, o mesmo caminho de uma linha digitada). Seção 2.9.</li>
+</ul>
+<h3 id="help_funcpy"><code>help_func.py</code></h3>
+<ul>
+<li><code>AJUDA</code> / <code>cmd_help(cmd_split)</code> — comando <code>help [termo]</code>: tabela (grupo → sintaxe, comentário) e filtro por termo. <strong>Ao criar um comando novo, acrescente-o em <code>AJUDA</code></strong> (há um teste que confere que todo comando do <code>cli.py</code> aparece na ajuda) e em <code>refcard.md</code>.</li>
+</ul>
+<h3 id="exec_funcpy"><code>exec_func.py</code></h3>
+<ul>
+<li><code>exec_cmd(...)</code> (wrapper) / <code>_exec_cmd_core(...)</code> / <code>_cmd_debug</code> / <code>_FiltroSaida</code> / <code>_DEBUG</code> — <code>debug on|off</code>: com <code>off</code>, a saída do comando passa por <code>_FiltroSaida</code>, que só deixa passar linhas de erro/uso (<code>_MARCAS_SEMPRE</code>), salvo nos comandos que imprimem resultado (<code>_comando_imprime_resultado</code>). Os comandos de dentro de <code>run</code> seguem a mesma regra, linha a linha.</li>
+<li><code>exec_cmd(...)</code> — despachante central de todos os comandos do prompt.</li>
+<li><code>run_file(...)</code> — executa um script de comandos linha a linha.</li>
+<li><code>_resolver_variavel(setup, token)</code> — resolve um token de variável com sufixo opcional <code>.N</code> (seção 2.1): localiza o arquivo aberto correspondente e a variável nele, com mensagens de erro/sugestões (<code>difflib</code>) quando o arquivo não está aberto ou a variável não existe. Sem sufixo <code>.N</code>, usa <code>setup['arquivo_sel']</code> (padrão <code>1</code>, alterado por <code>set t &lt;n&gt;</code>) em vez de sempre o arquivo 1.</li>
+<li><code>_arquivo_por_indice(setup, indice)</code> — retorna o registro do arquivo aberto com aquele índice, ou <code>None</code>.</li>
+<li><code>_avaliar_expressao(setup, expr)</code> — avaliador seguro de expressões aritméticas (<code>d (expr)</code>), agora resolvendo cada variável via <code>_resolver_variavel</code> — aceita sufixos <code>.N</code> e expressões cruzando arquivos, ex. <code>t2m.2 - t2m.1</code>.</li>
+<li><code>eh_atribuicao(cmd_user)</code> / <code>_definir_variavel</code> / <code>_listar_variaveis_usuario</code> / <code>_remover_variavel</code> / <code>_usar_variavel_usuario</code> — variáveis do usuário (<code>let</code>/<code>undef</code>, seção 2.4), guardadas em <code>setup['vars_usuario']</code> (<code>{nome: {array, expr, nivel}}</code>); <code>_resolver_variavel</code> dá prioridade a elas. <code>_FUNCOES_EXPR</code>/<code>_tokens_variaveis</code>/<code>_eval_expr</code> — funções permitidas nas expressões.</li>
+<li><code>_modo_serie_ativo(setup)</code> — <code>True</code> quando <code>set t &lt;ini&gt; &lt;fim&gt;</code> está definido e há mais de um arquivo aberto (seção 2.1).</li>
+<li><code>_dados_serie_temporal(setup, nome_var)</code> — reúne o array de <code>nome_var</code> de cada arquivo do intervalo <code>time_ini</code>/<code>time_fim</code>, com mensagens de erro/sugestões se a variável faltar em algum.</li>
+<li><code>_resolver_variavel_serie(setup, info, token)</code> — como <code>_resolver_variavel</code>, mas para uso dentro do modo de série: um token sem sufixo <code>.N</code> resolve para o arquivo do quadro atual (<code>info</code>), não sempre o arquivo 1; com sufixo, continua fixo naquele arquivo.</li>
+<li><code>_avaliar_expressao_serie(setup, info, expr)</code> — como <code>_avaliar_expressao</code>, mas usando <code>_resolver_variavel_serie</code> (expressões no modo série, ex. <code>t2m-273.15</code>).</li>
+<li><code>_dados_serie_temporal_expr(setup, expr)</code> — como <code>_dados_serie_temporal</code>, mas para uma expressão aritmética: avalia <code>expr</code> arquivo a arquivo (via <code>_avaliar_expressao_serie</code>) dentro do intervalo <code>time_ini</code>/<code>time_fim</code>.</li>
+<li><code>_dados_estatistica(setup, expr)</code> — reúne a lista de arrays "por arquivo/tempo" usada pelas funções estatísticas (seção 2.3): todos os arquivos do intervalo de <code>set t</code> quando o modo de série estiver ativo (sufixo <code>.N</code> ignorado, com aviso, se <code>expr</code> não tiver operador — quem manda é o intervalo), ou só o arquivo indicado por <code>expr</code> (com sufixo <code>.N</code>) caso contrário. Aceita tanto um nome de variável simples quanto uma expressão aritmética (ex: <code>t2m-273.15</code>), avaliada via <code>_avaliar_expressao</code>/<code>_dados_serie_temporal_expr</code>, igual ao <code>d</code>/<code>d3</code> (seção 3).</li>
+<li>Despacho escalar de <code>sum</code>/<code>mean</code>/<code>min</code>/<code>max</code>/<code>p10</code>..<code>p90</code> <code>all</code>/<code>inlimits</code>/<code>point &lt;variavel_ou_expressao&gt;</code> (seção 2.3): reúne os dados via <code>_dados_estatistica</code> e chama <code>calcular_valor</code> (<code>estatistics.py</code>), com <code>modo_point=True</code> quando o complemento for <code>point</code>.</li>
+<li>Despacho espacial de <code>d sum</code>/<code>mean</code>/<code>min</code>/<code>max</code>/<code>p10</code>..<code>p90</code> <code>all</code>/<code>inlimits</code>/<code>point &lt;variavel_ou_expressao&gt;</code> (seção 2.3; dentro do dispatch de <code>d</code>/<code>display</code>): reúne os dados via <code>_dados_estatistica</code>, chama <code>calcular_campo</code> (<code>estatistics.py</code>) — que também retorna o <strong>modo</strong> (mapa/ponto/corte/mapa_niveis, conforme a seleção atual de lat/lon/nível e o complemento <code>point</code>) — e plota o resultado com <code>plot_estatistica_campo</code> (<code>plot_func.py</code>); no modo <code>mapa_niveis</code>, <code>calcular_campo</code> já recusou e retornou <code>None</code>, então nada é plotado.</li>
+</ul>
+<h3 id="filespy-antigo-files_ncpy"><code>files.py</code> (antigo <code>files_nc.py</code>)</h3>
+<ul>
+<li><code>DatasetPreguicoso(caminho, dataset_aberto)</code> — envoltório dos arquivos 2..N: reabre o NetCDF sob demanda e mantém no máximo <code>_MAX_ABERTOS</code> abertos (pool LRU <code>_POOL_ABERTOS</code>); expõe <code>variables</code>, <code>dimensions</code>, <code>close</code> e delega os demais atributos.</li>
+<li><code>file_open(fileName, setup_toml, gridFile=None, setup_anterior=None)</code> — abre o arquivo (e a grade, se necessária). Se <code>setup_anterior</code> for passado (já há um arquivo aberto na sessão), valida a malha do novo arquivo contra a assinatura já registrada (seção 2.1): rejeita com <code>(None, None)</code> se forem diferentes (preservando <code>setup_anterior</code> intacto), ou adiciona o novo arquivo a <code>setup["files"]</code> com o próximo índice sequencial, se forem iguais. Sem <code>setup_anterior</code> (primeiro <code>open</code>), monta o <code>setup</code> do zero, como antes — inclusive guardando a referência ao <code>dataset</code> da malha (<code>setup["_malha_dataset"]</code>), usada sob demanda por <code>gxout hex</code> (seção 8.1) para ler a conectividade completa. Detecta arquivos em grade regular (<code>grade_regular.py</code>, seção 2.5), lê o tempo de <code>Time</code> quando não há <code>xtime</code> e usa a coordenada de pressão (<code>level</code>) como nível padrão quando não há <code>t_iso_levels</code>. Resiliente à ausência de <code>nCells</code>, malha, <code>xtime</code>/<code>initial_time</code>, <code>t_iso_levels</code>.</li>
+<li><code>carregar_limites(setup, caminho_csv)</code> — comando <code>load limits &lt;arquivo.csv&gt;</code> (seção 2.2): lê o arquivo de pontos (lat/lon, um por linha), calcula a máscara de células da malha dentro do polígono formado por eles e guarda tudo em <code>setup["limits_*"]</code>, pronto para as futuras funções estatísticas dentro da área. Retorna <code>True</code>/<code>False</code>; em caso de falha, preserva os limites já carregados anteriormente (se houver).</li>
+</ul>
+<h3 id="estatisticspy"><code>estatistics.py</code></h3>
+<ul>
+<li><code>calcular_valor(setup, nome_funcao, arrays, mask, rotulo, modo_point=False)</code> — forma <strong>escalar</strong> de todas as estatísticas (<code>sum</code>/<code>mean</code>/<code>min</code>/<code>max</code>/<code>p10</code>..<code>p90</code>, seção 2.3): empilha <code>arrays</code> (ver <code>_empilhar</code>) e reduz a <strong>um único número</strong>, sobre todos os tempos selecionados e, conforme o modo espacial atual (mapa/ponto/corte/mapa_niveis — ver <code>_modo_espacial</code>/<code>_fatia</code>): todas as células (ou só as de <code>mask</code>) no nível único (modo mapa) ou na faixa de níveis (modo corte, ou mapa com <code>modo_point=True</code> e faixa genuína — modo <code>mapa_niveis</code>), ou toda a faixa de níveis na célula mais próxima (modo ponto — <code>mask</code> aí só confere se esse ponto está dentro da área). Imprime o resultado e o retorna (<code>float</code>), ou <code>None</code> em caso de erro/aviso (variável com formato inesperado, máscara não batendo com a malha atual, nenhuma célula disponível, ou ponto fora da área de limites).</li>
+<li><code>calcular_campo(setup, nome_funcao, arrays, mask, rotulo, modo_point=False)</code> — forma <strong>espacial</strong>: como <code>calcular_valor</code>, mas reduz <strong>só sobre os tempos</strong>, mantendo a forma do modo atual — <code>(nCells,)</code> no mapa, <code>(nCells, nLevels)</code> no corte, <code>(nLevels,)</code> no ponto (perfil) — pronta para plotar via <code>plot_estatistica_campo</code> (<code>plot_func.py</code>). Com <code>mask</code>, as células de fora ficam com <code>NaN</code> (mapa/corte) ou o cálculo é recusado (ponto fora da área). Retorna <code>(campo, modo)</code>, ou <code>None</code> em caso de erro/aviso — inclusive no modo <code>mapa_niveis</code> (nem lat nem lon fixada, com <code>modo_point=True</code> e faixa genuína de níveis), onde a função sempre recusa a plotar (não há mapa nem corte bem definido) e retorna <code>None</code> com um aviso.</li>
+<li><code>levf_efetivo(lev, levf)</code> (<code>utils.py</code>, compartilhada com <code>plot_func.py</code>) — devolve o limite superior efetivo da fatia de níveis: <code>levf</code> quando já define uma faixa genuína (<code>levf &gt; lev</code>), senão <code>lev + 1</code> — evita que <code>var[..., lev:levf]</code> fique <strong>vazio</strong> quando <code>lev == levf</code> (nível único, sem <code>set lev &lt;ini&gt; &lt;fim&gt;</code> explícito), usado nos modos ponto/corte/mapa_niveis (<code>estatistics.py</code>) e nos mesmos modos da plotagem direta <code>d</code>/<code>d3</code> (<code>plot_func.py</code>).</li>
+<li><code>_fatia(setup, var, rotulo)</code> — extrai, de UM array (um arquivo/tempo), a MESMA fatia que <code>d</code>/<code>d3</code> extrairiam para plotar agora (ver <code>plot_var</code>/<code>plot_perfil</code>/<code>plot_corte</code> em <code>plot_func.py</code>), conforme o modo espacial atual: <code>var[time_sel,:]</code> (2D), <code>var[time_sel,:,lev]</code> (3D, mapa), <code>var[time_sel,indice_mais_proximo,lev:levf]</code> (3D, ponto) ou <code>var[time_sel,:,lev:levf]</code> (3D, corte). Retorna <code>(dados, modo, indice_mais_proximo)</code>.</li>
+<li><code>_empilhar(setup, arrays, rotulo, modo_point=False)</code> — fatia (<code>_fatia</code>) cada array de <code>arrays</code> (ver <code>_dados_estatistica</code> em <code>exec_func.py</code>) e empilha o resultado num eixo extra (o dos "tempos") na frente: <code>(n_tempos, nCells)</code> no mapa, <code>(n_tempos, nCells, nLevels)</code> no corte/mapa_niveis, ou <code>(n_tempos, nLevels)</code> no ponto. Retorna <code>(matriz, modo, indice_mais_proximo)</code>.</li>
+<li><code>_modo_espacial(setup)</code> — decide, a partir de <code>setup["lat_min"]</code>/<code>["lat_max"]</code>/<code>["lon_min"]</code>/<code>["lon_max"]</code>, o modo atual: <code>"ponto"</code> (lat e lon fixadas no mesmo valor), <code>"corte"</code> (só uma das duas fixa) ou <code>"mapa"</code> (nenhuma fixa) — mesma decisão que <code>plot_var</code> usa para escolher entre <code>plot_perfil</code>/<code>plot_corte</code>/mapa (seção 8).</li>
+<li><code>_indice_mais_proximo(setup)</code> — índice da célula da malha mais próxima do ponto de lat/lon selecionado (mesma fórmula usada por <code>plot_perfil</code>).</li>
+<li><code>_preparar_mascara(mask, n_cells, ...)</code> — confere se <code>mask</code> bate com o número de células da matriz empilhada (ex: após um <code>reinit</code> com outra malha, sem recarregar <code>load limits</code>).</li>
+<li><code>_descricao_nivel(setup)</code> / <code>_descricao_intervalo_niveis(setup)</code> — texto curto do nível único (modo mapa) ou da faixa de níveis (modo ponto/corte) atualmente selecionados, para anexar às mensagens de resultado — pressão em hPa ou profundidade do solo em m, conforme o tipo de nível da variável (<code>utils.nivel_do_setup</code>), senão só o(s) índice(s).</li>
+<li><code>sum_all</code>/<code>sum_inlimits</code>/<code>mean_all</code>/<code>mean_inlimits</code> — atalhos nomeados equivalentes a <code>calcular_valor</code> com o nome da função já fixado (úteis para chamar diretamente, ex. em testes).</li>
+<li>
+<p><code>NOMES_ESTATISTICA_ESCALAR</code>, <code>NOMES_ESTATISTICA_ESPACIAL</code> — tuplas com os nomes de comando reconhecidos por <code>exec_func.py</code> (todas as estatísticas têm tanto a forma escalar quanto a espacial, incluindo <code>sum</code>).</p>
+</li>
+<li>
+<p><code>mascara_sel(setup)</code> / <code>descricao_sel(setup)</code> / <code>nova_selecao()</code> — máscara booleana de células na região do <code>sel</code> (com cruzamento de meridiano), texto da região e seleção vazia. <code>calcular_serie_sel(setup, nome_funcao, dados, rotulo, acumular=False)</code> — para cada arquivo, fatia <code>[time_sel][máscara]</code> (e os níveis de <code>set lev</code>), acumula célula a célula (<code>acum</code>, ignorando <code>NaN</code>) e aplica a estatística; retorna <code>(valores, {n_cel, niveis})</code> ou <code>None</code>.</p>
+</li>
+</ul>
+<h3 id="set_funcpy"><code>set_func.py</code></h3>
+<ul>
+<li><code>cmd_set(...)</code> / <code>_cmd_set_dispatch(...)</code> — comando <code>set</code> (tabela da seção 6), com validação numérica segura. <code>set lev &lt;n1&gt; &lt;n2&gt;</code> valida <code>&lt;n1&gt;</code>/<code>&lt;n2&gt;</code> como índices de nível <strong>inclusivos</strong> (0 a <code>n_niveis-1</code>, com <code>&lt;n1&gt; &lt;= &lt;n2&gt;</code>) e guarda internamente <code>setup["levf"] = &lt;n2&gt; + 1</code> — o limite EXCLUSIVO usado por toda fatia de nível do resto do código (<code>var[..., lev:levf]</code> — ver <code>levf_efetivo</code> em <code>utils.py</code>); sem esse <code>+1</code>, incluir o último nível pedido exigiria um índice inválido.</li>
+<li><code>cmd_sel(cmd_split, setup, cmd_user)</code> / <code>_faixa_lon_sel(a, b)</code> — comando <code>sel</code> (seção 2.6): valida e guarda <code>setup['sel']</code>; normaliza longitudes (0–360 → −180–180, preservando o cruzamento do meridiano).</li>
+<li><code>set xtics|ytics on|off</code> guarda <code>setup['xtics'|'ytics']</code>; a aplicação é feita por <code>aplicar_limites_eixos</code> (<code>tick_params</code>).</li>
+<li><code>_valor_xrange(txt)</code> — interpreta número ou data para <code>set xrange|yrange</code>; <code>_reaplicar_limites_atuais</code> aplica na hora ao gráfico atual. A aplicação em si é <code>aplicar_limites_eixos(setup, ax)</code> (<code>plot_func.py</code>; xrange/yrange/xdiv/ydiv, chamada por <code>_aplicar_rotulos_eixos</code> ao final de toda plotagem); <code>restaurar_divisoes_eixos</code> atende <code>set xdiv|ydiv off</code>.</li>
+<li><code>_print_level_info(setup, l, lf=None)</code> — informação do nível (ou faixa) ao usar <code>set lev</code>, em cada tipo de nível do arquivo (pressão, solo, altura).</li>
+<li><code>_set_estilo_texto(setup, alvo, cmd_split, cmd_user)</code> — implementa <code>set label|title|xlabel|ylabel font/color/size/style</code> (<code>alvo</code> é <code>"label"</code>, <code>"title"</code>, <code>"xlabel"</code> ou <code>"ylabel"</code>; os dois últimos reaplicam o estilo na hora ao gráfico atual), guardando o resultado em <code>setup['&lt;alvo&gt;_font']</code>/<code>_color</code>/<code>_size</code>/<code>_style</code>. <code>font</code> verifica a existência da fonte no sistema (<code>_fonte_existe</code>, de <code>plot_func.py</code>) antes de aceitar.</li>
+<li>
+<p><code>_set_contour(setup, cmd_split, cmd_user)</code> — implementa <code>set contour line size/&lt;bw|color&gt;</code> e <code>set contour font/&lt;color|size|style&gt;</code> (linhas e rótulos inline do <code>gxout contour</code>), guardando o resultado em <code>setup['contour_line_size']</code>/<code>_line_mode</code>/<code>_font</code>/<code>_font_color</code>/<code>_font_size</code>/<code>_font_style</code>.</p>
+</li>
+<li>
+<p><code>_estatistica_sel(setup, cmd_user, cmd_split, inicio, plotar, ax, cbar)</code> — <code>&lt;função&gt; sel &lt;var&gt;</code>, <code>acum &lt;função&gt; sel &lt;var&gt;</code> e <code>d ...</code> (seção 2.6): detecta o prefixo <code>acum</code>, reúne os dados com <code>_dados_sel</code>, chama <code>calcular_serie_sel</code> e imprime a tabela ou plota com <code>plot_curva_sel</code>. <code>_dados_sel(setup, expr)</code> — lista <code>{index, DataDado, array}</code> dos arquivos do <code>sel t</code>, avaliando variável/expressão/<code>let</code> com <code>_avaliar_expressao_serie</code>. <code>sel</code> e <code>acum</code> são nomes reservados para <code>let</code>.</p>
+</li>
+</ul>
+<h3 id="show_funcpy"><code>show_func.py</code></h3>
+<ul>
+<li><code>cmd_show(setup, cmd_split)</code> / <code>_mostrar_info_arquivo(setup)</code> — comando <code>show</code> (tabela da seção 5).</li>
+<li><code>_mostrar_sets(setup)</code> / <code>_mostrar_sels(setup)</code> — blocos "Configuração atual (set)" e "Seleção atual (sel)" do <code>show info</code>; <code>_mostrar_sels</code> também atende <code>show sel</code> (seção 2.6).</li>
+<li><code>_mostrar_niveis(setup, filtro)</code> / <code>_mostrar_lev(setup)</code> — <code>show levels [tipo]</code> e <code>show lev</code>: níveis de cada tipo de coordenada vertical (seção 8.2).</li>
+<li><code>_mostrar_timestamp(setup, cmd_split)</code> — <code>show timestamp [n]</code>.</li>
+<li><code>_mostrar_arquivos(setup)</code> — <code>show files</code>: tabela com os arquivos abertos na sessão (seção 2.1).</li>
+<li><code>_mostrar_tempos(setup)</code> — <code>show times</code>: mesma tabela de <code>_mostrar_arquivos</code>, restrita ao(s) tempo(s) atualmente selecionado(s) por <code>set t</code> (o intervalo inteiro no modo série, ou só o arquivo pontual de <code>setup['arquivo_sel']</code> fora dele) — seção 2.1/5.</li>
+<li><code>_mostrar_fontes()</code> — <code>show fonts</code>: lista as fontes do sistema (ver <code>_listar_fontes</code> em <code>plot_func.py</code>) — seção 5/6.</li>
+<li><code>show_legend()</code> — <code>draw legend</code>.</li>
+</ul>
+<h3 id="draw_funcpy"><code>draw_func.py</code></h3>
+<ul>
+<li><code>draw_title(setup)</code> — <code>draw title &lt;texto&gt;</code>: desenha direto no eixo atual (<code>plt.title</code>), com a fonte/cor/estilo de <code>set title font/color/style</code> (<code>_kwargs_texto</code>, de <code>plot_func.py</code>).</li>
+<li><code>draw_map(setup, ax=None)</code> — <code>draw map</code>: garante uma figura/eixo 2D de verdade (via <code>_ativar_figura_2d</code>, de <code>plot_func.py</code>) antes de desenhar — não depende do <code>ax</code> recebido do chamador, que pode ainda ser o inteiro inicial <code>0</code> (de <code>cli.py</code>) se nenhum <code>d</code>/<code>d3</code> tiver rodado ainda na sessão. Se a janela 3D estiver ativa, desenha via <code>plot_map_3d</code> na superfície da caixa.</li>
+<li><code>draw_axis_label(setup, eixo, texto)</code> — <code>draw xlabel</code>/<code>draw ylabel</code>: guarda o texto em <code>setup['xlabel']</code>/<code>setup['ylabel']</code> e aplica no eixo atual; <code>_aplicar_rotulos_eixos(setup, ax)</code> (em <code>plot_func.py</code>) reaplica por cima do rótulo padrão ao final de toda plotagem.</li>
+<li><code>draw_label(setup, cbar, lbl)</code> — <code>draw label &lt;texto&gt;</code>: se <code>cbar</code> já é uma barra de cores de verdade, aplica o texto na hora (com a fonte/cor/estilo de <code>set label font/color/style</code>, via <code>_kwargs_texto</code>) e força o redesenho; senão (nenhum <code>d</code>/<code>d3</code> rodou ainda), não faz nada aqui — o texto já foi guardado em <code>setup["cbar_label"]</code> por quem chamou (<code>exec_func.py</code>) e é reaplicado sozinho pela primeira colorbar criada (<code>_aplicar_rotulo_cbar</code>, em <code>plot_func.py</code>).</li>
+<li><code>draw_mark(cmd_split)</code> — <code>draw mark &lt;lat&gt; &lt;lon&gt; &lt;simbolo&gt;</code> (seção 7.1).</li>
+<li><code>_SIMBOLOS_MARK</code> — tabela símbolo → <code>marker</code>/<code>fillstyle</code>.</li>
+</ul>
+<h3 id="plot_funcpy"><code>plot_func.py</code></h3>
+<ul>
+<li><code>interpolar_vertical(dados, zs, n)</code> / <code>_fator_vinterp</code> — interpolação linear na vertical do <code>d3</code> (<code>set vinterp</code>, <code>setup['vinterp']</code>, padrão <code>VINTERP_PADRAO</code> = 3), com tetos <code>_MAX_CAMADAS_3D</code>/<code>_MAX_PONTOS_3D</code>; no <code>shaded</code>, uma <code>Normalize</code> global comum a todas as camadas. Seção 4.</li>
+<li><code>resolver_tipo_marcador(txt)</code> / <code>_kwargs_marcador(setup)</code> / <code>aplicar_marcador_linha(setup, linha)</code> / <code>reaplicar_marcadores(setup)</code> — <code>set marker ...</code>: o estilo é aplicado na criação de cada linha (série, curva de <code>sel</code>, perfil — que agora usa os marcadores da própria linha, não mais um <code>scatter</code>) e reaplicado na hora ao último gráfico de linha na tela.</li>
+<li><code>_formatar_datas_eixo(ax, fig)</code> — gira os rótulos de data <strong>só do eixo plotado</strong> (antes usava <code>fig.autofmt_xdate()</code>, que apagava os rótulos e o título do eixo X dos demais painéis de <code>set pages</code>); em grade com mais de uma linha de painéis abre o espaçamento vertical (<code>hspace</code>).</li>
+<li><code>CHAVES_PAINEL</code> / <code>valor_painel(setup, painel, chave)</code> / <code>iniciar_paineis</code> / <code>trocar_painel</code> — configuração de aparência <strong>por painel</strong>: <code>set pages</code> guarda a base (<code>setup['painel_base']</code>), <code>set page</code> salva o painel que sai em <code>setup['painel_cfg'][(lin, col)]</code> e carrega o que entra; <code>estilo_efetivo</code>/<code>atualizar_legenda</code> leem o valor do painel de cada curva.</li>
+<li><code>registrar_linha(..., setup)</code> numera a curva (plot1, plot2… — <code>plots_ativos</code>), <code>estilo_efetivo</code> (set plot &gt; set marker &gt; sequência <code>_CORES_ANSI</code>/<code>_MARCADORES_SEQ</code>), <code>aplicar_estilo_plot</code>, <code>atualizar_legenda(setup, ax)</code> (legenda <strong>por painel</strong>, em L/R/U/D, fora do eixo, que é encolhido só no próprio painel; estado em <code>setup['legend_paineis'][(linha, coluna)]</code> = <code>{on, pos, title}</code>, via <code>definir_estado_legenda</code>/<code>estado_legenda</code>), <code>atualizar_legendas_figura</code> (refaz todas depois de qualquer ajuste de layout), <code>listar_plots</code> (tabela de <code>show plots</code>). Seção 2.8.</li>
+<li><code>registrar_linha(...)</code> / <code>salvar_csv(caminho, setup)</code> — <code>write csv</code> (seção 2.7): cada gráfico de linha (série em ponto, curva de <code>sel</code>, perfil vertical) registra seus dados em <code>setup['plots']</code>; <code>salvar_csv</code> grava, numa tabela só, todas as curvas vivas do eixo ativo (alinhadas pela 1ª coluna; blocos separados se os tipos diferem).
+<strong>Plotagem 2D:</strong></li>
+<li><code>plot_var(setup, var, cbar=None)</code> — despacha mapa/corte/perfil (seção 8) e <code>shaded</code>/<code>contour</code>/<code>voronoi</code>. No mapa horizontal, redesenha o mapa de fundo (<code>plot_map</code>) automaticamente se <code>setup["draw_map_on"]</code> estiver ligado (seção 7/2.1), e reaplica título (<code>_aplicar_titulo</code>) e rótulo da colorbar (<code>_aplicar_rotulo_cbar</code>), se definidos.</li>
+<li><code>plot_perfil(setup, var)</code> / <code>plot_corte(setup, var, cbar=None)</code> — resolvem a fatia bruta (<code>var[...]</code>) da variável comum e delegam o desenho a <code>_plotar_perfil_dados</code>/<code>_plotar_corte_dados</code>.</li>
+<li><code>_plotar_perfil_dados(setup, vertical_profile, closest_index)</code> / <code>_plotar_corte_dados(setup, data, cbar=None)</code> — desenham o perfil vertical/corte a partir de dados JÁ resolvidos (fatiados e, no caso do perfil, já na célula certa) — com hachura em áreas sem dado; reaproveitados tanto por <code>plot_perfil</code>/<code>plot_corte</code> (variável comum) quanto por <code>plot_estatistica_campo</code> (estatísticas num ponto/corte — seção 2.3); <code>_plotar_corte_dados</code> também reaplica o rótulo customizado da colorbar.</li>
+<li><code>plot_voronoi(setup, data)</code> — rasterização por aproximação (nearest-neighbor) via <code>cKDTree</code> (seção 8.1, <code>gxout voronoi</code>).</li>
+<li><code>plot_hexagonos(setup, data)</code> — desenha o polígono real de cada célula (<code>gxout hex</code>, seção 8.1) via <code>matplotlib.collections.PolyCollection</code>; avisa e retorna <code>None</code> (sem travar) se a malha não tiver a conectividade completa.</li>
+<li><code>_obter_poligonos_celulas(setup)</code> — polígonos de cada célula para <code>gxout hex</code>, em cache de memória (<code>setup["_poligonos_celulas"]</code>); construído uma única vez por sessão via <code>construir_poligonos_celulas</code> (utils.py), a partir de <code>setup["_malha_dataset"]</code>.</li>
+<li><code>plot_limites(setup)</code> — <code>load limits &lt;arquivo.csv&gt;</code> (seção 2.2): plota o contorno do polígono lido e destaca os centros de célula dentro dele (<code>setup["limits_mask"]</code>), com os demais em cinza claro para contexto.</li>
+<li><code>plot_estatistica_campo(setup, campo, modo, cbar=None)</code> — <code>d mean|min|max|p10..p90 all|inlimits &lt;variavel&gt;</code> (seção 2.3): plota <code>campo</code>, já reduzido por <code>calcular_campo</code> (<code>estatistics.py</code>), no formato indicado por <code>modo</code> ("mapa"/"ponto"/"corte" — mesma decisão que <code>plot_var</code> tomaria para a própria variável, seção 8): mapa (<code>(nCells,)</code>, embrulhado como <code>(1, nCells)</code> e passado a <code>plot_var</code> com <code>time_sel</code> forçado a 0 só durante a chamada), perfil (<code>(nLevels,)</code>, via <code>_plotar_perfil_dados</code>) ou corte (<code>(nCells, nLevels)</code>, via <code>_plotar_corte_dados</code>).</li>
+<li><code>plot_curva_sel(setup, rotulo_y, dados, valores, descricao_regiao, cbar=None)</code> — curva da estatística no tempo de <code>&lt;função&gt; sel &lt;var&gt;</code> (seção 2.6): eixo x em data/hora (<code>_eixo_x_tempo</code>), eixo y <code>rotulo_y</code>, região no título; respeita fundo, grade e estilos de <code>xlabel</code>/<code>ylabel</code>.</li>
+<li><code>_indice_mais_proximo_estatistica(setup)</code> — índice da célula mais próxima do ponto de lat/lon selecionado, usado por <code>plot_estatistica_campo</code> no modo "ponto" (mesma fórmula de <code>_indice_mais_proximo</code> em <code>estatistics.py</code>).</li>
+<li><code>plot_wind</code>, <code>plot_vector_field</code>, <code>plot_barbs</code>, <code>plot_streams</code> — vento (<code>vect</code>/<code>barb</code>/<code>stream</code>); <code>plot_wind</code> também redesenha o mapa e reaplica o título automaticamente se definidos.</li>
+<li><code>plot_marks(setup)</code> — mecanismo antigo de <code>set mark</code> (legado).</li>
+<li><code>_aplicar_titulo(setup, ax)</code> — desenha/redesenha <code>setup["title"]</code> (definido por <code>draw title</code>) no eixo, com a fonte/cor/estilo de <code>set title font</code>/<code>set title color</code>/<code>set title style</code> (ver <code>_kwargs_texto</code>); chamada em todo plot cujo eixo pode ter sido limpo entre uma chamada e outra (ex.: quadro a quadro na animação de mapa), para o título não se perder.</li>
+<li><code>_aplicar_rotulo_cbar(setup, cbar)</code> — reaplica <code>setup["cbar_label"]</code> (definido por <code>draw label</code>) numa colorbar recém-criada, com a fonte/cor/estilo de <code>set label font</code>/<code>set label color</code>/<code>set label style</code> (ver <code>_kwargs_texto</code>); chamada em toda criação de colorbar (2D e 3D), para o rótulo customizado não se perder quando a colorbar é recriada (ex.: a cada quadro da animação).</li>
+<li><code>_kwargs_texto(setup, prefixo)</code> — monta os argumentos de estilo (<code>color</code>/<code>fontfamily</code>/<code>fontsize</code>/<code>fontweight</code>/<code>fontstyle</code>) para desenhar texto (título ou rótulo da colorbar) a partir de <code>setup['&lt;prefixo&gt;_color']</code>/<code>_font</code>/<code>_size</code>/<code>_style</code> (<code>prefixo</code> é <code>"title"</code> ou <code>"label"</code>).</li>
+<li><code>aplicar_grade(setup, ax=None)</code> / <code>reaplicar_estilo_grade(setup)</code> / <code>_kwargs_grade(setup)</code> / <code>resolver_tipo_linha(texto)</code> — estilo da grade (<code>set grid color|size|type</code>): cor, espessura e <code>linestyle</code> do matplotlib; <code>resolver_tipo_linha</code> traduz os nomes em português, os do matplotlib e <code>dash:a,b,...</code>.</li>
+<li><code>aplicar_fundo(setup, cor=None, figuras=None)</code> / <code>restaurar_fundo(setup)</code> — <code>set background &lt;cor&gt;</code> / <code>set background default</code>: gravam a cor nos <code>rcParams</code> do matplotlib (<code>figure.facecolor</code>, <code>axes.facecolor</code>, <code>savefig.facecolor</code>) e aplicam nas figuras/eixos já abertos; <code>_ativar_figura_2d</code>/<code>_ativar_figura_3d</code> reaplicam ao criar uma figura nova.</li>
+<li><code>_estilo_para_kwargs(estilo)</code> — traduz <code>"bold"</code>/<code>"italic"</code>/<code>"normal"</code> (<code>set label style</code>/<code>set title style</code>) para os argumentos independentes do matplotlib <code>fontweight</code>/<code>fontstyle</code>.</li>
+<li><code>_listar_fontes()</code> / <code>_fonte_existe(nome)</code> — lista as fontes do sistema reconhecidas pelo matplotlib (<code>show fonts</code>) e confere se uma fonte existe, antes de aceitar <code>set label font</code>/<code>set title font</code>.</li>
+<li><code>_kwargs_colorbar(setup)</code> — monta o argumento <code>location</code> para <code>plt.colorbar</code>/<code>fig.colorbar</code> a partir de <code>setup['bar_position']</code> (<code>set bar position &lt;U/D/L/R&gt;</code>).</li>
+<li><code>_kwargs_contour_linhas(setup, cmap)</code> — monta os argumentos de cor/espessura para <code>ax.contour</code> (linhas do <code>gxout contour</code>) a partir de <code>setup['contour_line_size']</code>/<code>setup['contour_line_mode']</code> (<code>set contour line size/&lt;bw|color&gt;</code>).</li>
+<li><code>_aplicar_estilo_contorno_labels(setup, textos)</code> — aplica a fonte/cor/tamanho/estilo de <code>set contour font</code>/<code>set contour font color</code>/<code>set contour font size</code>/<code>set contour font style</code> a cada rótulo inline (<code>Text</code>) devolvido por <code>ax.clabel</code>/<code>plt.clabel</code> — a API de <code>clabel</code> desta versão do matplotlib não aceita fonte/estilo diretamente (só <code>fontsize</code>, que também é passado na criação).</li>
+</ul>
+<p><strong>Plotagem 3D:</strong>
+- <code>plot_var_3d(setup, var)</code> — <code>d3</code> (seção 4): <em>scatter</em> ou superfícies empilhadas (<code>shaded</code>). Redesenha o mapa (<code>plot_map_3d</code>) automaticamente se <code>setup["draw_map_on"]</code> estiver ligado, e reaplica o rótulo customizado da colorbar (<code>_aplicar_rotulo_cbar</code>), se definido.</p>
+<p><strong>Série temporal entre arquivos (seção 2.1):</strong>
+- <code>plot_serie(setup, var_name, dados, cbar=None)</code> — despachante de <code>d &lt;variavel&gt;</code> no modo de série temporal: decide entre linha/Hovmöller (<code>plot_serie_temporal</code>) e animação de mapa (<code>plot_serie_mapa</code>).
+- <code>plot_serie_temporal(setup, var_name, dados, cbar=None)</code> — linha (ponto único) ou diagrama Hovmöller (uma faixa entre lat/lon/nível); no Hovmöller, também reaplica o rótulo customizado da colorbar.
+- <code>plot_serie_mapa(setup, var_name, dados, cbar=None)</code> — animação 2D (mapa completo), quadro a quadro, pausando <code>tint</code> segundos entre cada um.
+- <code>plot_serie_mapa_3d(setup, var_name, dados)</code> — mesma animação, para <code>d3</code>.
+- <code>_eixo_x_tempo(dados)</code> / <code>_formatar_eixo_x_tempo(...)</code> — monta o eixo X (tempo) a partir do <code>DataDado</code> de cada arquivo selecionado (datas reais, ou eixo posicional como recurso).</p>
+<p><strong>Triangulação e interpolação (seção 10):</strong>
+- <code>_obter_triangulacao(setup)</code> — Delaunay em cache (memória → disco → constrói).
+- <code>_assinatura_grade(setup)</code> — nº de células + hash de lat/lon.
+- <code>_carregar_delaunay_disco</code> / <code>_salvar_delaunay_disco</code> — cache persistente.
+- <code>_interpolar(setup, valores, pontos_destino)</code> — interpolação linear reaproveitando a triangulação.
+- <code>_grade_regular_interpolada(setup, ax, data)</code> — interpola para uma grade regular (usada por <code>shaded</code>/<code>contour</code>).
+- <code>_obter_arvore_celulas(setup)</code> — <code>cKDTree</code> em cache, para <code>voronoi</code>.</p>
+<p><strong>Utilitários de plotagem:</strong>
+- <code>_ativar_figura_2d</code> / <code>_ativar_figura_3d</code> — garantem a janela certa ativa antes de plotar.
+- <code>clear_plots(setup=None)</code> — <code>c</code> (painel/janela 2D ou 3D, conforme a ativa).
+- <code>set_window_title(titulo)</code> / <code>set_ion()</code> — título da janela (bruto) / modo interativo.
+- <code>atualizar_titulo_janela(setup)</code> — monta e aplica o título da janela no formato <code>GradsMonan: &lt;timestamp&gt;,&lt;lat&gt;,&lt;lon&gt;,L&lt;nivel&gt;</code> (lat/lon com 2 casas decimais; nível prefixado com <code>L</code> — seção 2.1), chamada por <code>files.py</code> logo após cada <code>open</code>, por <code>set_func.py</code> ao final de <code>set t</code>/<code>set lat</code>/<code>set lon</code>/<code>set lev</code>, e por <code>exec_func.py</code> no <code>reset</code>.
+- <code>save_fig(fig_name, setup)</code> — <code>gxprint</code>.
+- <code>_niveis_cor(setup)</code> — níveis de cor/contorno (<code>set clevs</code> ou padrão).
+- <code>_tamanho_malha_ok</code>, <code>_aplicar_corte</code>, <code>_mask_corte</code> — validações e aplicação de <code>set cut</code>.</p>
+<h3 id="map_funcpy"><code>map_func.py</code></h3>
+<ul>
+<li><code>plot_map(setup, ax)</code> — mapa de fundo 2D.</li>
+<li><code>plot_map_3d(setup, ax3d)</code> — mapa de fundo projetado na superfície 3D (<code>d3</code> + <code>draw map</code>).</li>
+</ul>
+<h3 id="grade_regularpy"><code>grade_regular.py</code></h3>
+<ul>
+<li><code>detectar_grade_regular(dataset)</code> — decide, pelo conteúdo, se o arquivo está em grade regular lat/lon (seção 2.5); devolve as coordenadas ou <code>None</code>.</li>
+<li><code>adaptar_se_regular(dataset)</code> — devolve o próprio dataset (malha do MPAS) ou um <code>DatasetGradeRegular</code>.</li>
+<li><code>DatasetGradeRegular</code> — mesma interface do <code>Dataset</code> do netCDF4, com a dimensão <code>nCells</code>, as variáveis virtuais <code>latCell</code>/<code>lonCell</code> (radianos) e as demais variáveis reorganizadas.</li>
+<li><code>VariavelGradeRegular</code> — visão de uma variável <code>(…, latitude, longitude)</code> como <code>(Time, nCells[, nível])</code>; leitura sob demanda (um índice de tempo inteiro lê só aquele instante).</li>
+</ul>
+<h3 id="utilspy"><code>utils.py</code></h3>
+<ul>
+<li><code>normalize_lon(lon)</code> — normaliza longitude para (-180, 180].</li>
+<li><code>mag(u, v)</code> — magnitude vetorial.</li>
+<li><code>sem_mascara(arr)</code> — converte array mascarado do <code>netCDF4</code> (<code>numpy.ma.MaskedArray</code>) para array comum com <code>NaN</code>, evitando que <code>scipy</code>/<code>Delaunay</code>/<code>cKDTree</code> rejeitem o dado.</li>
+<li><code>assinatura_malha(latitudes, longitudes)</code> — nº de células + hash <code>md5</code> de lat/lon, usada para validar que arquivos abertos na mesma sessão compartilham a mesma malha (seção 2.1).</li>
+<li><code>construir_poligonos_celulas(mesh)</code> — monta o polígono (lon/lat) de cada célula a partir da conectividade completa do arquivo de grade (<code>verticesOnCell</code>/<code>nEdgesOnCell</code>/<code>latVertex</code>/<code>lonVertex</code>), incluindo o formato/tamanho real das células de borda em domínios regionais — usado por <code>gxout hex</code> (seção 8.1). Retorna <code>None</code> se a malha não tiver essa conectividade.</li>
+<li><code>load_zgrid_centers(...)</code> — extrai e alinha a variável <code>zgrid</code>.</li>
+<li><code>classificar_dim_vertical(nome)</code> / <code>descritor_nivel(setup, var)</code> / <code>descritores_disponiveis(setup)</code> / <code>nivel_padrao(setup)</code> / <code>nivel_do_setup(setup)</code> / <code>formatar_nivel(desc, i)</code> / <code>checar_niveis(setup, desc, nome)</code> — coordenada vertical <strong>por variável</strong> (pressão, altura, solo; seção 8.2): o descritor traz tipo, dimensão, nº de níveis, valores, rótulo, sentido do eixo e fonte; <code>checar_niveis</code> confere o <code>set lev</code> contra os níveis da variável.</li>
+<li><code>encontrar_posicao_mais_proxima(...)</code> — busca binária.</li>
+<li><code>custom_input(prompt="&gt; ")</code> / <code>load_history</code> / <code>save_command_to_history</code> — prompt com histórico; <code>prompt</code> é escolhido a cada linha por <code>cli.py</code> conforme o resultado do comando anterior (seção 1.1: <code>'&gt; '</code>/<code>'E&gt; '</code>/<code>'?&gt; '</code>).</li>
+</ul>
+<hr />
+<h2 id="13-requisitos-de-arquivo">13. Requisitos de arquivo</h2>
+<ul>
+<li><strong>Sempre necessário</strong>: as variáveis a serem plotadas.</li>
+<li><strong>Malha</strong>: <code>nCells</code> e <code>latCell</code>/<code>lonCell</code> (<strong>ou</strong> uma grade regular com coordenadas 1-D de latitude e longitude — seção 2.5), embutidos ou num arquivo de grade externo (seção 10 do manual anterior mantém-se válida: vários cenários de ausência são tratados sem travar).</li>
+<li><strong>Tempo</strong> (opcional, com valores de reserva): <code>xtime</code>, <code>initial_time</code>.</li>
+<li><strong>Níveis de pressão</strong> (opcional): <code>t_iso_levels</code> (Pa).</li>
+<li><strong>Níveis de solo</strong> (opcional): dimensão <code>nSoilLevels</code> com <code>zs</code> (profundidade dos centros) ou <code>dzs</code> (espessura das camadas). Sem isso, usa o índice.</li>
+<li>Sem nenhum deles, usa índice de nível do modelo.</li>
+<li><strong>Altura real</strong> (opcional, corte/perfil/<code>d3</code> por altura): <code>zgrid</code>.</li>
+<li><strong><code>voronoi</code>/<code>shaded</code>/<code>contour</code>/corte/<code>streamlines</code></strong>: só precisam de <code>latCell</code>/<code>lonCell</code> — não é necessária a conectividade completa (<code>verticesOnCell</code> etc.).</li>
+<li><strong><code>hex</code></strong> (seção 8.1): precisa da conectividade completa da malha — <code>verticesOnCell</code>, <code>nEdgesOnCell</code>, <code>latVertex</code>, <code>lonVertex</code> — presente no arquivo de grade padrão do MPAS/MONAN (<code>x1.&lt;nCells&gt;.grid.nc</code>), mas tipicamente ausente em saídas de diagnóstico/pós-processadas. Sem essa conectividade, o programa avisa e sugere <code>voronoi</code> em vez de travar.</li>
+</ul>
+        </div>
+      </div>
+    </div>
+    <div id="content_footer"></div>
+    <a id="to_top" href="#manual_toc" title="Voltar ao índice">&#8593; Índice</a>
+    <div id="footer">
+      <p><a href="index.html">Home</a> | <a href="examples.html">Examples</a> | <a href="page.html">A Page</a> | <a href="another_page.html">Another Page</a> | <a href="contact.html">Contact Us</a></p>
+      <p>Copyright &copy; simplestyle_horizon | <a href="http://validator.w3.org/check?uri=referer">HTML5</a> | <a href="http://jigsaw.w3.org/css-validator/check/referer">CSS</a> | <a href="http://www.html5webtemplates.co.uk">Simple web templates by HTML5</a></p>
+    </div>
+  </div>
+</body>
+</html>
