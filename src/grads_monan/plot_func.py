@@ -8,6 +8,7 @@
 """ This script plot data from NetCDF data generated From MONAN MODEL"""  
 # ---------------------------------------------------------------------------
 import os
+import time
 import sys
 import re
 import pickle
@@ -2513,7 +2514,11 @@ def plot_serie_mapa(setup, var_name, dados, cbar=None):
             barra.atualizar(i)
             try:
                 fig.canvas.draw_idle()
-                plt.pause(max(float(intervalo), 0.001))
+                _t_p = time.perf_counter()
+                try:
+                    plt.pause(max(float(intervalo), 0.001))
+                finally:
+                    setup["_tempo_pausa"] = setup.get("_tempo_pausa", 0.0) + (time.perf_counter() - _t_p)
             except Exception:
                 pass
     except KeyboardInterrupt:
@@ -2559,7 +2564,11 @@ def plot_serie_mapa_3d(setup, var_name, dados):
                 fig3d = setup.get("fig3d")
                 if fig3d is not None:
                     fig3d.canvas.draw_idle()
-                plt.pause(max(float(intervalo), 0.001))
+                _t_p = time.perf_counter()
+                try:
+                    plt.pause(max(float(intervalo), 0.001))
+                finally:
+                    setup["_tempo_pausa"] = setup.get("_tempo_pausa", 0.0) + (time.perf_counter() - _t_p)
             except Exception:
                 pass
     except KeyboardInterrupt:

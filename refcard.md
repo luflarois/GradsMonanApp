@@ -57,6 +57,7 @@ d temp           perfil, se lat e lon fixos
 d temp           corte, se só lat OU lon fixo
 d3 temp          3D (sem faixa = tudo)
 set vinterp 3    d3: camadas interpoladas (off=0)
+set timemeasure on  mostra o tempo de d / d3
 c                limpa o gráfico
 gxprint f.png    salva (png, pdf, …)
 write csv f      grava todas as curvas em CSV

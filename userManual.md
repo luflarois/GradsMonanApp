@@ -50,8 +50,6 @@ conda activate GradsMonanApp
 grads-monan
 ```
 
-Você pode assistir um vídeo exemplo de instalação (git, pacotes, etc) em [Assista ao vídeo](https://drive.proton.me/urls/RMDNQK0G14#YaSfg8Gzj4Pf)
-
 **OBSERVAÇÃO IMPORTANTE**: se vc for rodar um branch específico que ainda não recebeu
 pull request ou teve pull request aceito, proceda o checkout para o branch:
 
@@ -221,9 +219,6 @@ Num  Arquivo                                        Timestamp
 - `show files` (ver também seção 5) lista, em forma de tabela, todos os
   arquivos abertos na sessão: número, nome do arquivo e o timestamp
   (data/hora), quando disponível — "desconhecida" caso contrário.
-
-Você pode assistir um vídeo exemplo de abertura de um arquivo em [Assista ao vídeo](https://drive.proton.me/urls/RMDNQK0G14#YaSfg8Gzj4Pf)
-
 - Abrir um novo arquivo **não reseta** as configurações já feitas na sessão
   (`set lev`, `set gxout`, `title`, etc.) — elas continuam valendo; só o(s)
   arquivo(s) adicional(is) entram na lista.
@@ -1170,6 +1165,7 @@ faltando avisa e **mantém a configuração anterior**, sem travar.
 | `set legend color <cor>` | Cor do texto, do título e da **borda** da caixa (`default` volta ao automático). |
 | `set legend line <espessura>` / `set legend linetype <tipo>` | Espessura e tipo (cheia, tracejada, traço-ponto, pontilhada…, como em `set grid type`) da **borda** da caixa. |
 | `set minmax <variável> <min> <max> [<intervalo>]` | Fixa a escala de cores **da variável** em `d`, `d3` e `write animation` (ex.: `set minmax t2m 280 320 5` → 280 K a 320 K, faixas de 5 K). Sem `<intervalo>`, usa 20 faixas iguais entre min e max. Vale para esse nome de variável (com ou sem `.N`; expressões sem espaços, como `t2m-273.15`, têm chave própria); tem prioridade sobre `set clevs` para ela. Valores fora de min–max ficam sem cor. `set minmax <variável>` remove a escala dela; `set minmax` sem argumentos remove todas (volta ao automático). `reset` não altera. Aparece em `show info`. |
+| `set timemeasure on\|off` | Com `on`, cada `d`/`display` e `d3` mostra, **depois de terminar**, o tempo gasto (leitura dos dados, cálculo e desenho): `Tempo [d t2m]: 1.234 s`. Em animações (`set t <ini> <fin>`) separa o processamento da pausa entre quadros: `Tempo [d t2m]: 5.234 s (1.234 s de processamento + 4.000 s de pausa entre quadros, set tint)`. Aparece também com `debug off`. Padrão: `off`; aparece em `show info`. |
 | `set vinterp <n>\|on\|off` | Interpolação vertical do `d3`: `n` camadas intermediárias entre cada par de níveis (padrão 3; `off` = 0) — seção 4. |
 | `set clevs <v0> <v1> ... <vn>` | Fronteiras exatas dos intervalos de cor/contorno (ex.: `0 100 200 ... 1500`). Usadas em todo tipo de plotagem com barra de cores, inclusive `d3`. Lista vazia volta ao padrão automático (20 níveis). |
 | `set cmap <nome>` | Colormap do matplotlib. |
@@ -1543,6 +1539,7 @@ Além dos valores vindos do `.toml` (seção 9.1), o `setup` é enriquecido no
 - `_SIMBOLOS_MARK` — tabela símbolo → `marker`/`fillstyle`.
 
 ### `plot_func.py`
+- Animações (`plot_serie_mapa`, `plot_serie_mapa_3d`) somam em `setup['_tempo_pausa']` o tempo parado em `plt.pause`, para o `set timemeasure` separar processamento de pausa.
 - `interpolar_vertical(dados, zs, n)` / `_fator_vinterp` — interpolação linear na vertical do `d3` (`set vinterp`, `setup['vinterp']`, padrão `VINTERP_PADRAO` = 3), com tetos `_MAX_CAMADAS_3D`/`_MAX_PONTOS_3D`; no `shaded`, uma `Normalize` global comum a todas as camadas. Seção 4.
 - `resolver_tipo_marcador(txt)` / `_kwargs_marcador(setup)` / `aplicar_marcador_linha(setup, linha)` / `reaplicar_marcadores(setup)` — `set marker ...`: o estilo é aplicado na criação de cada linha (série, curva de `sel`, perfil — que agora usa os marcadores da própria linha, não mais um `scatter`) e reaplicado na hora ao último gráfico de linha na tela.
 - `_formatar_datas_eixo(ax, fig)` — gira os rótulos de data **só do eixo plotado** (antes usava `fig.autofmt_xdate()`, que apagava os rótulos e o título do eixo X dos demais painéis de `set pages`); em grade com mais de uma linha de painéis abre o espaçamento vertical (`hspace`).

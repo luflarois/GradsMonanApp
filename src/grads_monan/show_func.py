@@ -78,6 +78,7 @@ def _mostrar_sets(setup):
     clevs = setup.get("clevs")
     print("  set clevs:  {0}".format(" ".join("{0:g}".format(c) for c in clevs) if clevs else "automatico"))
     print("  set vinterp: {0}".format(setup.get("vinterp", 3)))
+    print("  set timemeasure: {0}".format("on" if setup.get("timemeasure") else "off"))
     mm = setup.get("minmax") or {}
     if mm:
         for k, (a, b, st) in mm.items():

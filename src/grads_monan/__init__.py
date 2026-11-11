@@ -1,3 +1,3 @@
 """GRADS-MONAN APP - um clone do GrADS para saidas do modelo MONAN/MPAS."""
 
-__version__ = "1.2.2"
+__version__ = "1.2.3"

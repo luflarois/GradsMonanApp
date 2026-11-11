@@ -1016,6 +1016,14 @@ def _cmd_set_dispatch(cmd_split, setup, cmd_user):
             cmd_split[2], vmin, vmax,
             "intervalo {0:g}".format(passo) if passo else "intervalo padrao ({0:g}, 20 faixas)".format((vmax - vmin) / 20)))
         return setup
+    elif cmd_split[1] == "timemeasure":
+        # set timemeasure on|off - mostra o tempo gasto por cada 'd' / 'd3'
+        if len(cmd_split) == 3 and cmd_split[2].lower() in ("on", "off"):
+            setup["timemeasure"] = cmd_split[2].lower() == "on"
+            print("timemeasure: {0}".format("ligado (d e d3 mostram o tempo gasto)" if setup["timemeasure"] else "desligado"))
+        else:
+            print("Uso: set timemeasure on|off")
+        return setup
     elif cmd_split[1] == "vinterp":
         # set vinterp <n>|on|off  - interpolacao vertical do 'd3' (camadas
         # intermediarias entre niveis); sem argumento volta ao padrao.

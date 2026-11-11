@@ -9,6 +9,7 @@
 # ---------------------------------------------------------------------------
 import os
 import sys
+import time
 import re
 import glob
 import difflib
@@ -1100,6 +1101,32 @@ def exec_cmd(cmd_user, cmd, cmd_split, setup, dataset, ax, cbar, setup_toml):
     if cmd == "show" and len(cmd_split) > 1 and cmd_split[1] == "commands":
         cmd_show_commands()
         return setup, dataset, ax, cbar
+    if setup.get("timemeasure") and cmd in _COMANDOS_CRONOMETRADOS:
+        # 'set timemeasure on': mede o 'd'/'d3' (inclui leitura, calculo e
+        # desenho) e mostra o tempo depois que o comando termina.
+        setup["_tempo_pausa"] = 0.0
+        t0 = time.perf_counter()
+        try:
+            return _exec_cmd_saida(cmd_user, cmd, cmd_split, setup, dataset, ax, cbar, setup_toml)
+        finally:
+            _mostrar_tempo(cmd_user, time.perf_counter() - t0, setup.get("_tempo_pausa", 0.0))
+    return _exec_cmd_saida(cmd_user, cmd, cmd_split, setup, dataset, ax, cbar, setup_toml)
+
+
+_COMANDOS_CRONOMETRADOS = ("d", "display", "d3")
+
+
+def _mostrar_tempo(cmd_user, total, pausa):
+    """Linha de 'set timemeasure on'. Em animacoes, separa o tempo parado
+    em 'set tint' do processamento de verdade."""
+    if pausa > 0.0005:
+        print("Tempo [{0}]: {1:.3f} s ({2:.3f} s de processamento + {3:.3f} s de pausa entre quadros, set tint)".format(
+            cmd_user.strip(), total, max(total - pausa, 0.0), pausa))
+    else:
+        print("Tempo [{0}]: {1:.3f} s".format(cmd_user.strip(), total))
+
+
+def _exec_cmd_saida(cmd_user, cmd, cmd_split, setup, dataset, ax, cbar, setup_toml):
     if _DEBUG["on"] or _comando_imprime_resultado(cmd, cmd_split):
         return _exec_cmd_core(cmd_user, cmd, cmd_split, setup, dataset, ax, cbar, setup_toml)
     real = sys.stdout

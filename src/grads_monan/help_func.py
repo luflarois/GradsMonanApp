@@ -61,6 +61,7 @@ AJUDA = [
         ("set cmap <nome>", "colormap"),
         ("set clevs <v0> ... <vn>", "fronteiras dos intervalos de cor"),
         ("set vinterp <n>|on|off", "d3: n camadas interpoladas entre niveis (continuidade vertical)"),
+        ("set timemeasure on|off", "mostra o tempo gasto por d e d3"),
         ("set minmax <var> <min> <max> [int]", "escala de cor fixa p/ a variavel (d, d3, animacao); sem args = automatico"),
         ("set background <cor>", "cor de fundo da janela (default)"),
         ("set bar position <U|D|L|R>", "posicao da barra de cores"),

@@ -414,6 +414,7 @@ def file_open(fileName, setup_toml, gridFile=None, setup_anterior=None):
                  "cut"             : None,
                  "tint"            : 1.0,
                  "vinterp"         : 3,
+                 "timemeasure"     : False,
                  "minmax"          : {},
                  "draw_map_on"     : False,
                  "variables"       :variables,
