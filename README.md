@@ -6,8 +6,8 @@
 
 ---
 
-**Version:** 1.2.3  
-**Date:** November 10, 2026
+**Version:** 1.2.4  
+**Date:** November 13, 2026
 
 ---
 

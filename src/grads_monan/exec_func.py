@@ -24,7 +24,7 @@ from .plot_func import plot_wind, plot_var, plot_var_3d, clear_plots,save_fig, p
 from .draw_func import draw_title, draw_mark, draw_map, draw_label, draw_axis_label
 from .set_func import cmd_set, cmd_sel
 from .help_func import cmd_help
-from .utils import mag, sem_mascara, descritor_nivel, checar_niveis
+from .utils import mag, sem_mascara, descritor_nivel, checar_niveis, ArrayPreguicoso
 from .estatistics import calcular_valor, calcular_campo, NOMES_ESTATISTICA_ESCALAR, NOMES_ESTATISTICA_ESPACIAL, calcular_serie_sel, descricao_sel, nova_selecao, _NOMES_FUNCAO as _NOMES_ESTATISTICA
 
 _REF_VAR_RE = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*)(?:\.(\d+))?$')
@@ -106,7 +106,7 @@ def _resolver_variavel(setup, token):
     if not _registrar_nivel(setup, nome, variables[nome], variables):
         return nome, indice, None
 
-    return nome, indice, sem_mascara(variables[nome][:])
+    return nome, indice, ArrayPreguicoso(variables[nome])
 
 _TOKEN_REF_RE = re.compile(r'(?<![A-Za-z0-9_.])[A-Za-z_][A-Za-z0-9_]*(?:\.\d+)?')
 
@@ -134,6 +134,67 @@ def _eval_expr(expr_substituida, namespace):
     ns.update(namespace)
     with np.errstate(all="ignore"):
         return eval(expr_substituida, {"__builtins__": {}}, ns)
+
+def _forma(op):
+    return tuple(getattr(op, "shape", np.shape(op)))
+
+class ExpressaoPreguicosa:
+    """
+    Resultado de uma expressao ('t2m-273.15', 'mag(u,v)', variavel do
+    'let' reavaliada na serie...) SEM calcular nada na criacao: cada
+    indexacao ('expr[time_sel, :, lev]', como faz todo o codigo de plot e
+    de estatistica) fatia primeiro cada operando - lendo do disco so aquela
+    fatia, ver ArrayPreguicoso - e so entao avalia a expressao. Como as
+    funcoes permitidas (_FUNCOES_EXPR) e os operadores sao elemento a
+    elemento, 'f(a, b)[k] == f(a[k], b[k])' quando os operandos tem a
+    mesma forma. Se as formas diferirem (broadcast), avalia a expressao
+    inteira e fatia depois - ainda sem guardar nada em cache.
+
+    Antes, cada expressao era calculada sobre as variaveis inteiras (todos
+    os tempos/niveis/pontos) e, no modo de serie temporal, mantida na
+    memoria para todos os arquivos ao mesmo tempo, esgotando a RAM.
+    """
+    dtype = np.dtype(float)
+
+    def __init__(self, expr_substituida, namespace):
+        self._expr = expr_substituida
+        self._ns = dict(namespace)
+        formas = {_forma(v) for v in self._ns.values() if len(_forma(v)) > 0}
+        self._elementar = len(formas) <= 1
+        self._shape = next(iter(formas)) if (self._elementar and formas) else None
+
+    def _avaliar(self, chave):
+        ns = {k: (v[chave] if len(_forma(v)) > 0 else v) for k, v in self._ns.items()}
+        return np.asarray(_eval_expr(self._expr, ns))
+
+    @property
+    def shape(self):
+        if self._shape is None:
+            self._shape = tuple(np.shape(self._avaliar(slice(None))))
+        return self._shape
+
+    @property
+    def ndim(self):
+        return len(self.shape)
+
+    def __len__(self):
+        return self.shape[0]
+
+    def __getitem__(self, chave):
+        if self._elementar:
+            return self._avaliar(chave)
+        return self._avaliar(slice(None))[chave]
+
+    def __array__(self, dtype=None, copy=None):
+        arr = self._avaliar(slice(None))
+        return arr if dtype is None else arr.astype(dtype)
+
+    def validar(self):
+        """Avalia so o 1o instante, para que erros na expressao (nome,
+        sintaxe, tipos) aparecam ja na hora do comando, como antes."""
+        if self.ndim > 0 and self.shape[0] > 0:
+            self[0]
+        return self
 
 # ---------------------------------------------------------------------------
 # Variaveis do usuario: 'let <nome> = <expressao>' / '<nome> = <expressao>'
@@ -253,7 +314,7 @@ def _avaliar_expressao(setup, expr):
         expr_substituida = re.sub(r'(?<![A-Za-z0-9_.])' + re.escape(tok) + r'(?![A-Za-z0-9_])', nome_seguro, expr_substituida)
     if not ok:
         return None
-    return _eval_expr(expr_substituida, namespace)
+    return ExpressaoPreguicosa(expr_substituida, namespace).validar()
 
 def _resolver_variavel_serie(setup, info, token):
     """
@@ -297,7 +358,7 @@ def _resolver_variavel_serie(setup, info, token):
     if not _registrar_nivel(setup, nome, variables[nome], variables):
         return nome, info["index"], None
 
-    return nome, info["index"], sem_mascara(variables[nome][:])
+    return nome, info["index"], ArrayPreguicoso(variables[nome])
 
 def _avaliar_expressao_serie(setup, info, expr):
     """
@@ -318,7 +379,7 @@ def _avaliar_expressao_serie(setup, info, expr):
         expr_substituida = re.sub(r'(?<![A-Za-z0-9_.])' + re.escape(tok) + r'(?![A-Za-z0-9_])', nome_seguro, expr_substituida)
     if not ok:
         return None
-    return _eval_expr(expr_substituida, namespace)
+    return ExpressaoPreguicosa(expr_substituida, namespace)
 
 def _dados_serie_temporal_expr(setup, expr):
     """
@@ -344,6 +405,8 @@ def _dados_serie_temporal_expr(setup, expr):
     for info in selecionados:
         try:
             arr = _avaliar_expressao_serie(setup, info, expr)
+            if arr is not None and not dados:
+                arr.validar()       # erros na expressao aparecem ja aqui
         except Exception as e:
             print("Erro ao avaliar a expressao '{0}' no arquivo {1} ({2}): {3}".format(
                 expr, info["index"], info["fileName"], e))
@@ -394,9 +457,12 @@ def _dados_serie_temporal(setup, nome_var):
         if not _registrar_nivel(setup, nome_var, info["dataset"].variables[nome_var], info["dataset"].variables):
             return None
 
+    # Leitura preguicosa: so a fatia efetivamente usada (normalmente
+    # 'var[time_sel, ...]') e lida, arquivo a arquivo - ler a variavel
+    # inteira de todos os arquivos de uma vez esgotava a memoria.
     dados = []
     for info in selecionados:
-        arr = sem_mascara(info["dataset"].variables[nome_var][:])
+        arr = ArrayPreguicoso(info["dataset"].variables[nome_var])
         dados.append({"index": info["index"], "DataDado": info.get("DataDado"), "array": arr})
     return dados
 
@@ -433,10 +499,29 @@ def _dados_sel(setup, expr):
     if not arquivos:
         print("Erro: nenhum arquivo aberto no intervalo de 'sel t'. Use 'show files'.")
         return None
+    # Variavel simples (sem operadores, sem sufixo '.N', fora do 'let'):
+    # leitura preguicosa, como em _dados_serie_temporal.
+    m = _REF_VAR_RE.match(expr.strip())
+    if m and not m.group(2) and m.group(1) not in _vars_usuario(setup):
+        nome = m.group(1)
+        dados = []
+        for info in arquivos:
+            variables = info["dataset"].variables
+            if nome not in variables:
+                print("Variavel '{0}' nao encontrada no arquivo {1} ({2})!".format(nome, info["index"], info["fileName"]))
+                return None
+            if not _registrar_nivel(setup, nome, variables[nome], variables):
+                return None
+            dados.append({"index": info["index"], "DataDado": info.get("DataDado"),
+                          "array": ArrayPreguicoso(variables[nome])})
+        return dados
+
     dados = []
     for info in arquivos:
         try:
             arr = _avaliar_expressao_serie(setup, info, expr)
+            if arr is not None and not dados:
+                arr.validar()       # erros na expressao aparecem ja aqui
         except Exception as e:
             print("Erro ao avaliar a expressao '{0}' no arquivo {1} ({2}): {3}".format(
                 expr, info["index"], info["fileName"], e))
@@ -1000,7 +1085,7 @@ def _exec_cmd_core(cmd_user, cmd,cmd_split,setup, dataset, ax, cbar, setup_toml)
 
                 # mag(u,v) e tratada como uma variavel escalar comum (a magnitude):
                 # obedece shaded/contour, corte vertical e perfil, igual a qualquer "d <var>".
-                var = mag(var1, var2)
+                var = ExpressaoPreguicosa("mag(_u, _v)", {"_u": var1, "_v": var2})
                 ax, cbar = plot_var(setup, var, cbar)
             elif vector_call:
                 var_u, var_v = vector_call.group(1), vector_call.group(2)

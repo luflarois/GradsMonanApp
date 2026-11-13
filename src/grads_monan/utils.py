@@ -53,6 +53,38 @@ def sem_mascara(arr):
         return np.ma.filled(arr.astype(float), np.nan)
     return np.asarray(arr)
 
+class ArrayPreguicoso:
+    """
+    Envolve uma variavel do arquivo (netCDF4.Variable, VariavelGradeRegular,
+    variaveis de ROMS/WRF/MOM6...) SEM ler os dados: so le do disco a fatia
+    pedida em cada indexacao, ja sem mascara (ver sem_mascara), e nao guarda
+    nada em cache.
+
+    Usado no modo de serie temporal ('set t <arquivo_inicial>
+    <arquivo_final>'): antes, cada arquivo do intervalo tinha a variavel
+    INTEIRA (todos os tempos, niveis e pontos) lida e mantida na memoria ao
+    mesmo tempo, mesmo quando so um ponto/instante era usado - com muitos
+    arquivos isso esgotava a RAM. Como todo o codigo de plot indexa
+    'var[time_sel, ...]', so o instante usado e lido, e e descartado em
+    seguida.
+    """
+    def __init__(self, var):
+        self._var = var
+        self.shape = tuple(int(n) for n in var.shape)
+        self.ndim = len(self.shape)
+        self.dtype = np.dtype(float)
+
+    def __len__(self):
+        return self.shape[0]
+
+    def __getitem__(self, chave):
+        return sem_mascara(self._var[chave])
+
+    def __array__(self, dtype=None, copy=None):
+        # Fallback (np.asarray(...)): le tudo, mas so desta variavel/arquivo.
+        arr = sem_mascara(self._var[:])
+        return arr if dtype is None else arr.astype(dtype)
+
 def normalize_lon(lon):
     return ((lon + 180) % 360) - 180
 

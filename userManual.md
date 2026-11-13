@@ -1,6 +1,6 @@
 # Manual do GradsMonanApp
 
-**Versão 1.1.0**
+**Versão 1.2.4**
 
 Um clone do GrADS/COLA para abrir e plotar saídas do modelo **MONAN/MPAS**
 (grade de Voronoi não estruturada), incluindo interpolação, cortes
@@ -303,6 +303,17 @@ iguais, ex: `set t 3 3`) é um comando **diferente**: liga o modo de
 **série temporal/animação** entre um intervalo de arquivos, descrito no
 restante desta seção — não confundir com `set t <n>` (um argumento),
 acima, que só troca o arquivo padrão de uma chamada simples.
+
+> **Uso de memória (a partir da versão 1.2.4):** variáveis e expressões
+> (inclusive as do `let`, `mag(u,v)` e as estatísticas) são lidas do disco
+> **sob demanda** — de cada arquivo, só o instante (`set t`) e a fatia
+> efetivamente usados no gráfico. Assim, uma série temporal num ponto com
+> dezenas de arquivos abertos consome a memória de um único campo por vez.
+> Nas versões anteriores, a variável inteira (todos os tempos, níveis e
+> pontos) de **todos** os arquivos do intervalo era carregada ao mesmo
+> tempo, o que podia esgotar a RAM e derrubar o sistema. Uma variável
+> definida com `let` continua sendo calculada e guardada por inteiro, uma
+> única vez, no momento do `let`.
 
 **As duas formas são modos mutuamente exclusivos** — vale sempre o último
 `set t` usado: um `set t <n>` (um argumento) **desliga** o modo de série,
